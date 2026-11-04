@@ -15,9 +15,21 @@ SwiftUI and a Rust core on top of
 
 ## Status
 
-Planning. No usable build exists yet. See [`plan.md`](plan.md) for the
-product, architecture, and delivery plan, and [`docs/ADR`](docs/ADR) for
-decisions already made.
+Phase 0 proof of concept. Pairing, encrypted storage, text, and images
+work against a real account; there is no usable app yet. See
+[`plan.md`](plan.md) for the plan, [`docs/ADR`](docs/ADR) for decisions, and
+[`docs/UPSTREAM-COMPATIBILITY.md`](docs/UPSTREAM-COMPATIBILITY.md) for what
+has been verified.
+
+To try the Phase 0 app (macOS 14+, Rust, Xcode):
+
+```sh
+./scripts/build-core.sh
+cd app && NIMQO_TEST_PEER=+<number> swift run
+```
+
+Only the test number may be stored or messaged. Do not run the app and
+`nimqo-poc` at the same time: they share one linked device.
 
 ## Principles
 

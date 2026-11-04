@@ -1,0 +1,5 @@
+excluded:
+  - app/.build
+  - app/Generated
+disabled_rules:
+  - trailing_comma # swiftformat owns comma style

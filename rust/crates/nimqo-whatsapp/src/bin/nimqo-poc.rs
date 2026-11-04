@@ -12,7 +12,7 @@
 //! receipts, never sends to anyone but the peer, and rate-limits sends.
 
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,10 +20,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use log::{error, info, warn};
-use nimqo_whatsapp::inbox::Inbox;
 use nimqo_whatsapp::media;
 use nimqo_whatsapp::peer::Peer;
-use nimqo_whatsapp::vault::{self, Key, MasterKey};
+use nimqo_whatsapp::stores;
+use nimqo_whatsapp::vault::Key;
 use qrcode::QrCode;
 use qrcode::render::svg;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -32,16 +32,12 @@ use whatsapp_rust::media::{ImageOptions, image_message};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::{Client, UploadOptions};
-use whatsapp_rust_sqlite_storage::{SqliteDatabase, SqliteDatabaseConfig};
 
 /// Minimum spacing between sends; a guard against accidental bursts.
 const SEND_INTERVAL: Duration = Duration::from_secs(3);
 const MAX_TEXT_LEN: usize = 1000;
 /// Caps both directions; WhatsApp itself limits images to 16 MiB.
 const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
-/// Development identity, separate from any future release build (plan 11.2).
-const KEYCHAIN_SERVICE: &str = "dev.nimqo.poc";
-const KEYCHAIN_ACCOUNT: &str = "master-key-v1";
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -54,48 +50,26 @@ fn main() -> Result<()> {
 }
 
 async fn run(peer_number: &str) -> Result<()> {
-    let dir = data_dir()?;
-    let master = MasterKey::load_or_create(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
-
-    let protocol_db = dir.join("protocol.db");
-    let url = protocol_db.to_str().context("data path is not UTF-8")?;
-    let config = SqliteDatabaseConfig::default().with_connection_init(
-        nimqo_whatsapp::db::connection_init(master.derive(vault::PROTOCOL_DB)),
-    );
-    let store = SqliteDatabase::open(url, config).await?.store(1);
-
     let fail_commits = std::env::var_os("NIMQO_FAIL_COMMIT").is_some();
     if fail_commits {
         warn!("NIMQO_FAIL_COMMIT set: no message will be acknowledged this run");
     }
-    let inbox = Inbox::open(
-        &dir.join("app.db"),
-        &master.derive(vault::APP_DB),
-        Peer::parse(peer_number)?,
-        fail_commits,
-    )?;
+    let stores = stores::open(Peer::parse(peer_number)?, fail_commits).await?;
     info!(
         "encrypted stores ready; {} stored peer message(s)",
-        inbox.count()?
+        stores.inbox.count()?
     );
-    let media_key = Arc::new(master.derive(vault::MEDIA));
-    drop(master);
-    let media_dir = dir.join("media");
-    let view_dir = dir.join("view");
-    for d in [&media_dir, &view_dir] {
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(d)?;
-    }
+    let (dir, media_dir) = (stores.dir, stores.media_dir);
+    let media_key = Arc::new(stores.media_key);
+    let view_dir = stores::private_dir(&dir.join("view"))?;
 
     let filter = Peer::parse(peer_number)?;
     let (rx_key, rx_dir) = (Arc::clone(&media_key), media_dir.clone());
     let qr_page = dir.join("pair-qr.html");
     let (qr_for_code, qr_for_connect) = (qr_page.clone(), qr_page.clone());
     let bot = Bot::builder()
-        .with_backend(store)
-        .with_inbound_durability_hook(inbox)
+        .with_backend(stores.protocol)
+        .with_inbound_durability_hook(stores.inbox)
         .on_qr_code(move |code, timeout| {
             let page = qr_for_code.clone();
             async move {
@@ -332,20 +306,4 @@ fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
     drop(f);
     std::fs::rename(&tmp, path)?;
     Ok(())
-}
-
-/// `~/Library/Application Support/NIMQO-dev`, readable only by this user.
-fn data_dir() -> Result<PathBuf> {
-    let Some(home) = std::env::home_dir() else {
-        bail!("no home directory")
-    };
-    let dir = home.join("Library/Application Support/NIMQO-dev");
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-    // ponytail: no Time Machine exclusion yet (plan 11.2); the app sets it via
-    // NSURL isExcludedFromBackup, a CLI would have to shell out to tmutil.
-    Ok(dir)
 }

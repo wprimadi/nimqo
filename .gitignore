@@ -10,8 +10,9 @@ xcuserdata/
 # Rust
 target/
 
-# Generated UniFFI bindings
-generated/
+# Generated UniFFI bindings and SwiftPM build output
+app/Generated/
+.build/
 
 # Local data: never commit sessions, databases, keys, or logs
 *.db

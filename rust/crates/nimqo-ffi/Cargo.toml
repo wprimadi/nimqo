@@ -1,0 +1,26 @@
+[package]
+name = "nimqo-ffi"
+description = "UniFFI bridge between the NIMQO Swift app and the Rust core"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+nimqo-whatsapp = { path = "../nimqo-whatsapp" }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+uniffi = { version = "0.32", features = ["cli"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }
+
+[lints]
+workspace = true

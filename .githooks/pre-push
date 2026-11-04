@@ -33,4 +33,8 @@ if [ -f .swiftlint.yml ]; then
   swiftformat --lint .
   swiftlint lint --strict --quiet
 fi
-# ponytail: Xcode build+test joins here once the app target exists; scheme name unknown until then.
+if [ -f app/Package.swift ]; then
+  ./scripts/build-core.sh
+  (cd app && swift build)
+fi
+# ponytail: SwiftPM app for Phase 0; an Xcode project (signing, entitlements) replaces it in Phase 1.

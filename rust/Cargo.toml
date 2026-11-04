@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/nimqo-whatsapp"]
+members = ["crates/nimqo-ffi", "crates/nimqo-whatsapp"]
 
 [workspace.package]
 edition = "2024"

@@ -1,1 +1,1 @@
-doc-valid-idents = ["SQLCipher", "SQLite", "ChaCha20", "HKDF", "RustCrypto", "WhatsApp", ".."]
+doc-valid-idents = ["SQLCipher", "SQLite", "ChaCha20", "HKDF", "RustCrypto", "WhatsApp", "UniFFI", ".."]

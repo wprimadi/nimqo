@@ -1963,15 +1963,16 @@ Do not silently change architecture through implementation details.
 -   [x] Choose license: MIT.
 -   [ ] Enable push protection, secret scanning, and a gitleaks hook
     before the first push.
--   [ ] Add `LICENSE` and community documents.
+-   [x] Add `LICENSE` and community documents.
 -   [x] Add local quality gate hook.
--   [ ] Create Xcode macOS app target.
+-   [x] Create SwiftPM macOS app target for Phase 0 (`app/`); Xcode
+    project with signing in Phase 1.
 -   [x] Create Rust workspace.
 -   [x] Upgrade local Rust to 1.99.1 (upstream MSRV is 1.95).
 -   [x] Pin Rust toolchain in `rust-toolchain.toml` (1.99.1).
 -   [x] Pin `whatsapp-rust` to `main` @ `0a6ae10`.
--   [ ] Pin UniFFI version.
--   [ ] Create build scripts.
+-   [x] Pin UniFFI version (0.32, `Cargo.lock`).
+-   [x] Create build scripts (`scripts/build-core.sh`).
 -   [ ] Add documentation skeleton.
 
 ### Epic B --- Protocol proof of concept
@@ -1992,9 +1993,9 @@ Do not silently change architecture through implementation details.
 
 -   [ ] Define NIMQO DTOs.
 -   [ ] Define typed error model.
--   [ ] Expose client lifecycle.
--   [ ] Expose pairing API.
--   [ ] Expose connection state.
+-   [x] Expose client lifecycle (Phase 0: start/stop).
+-   [x] Expose pairing API (Phase 0: QR payload callback).
+-   [x] Expose connection state.
 -   [ ] Expose message operations.
 -   [ ] Expose event subscription.
 -   [ ] Verify async/cancellation/lifetime behavior.

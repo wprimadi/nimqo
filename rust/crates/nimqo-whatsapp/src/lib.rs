@@ -5,4 +5,5 @@ pub mod db;
 pub mod inbox;
 pub mod media;
 pub mod peer;
+pub mod stores;
 pub mod vault;

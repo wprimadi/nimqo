@@ -3,10 +3,16 @@ targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # Unmaintained, not vulnerable. Reached only through UniFFI's bindgen at
+    # build time (askama -> basic-toml); not in the shipped library. Remove
+    # when UniFFI drops it.
+    { id = "RUSTSEC-2026-0374", reason = "build-time only via uniffi_bindgen; no upgrade available" },
+]
 
 [licenses]
 # Permissive licenses compatible with shipping NIMQO under MIT (ADR 0007).
-allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CDLA-Permissive-2.0"]
+allow = ["MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "CDLA-Permissive-2.0", "MPL-2.0"]
 
 [bans]
 multiple-versions = "allow"

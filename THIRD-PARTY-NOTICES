@@ -2,4 +2,5 @@ Third-party notices for NIMQO
 
 No third-party code is bundled yet. Every dependency added to a release build
 must be listed here with its license text before it ships, including
-whatsapp-rust (MIT) and SQLCipher Community Edition (BSD-style).
+whatsapp-rust (MIT), SQLCipher Community Edition (BSD-style), and UniFFI
+(MPL-2.0, used unmodified; its source is available from crates.io).
