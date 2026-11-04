@@ -48,7 +48,8 @@ final class CoreModel {
     }
 
     func fail(_ error: Error) {
-        log.error("start failed: \(String(describing: error), privacy: .public)")
+        // The detail can hold file paths; keep it out of public logs.
+        log.error("start failed: \(String(describing: error), privacy: .private)")
         failure = Self.message(for: error)
     }
 

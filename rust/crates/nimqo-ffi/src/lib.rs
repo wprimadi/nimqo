@@ -147,15 +147,32 @@ async fn connect(test_peer: &str, listener: Arc<dyn CoreListener>) -> Result<Bot
     Ok(bot.spawn())
 }
 
-/// Sends Rust `log` records to the unified log (Console.app, `log stream`).
+/// Sends NIMQO's own `log` records to the unified log (Console.app,
+/// `/usr/bin/log stream`). `os_log` stores them as public, so upstream records
+/// are dropped: they can carry JIDs, which are phone numbers.
 fn init_logging() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
+        log::set_max_level(log::LevelFilter::Info);
         // Fails only if another logger is already installed; keep that one.
-        let _ = oslog::OsLogger::new("app.nimqo.core")
-            .level_filter(log::LevelFilter::Info)
-            .init();
+        let _ = log::set_boxed_logger(Box::new(NimqoOnly(oslog::OsLogger::new("app.nimqo.core"))));
     });
+}
+
+struct NimqoOnly(oslog::OsLogger);
+
+impl log::Log for NimqoOnly {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.target().starts_with("nimqo") && metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 #[cfg(test)]
@@ -166,6 +183,20 @@ mod tests {
     impl CoreListener for Silent {
         fn on_status(&self, _: ConnectionStatus) {}
         fn on_qr(&self, _: String, _: u64) {}
+    }
+
+    #[test]
+    fn only_nimqo_targets_reach_the_unified_log() {
+        use log::Log;
+        let logger = NimqoOnly(oslog::OsLogger::new("test"));
+        let meta = |target| {
+            log::Metadata::builder()
+                .target(target)
+                .level(log::Level::Info)
+                .build()
+        };
+        assert!(logger.enabled(&meta("nimqo_ffi")));
+        assert!(!logger.enabled(&meta("whatsapp_rust::client")));
     }
 
     #[test]
