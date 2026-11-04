@@ -26,7 +26,8 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Session restored after restart without re-pairing | Pass | 2026-11-04 |
 | Message redelivered once after a refused commit (`NIMQO_FAIL_COMMIT`) | Pass | 2026-11-04 |
 | Message redelivered after a hard kill between decrypt and commit | Pending | |
-| Reconnect after network loss | Pending | |
+| Reconnect after Wi-Fi off for about 30 s | Pass | 2026-11-04 |
+| Incoming image event delivered (content not yet handled; shown as `<non-text>`) | Pass | 2026-11-04 |
 | Media transfer | Pending | |
 
 ## Known issues

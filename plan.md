@@ -1984,7 +1984,7 @@ Do not silently change architecture through implementation details.
 -   [ ] Verify the durability hook with a hard kill (`kill -9`).
 -   [x] Receive a text message.
 -   [x] Send a text message.
--   [ ] Test reconnect.
+-   [x] Test reconnect.
 -   [ ] Test media transfer.
 -   [ ] Document limitations.
 
