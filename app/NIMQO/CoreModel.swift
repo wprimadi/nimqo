@@ -2,6 +2,7 @@ import AppKit
 import NimqoCore
 import Observation
 import os
+import SwiftUI
 
 /// Owns the Rust core and mirrors its state for the UI. Views read this;
 /// they never call the core directly.
@@ -72,7 +73,12 @@ final class CoreModel {
 
     func update(status: ConnectionStatus) {
         log.info("status \(String(describing: status), privacy: .public)")
+        let changed = self.status != status
         self.status = status
+        if changed {
+            // The window may be hidden; VoiceOver users still hear the change.
+            AccessibilityNotification.Announcement(statusText).post()
+        }
         if status != .waitingForScan {
             qrPayload = nil
         }

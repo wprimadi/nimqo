@@ -2008,10 +2008,13 @@ Do not silently change architecture through implementation details.
 -   [x] Build chat list placeholder with real model contract (Swift
     `ChatSummary`; the Rust DTO arrives with `list_chats`).
 -   [x] Build conversation shell.
--   [ ] Add Menu Bar Extra.
--   [ ] Define close/hide/quit behavior.
+-   [x] Add Menu Bar Extra (status, open, quit).
+-   [x] Define close/hide/quit behavior (close keeps the session; Quit
+    disconnects within 3 s).
 -   [x] Add light/dark support (system semantic styles).
--   [ ] Add accessibility foundations.
+-   [x] Add accessibility foundations (VoiceOver status announcements,
+    labeled controls, spelled-out QR steps, system styles for focus,
+    contrast, and text). Pairing-code fallback comes with onboarding.
 
 ### Epic E --- Core messaging
 
