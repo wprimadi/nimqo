@@ -32,6 +32,9 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Send an image to the test peer with `/img` | Pass | 2026-11-05 |
 | SwiftUI app through UniFFI: session restored, status shown, reconnect after Wi-Fi off | Pass | 2026-11-05 |
 | Xcode-built app (Phase 1 shell): connects, main window with sidebar | Pass | 2026-11-05 |
+| App: Offline on Wi-Fi off, reconnect on return (`NWPathMonitor`) | Pass | 2026-11-05 |
+| App: reconnect after system sleep and wake | Pass | 2026-11-05 |
+| Second process refused while the app holds the data directory lock | Pass | 2026-11-05 |
 
 ## Limitations register
 
@@ -45,7 +48,7 @@ run on macOS; everything else is untested here, whatever upstream documents.
 | Inbound durability | `InboundDurabilityHook` | `inbox::Inbox` | Verified (refused commit, `kill -9`) | Peer-only storage in Phase 0; other chats are acknowledged unstored. Upstream warns when processing exceeds `MAX_MESSAGE_DELAY` (20 s): commits must stay well below it |
 | Text send/receive | `Client::send_message`, `on_message` | `nimqo-poc` | Verified | One-to-one only; groups untested |
 | Images | `Client::download`, `Client::upload`, `media::image_message` | `nimqo-poc`, `media` (ADR 0006) | Verified | Whole file in memory, 16 MiB cap; video, audio, documents untested |
-| Reconnect | built in | none | Verified (Wi-Fi off ~30 s) | Sleep/wake and long outages untested |
+| Reconnect | built in, `Client::reconnect_immediately` | `nimqo-ffi` state machine, app network/wake observers | Verified (Wi-Fi off, sleep/wake) | Long outages untested |
 | Swift bridge | n/a | `nimqo-ffi` (UniFFI 0.32) | Verified | Status and QR only; see ADR 0002 |
 | Proxy, VPN, custom root CA | `ureq-client`, `tokio-transport` | none | Untested | Plan 9.3 requires a recorded result |
 | History sync, receipts, presence | various | none | Untested | Phase 3 |
