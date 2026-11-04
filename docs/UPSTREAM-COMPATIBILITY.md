@@ -12,7 +12,7 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Storage | upstream SQLite store on SQLCipher (`libsqlite3-sys` 0.38 `bundled-sqlcipher`, CommonCrypto) |
 | Rust | 1.99.1 |
 | macOS | 27.0.1, Apple Silicon; binary minimum macOS 14.0 |
-| Tool | `rust/crates/nimqo-whatsapp`, binary `nimqo-poc` |
+| Tools | `rust/crates/nimqo-whatsapp` binary `nimqo-poc`; SwiftPM app in `app/` via `nimqo-ffi` |
 
 ## Results
 
@@ -28,7 +28,9 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Message redelivered after a hard kill between decrypt and commit | Pending | |
 | Reconnect after Wi-Fi off for about 30 s | Pass | 2026-11-04 |
 | Incoming image event delivered (content not yet handled; shown as `<non-text>`) | Pass | 2026-11-04 |
-| Media transfer | Pending | |
+| Receive an image from the test peer, stored encrypted (ADR 0006), opened with `/show` | Pass | 2026-11-05 |
+| Send an image to the test peer with `/img` | Pass | 2026-11-05 |
+| SwiftUI app through UniFFI: session restored, status shown, reconnect after Wi-Fi off | Pass | 2026-11-05 |
 
 ## Known issues
 

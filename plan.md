@@ -1986,7 +1986,7 @@ Do not silently change architecture through implementation details.
 -   [x] Receive a text message.
 -   [x] Send a text message.
 -   [x] Test reconnect.
--   [ ] Test media transfer.
+-   [x] Test media transfer (images).
 -   [ ] Document limitations.
 
 ### Epic C --- Swift/Rust bridge
