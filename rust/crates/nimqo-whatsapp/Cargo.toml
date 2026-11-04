@@ -1,0 +1,28 @@
+[package]
+name = "nimqo-whatsapp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Pinned upstream revision (plan 9.2). Defaults are off because they include
+# plain bundled SQLite; SQLCipher is linked through libsqlite3-sys below.
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false }
+libsqlite3-sys = { version = "0.38", default-features = false, features = ["bundled-sqlcipher"] }
+diesel = { version = "2.3.14", default-features = false, features = ["sqlite"] }
+security-framework = "3.7"
+hkdf = "0.13"
+sha2 = "0.11"
+zeroize = "1.9"
+anyhow = "1"
+async-trait = "0.1"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+qrcode = { version = "0.14", default-features = false }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal", "time"] }
+
+[lints]
+workspace = true

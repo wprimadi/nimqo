@@ -1,0 +1,3 @@
+[env]
+# Plan 4.2: bundled C code (SQLCipher, ring) must match the app target.
+MACOSX_DEPLOYMENT_TARGET = "14.0"

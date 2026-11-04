@@ -1966,18 +1966,18 @@ Do not silently change architecture through implementation details.
 -   [ ] Add `LICENSE` and community documents.
 -   [x] Add local quality gate hook.
 -   [ ] Create Xcode macOS app target.
--   [ ] Create Rust workspace.
+-   [x] Create Rust workspace.
 -   [x] Upgrade local Rust to 1.99.1 (upstream MSRV is 1.95).
--   [ ] Pin Rust toolchain in `rust-toolchain.toml` (1.99.1).
--   [ ] Pin `whatsapp-rust` version/commit.
+-   [x] Pin Rust toolchain in `rust-toolchain.toml` (1.99.1).
+-   [x] Pin `whatsapp-rust` to `main` @ `0a6ae10`.
 -   [ ] Pin UniFFI version.
 -   [ ] Create build scripts.
 -   [ ] Add documentation skeleton.
 
 ### Epic B --- Protocol proof of concept
 
--   [ ] Inspect upstream README and API docs.
--   [ ] Inspect feature flags and storage implementation.
+-   [x] Inspect upstream README and API docs.
+-   [x] Inspect feature flags and storage implementation.
 -   [ ] Pair a dedicated test account.
 -   [ ] Persist session in SQLCipher with a Keychain key.
 -   [ ] Verify the durability hook with a crash test.
