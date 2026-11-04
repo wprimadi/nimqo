@@ -1,0 +1,32 @@
+# macOS
+.DS_Store
+
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+
+# Rust
+target/
+
+# Generated UniFFI bindings
+generated/
+
+# Local data: never commit sessions, databases, keys, or logs
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+.env
+.env.*
+
+# Local tooling state
+.remember/
+.claude-flow/
+.swarm/
+.claude/
+evidence/
+.scannerwork/
