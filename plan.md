@@ -1979,8 +1979,9 @@ Do not silently change architecture through implementation details.
 -   [x] Inspect upstream README and API docs.
 -   [x] Inspect feature flags and storage implementation.
 -   [x] Pair a dedicated test account.
--   [ ] Persist session in SQLCipher with a Keychain key.
--   [ ] Verify the durability hook with a crash test.
+-   [x] Persist session in SQLCipher with a Keychain key.
+-   [x] Verify the durability hook with a refused commit.
+-   [ ] Verify the durability hook with a hard kill (`kill -9`).
 -   [x] Receive a text message.
 -   [x] Send a text message.
 -   [ ] Test reconnect.

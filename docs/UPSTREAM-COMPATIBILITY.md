@@ -23,8 +23,9 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Send text to the test peer | Pass | 2026-11-04 |
 | Receive text from the test peer | Pass | 2026-11-04 |
 | Protocol and app databases encrypted on disk after a real session | Pass | 2026-11-04 |
-| Session restored after restart without re-pairing | Pending | |
-| Message redelivered after a refused commit (`NIMQO_FAIL_COMMIT`) | Pending | |
+| Session restored after restart without re-pairing | Pass | 2026-11-04 |
+| Message redelivered once after a refused commit (`NIMQO_FAIL_COMMIT`) | Pass | 2026-11-04 |
+| Message redelivered after a hard kill between decrypt and commit | Pending | |
 | Reconnect after network loss | Pending | |
 | Media transfer | Pending | |
 
