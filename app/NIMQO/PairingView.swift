@@ -21,21 +21,12 @@ struct PairingView: View {
                     .background(.white)
                     .accessibilityLabel("Pairing QR code")
             } else {
-                Label(statusText, systemImage: "arrow.triangle.2.circlepath")
+                Label(model.statusText, systemImage: model.statusSymbol)
                     .font(.title2)
             }
         }
         .padding(Theme.Spacing.large)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var statusText: String {
-        switch model.status {
-        case nil, .connecting, .connected: "Connecting…"
-        case .waitingForScan: "Waiting for QR code…"
-        case .disconnected: "Disconnected, reconnecting…"
-        case .loggedOut: "Logged out. This device was unlinked."
-        }
     }
 
     private static func qrImage(_ payload: String) -> NSImage? {

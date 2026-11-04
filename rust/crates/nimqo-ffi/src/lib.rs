@@ -5,6 +5,7 @@
 //! messages, so nothing is acknowledged without being kept.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use nimqo_whatsapp::inbox::Fault;
 use nimqo_whatsapp::peer::Peer;
@@ -92,14 +93,19 @@ impl Core {
         }))
     }
 
-    /// Disconnects. Safe to call more than once.
+    /// Disconnects, waiting at most a few seconds so quitting never hangs.
+    /// Safe to call more than once.
     pub fn stop(&self) {
+        const GRACE: Duration = Duration::from_secs(3);
         let handle = self.handle.lock().map_or(None, |mut h| h.take());
         if let Some(handle) = handle {
-            log::info!(
-                "core stopped: {:?}",
-                self.runtime.block_on(handle.shutdown())
-            );
+            let report = self
+                .runtime
+                .block_on(async { tokio::time::timeout(GRACE, handle.shutdown()).await });
+            match report {
+                Ok(report) => log::info!("core stopped: {report:?}"),
+                Err(_) => log::warn!("core shutdown exceeded {GRACE:?}; exiting anyway"),
+            }
         }
     }
 }

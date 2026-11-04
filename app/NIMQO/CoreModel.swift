@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import NimqoCore
 import Observation
 import os
@@ -15,6 +15,41 @@ final class CoreModel {
     private(set) var chats: [ChatSummary] = []
     private var core: Core?
     private let log = Logger(subsystem: "app.nimqo", category: "core-model")
+
+    var statusText: String {
+        switch status {
+        case nil, .connecting: "Connecting…"
+        case .waitingForScan: "Waiting for QR code scan"
+        case .connected: "Connected"
+        case .disconnected: "Disconnected, reconnecting…"
+        case .loggedOut: "Logged out. This device was unlinked."
+        }
+    }
+
+    var statusSymbol: String {
+        switch status {
+        case .connected: "checkmark.circle"
+        case .loggedOut: "xmark.circle"
+        case .waitingForScan: "qrcode"
+        default: "arrow.triangle.2.circlepath"
+        }
+    }
+
+    init() {
+        // Quit is the only path that ends the session (plan 7.6); closing the
+        // window does not. Disconnect cleanly before the process exits.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stop() }
+        }
+    }
+
+    /// Blocks for at most the core's shutdown grace period.
+    func stop() {
+        core?.stop()
+        core = nil
+    }
 
     func start() {
         // Unit tests host the app; never connect a real account from a test.

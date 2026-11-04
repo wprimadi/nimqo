@@ -25,7 +25,7 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Protocol and app databases encrypted on disk after a real session | Pass | 2026-11-04 |
 | Session restored after restart without re-pairing | Pass | 2026-11-04 |
 | Message redelivered once after a refused commit (`NIMQO_FAIL_COMMIT`) | Pass | 2026-11-04 |
-| Message redelivered after `kill -9` between decrypt and commit (`NIMQO_COMMIT_DELAY`) | Pass | 2026-11-05 |
+| Message redelivered after `kill -9` between decrypt and commit (`NIMQO_COMMIT_DELAY`), stored exactly once | Pass | 2026-11-05 |
 | Reconnect after Wi-Fi off for about 30 s | Pass | 2026-11-04 |
 | Incoming image event delivered (content not yet handled; shown as `<non-text>`) | Pass | 2026-11-04 |
 | Receive an image from the test peer, stored encrypted (ADR 0006), opened with `/show` | Pass | 2026-11-05 |
