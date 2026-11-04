@@ -1,0 +1,85 @@
+//! Read-only chat list and timeline records (plan 8: DTOs at the boundary).
+
+use nimqo_whatsapp::inbox::{ChatRow, MessageRow};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MessageKind {
+    Text,
+    Image,
+    Video,
+    Audio,
+    Document,
+    Sticker,
+    Unsupported,
+}
+
+impl MessageKind {
+    fn parse(kind: &str) -> Self {
+        match kind {
+            "text" => Self::Text,
+            "image" => Self::Image,
+            "video" => Self::Video,
+            "audio" => Self::Audio,
+            "document" => Self::Document,
+            "sticker" => Self::Sticker,
+            _ => Self::Unsupported,
+        }
+    }
+}
+
+/// One row of the chat list: the chat and its latest message.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Chat {
+    pub id: String,
+    pub is_group: bool,
+    /// Push name of the other person, when one was seen.
+    pub name: Option<String>,
+    /// `+<digits>` for a phone-number chat.
+    pub phone: Option<String>,
+    pub last_activity_secs: i64,
+    pub last_kind: MessageKind,
+    pub last_body: Option<String>,
+    pub last_from_me: bool,
+}
+
+impl From<ChatRow> for Chat {
+    fn from(r: ChatRow) -> Self {
+        let (user, server) = r.chat.split_once('@').unwrap_or((&r.chat, ""));
+        Self {
+            is_group: server == "g.us",
+            phone: (server == "s.whatsapp.net").then(|| format!("+{user}")),
+            name: r.name,
+            last_activity_secs: r.ts,
+            last_kind: MessageKind::parse(&r.kind),
+            last_body: r.body,
+            last_from_me: r.from_me,
+            id: r.chat,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChatMessage {
+    pub id: String,
+    pub sender: String,
+    pub sender_name: Option<String>,
+    pub from_me: bool,
+    pub timestamp_secs: i64,
+    pub kind: MessageKind,
+    /// Text, or a media caption or file name.
+    pub body: Option<String>,
+}
+
+impl From<MessageRow> for ChatMessage {
+    fn from(r: MessageRow) -> Self {
+        Self {
+            id: r.id,
+            sender: r.sender,
+            sender_name: r.sender_name.filter(|n| !n.is_empty()),
+            from_me: r.from_me,
+            timestamp_secs: r.ts,
+            kind: MessageKind::parse(&r.kind),
+            body: r.body,
+        }
+    }
+}

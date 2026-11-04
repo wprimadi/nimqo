@@ -51,7 +51,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(peer_number: &str) -> Result<()> {
-    let stores = stores::open(Peer::parse(peer_number)?, fault_from_env()?).await?;
+    let stores = stores::open(fault_from_env()?).await?;
     info!(
         "encrypted stores ready; {} stored peer message(s)",
         stores.inbox.count()?

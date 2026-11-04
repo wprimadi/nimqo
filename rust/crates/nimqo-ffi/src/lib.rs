@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nimqo_whatsapp::inbox::Fault;
+use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use whatsapp_rust::Client;
@@ -20,7 +20,10 @@ use whatsapp_rust::types::events::{Event, EventKind};
 
 uniffi::setup_scaffolding!();
 
+mod chats;
 mod state;
+
+pub use chats::{Chat, ChatMessage, MessageKind};
 
 pub use state::ConnectionState;
 use state::Input;
@@ -35,6 +38,8 @@ pub trait CoreListener: Send + Sync {
     fn on_pair_code(&self, code: String, timeout_secs: u64);
     /// No code is coming. `throttled` means wait before asking again.
     fn on_pair_code_error(&self, throttled: bool, retry_after_secs: Option<u64>);
+    /// New messages were stored in these chats; reload what is shown.
+    fn on_chats_changed(&self, chat_ids: Vec<String>);
 }
 
 /// Grouped by what the user can do about it. `detail` is for logs and bug
@@ -118,6 +123,7 @@ pub struct Core {
     /// Number used for code pairing, kept to re-request when the server asks.
     pair_phone: Arc<Mutex<Option<String>>>,
     dir: PathBuf,
+    inbox: Inbox,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -145,7 +151,7 @@ impl Core {
             listener,
         });
         let pair_phone = Arc::new(Mutex::new(None));
-        let (handle, client, (lock, dir)) = runtime.block_on(connect(
+        let (handle, client, (lock, dir, inbox)) = runtime.block_on(connect(
             test_peer,
             Arc::clone(&machine),
             Arc::clone(&pair_phone),
@@ -157,8 +163,39 @@ impl Core {
             machine,
             pair_phone,
             dir,
+            inbox,
             lock: Mutex::new(Some(lock)),
         }))
+    }
+
+    /// Chats by most recent activity. Reads the local store only.
+    ///
+    /// # Errors
+    /// The encrypted store cannot be read.
+    pub fn chats(&self) -> Result<Vec<Chat>, CoreError> {
+        const LIMIT: i64 = 500;
+        Ok(self
+            .inbox
+            .chats(LIMIT)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(Chat::from)
+            .collect())
+    }
+
+    /// The latest messages of one chat, oldest first.
+    ///
+    /// # Errors
+    /// The encrypted store cannot be read.
+    pub fn messages(&self, chat_id: &str) -> Result<Vec<ChatMessage>, CoreError> {
+        const LIMIT: i64 = 200;
+        Ok(self
+            .inbox
+            .messages(chat_id, LIMIT)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(ChatMessage::from)
+            .collect())
     }
 
     #[must_use]
@@ -264,9 +301,10 @@ async fn connect(
     test_peer: &str,
     machine: Arc<Machine>,
     pair_phone: Arc<Mutex<Option<String>>>,
-) -> Result<(BotHandle, Arc<Client>, (File, PathBuf)), CoreError> {
-    let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
-    let stores = stores::open(peer, Fault::None).await.map_err(|e| {
+) -> Result<(BotHandle, Arc<Client>, (File, PathBuf, Inbox)), CoreError> {
+    // Validated now; sending to it comes with the composer.
+    Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
+    let mut stores = stores::open(Fault::None).await.map_err(|e| {
         if e.downcast_ref::<AlreadyRunning>().is_some() {
             CoreError::AlreadyRunning
         } else {
@@ -275,6 +313,11 @@ async fn connect(
             }
         }
     })?;
+    let listener = Arc::clone(&machine.listener);
+    stores
+        .inbox
+        .set_on_commit(Arc::new(move |chats| listener.on_chats_changed(chats)));
+    let inbox = stores.inbox.clone();
     let (on_qr, on_code, on_code_err) = (
         Arc::clone(&machine),
         Arc::clone(&machine),
@@ -332,7 +375,7 @@ async fn connect(
         .await
         .map_err(err(|detail| CoreError::Startup { detail }))?;
     let client = bot.client();
-    Ok((bot.spawn(), client, (stores.lock, stores.dir)))
+    Ok((bot.spawn(), client, (stores.lock, stores.dir, inbox)))
 }
 
 /// Failures are reported through the `PairingCodeError` event, so the
@@ -409,6 +452,7 @@ mod tests {
         fn on_qr(&self, _: String, _: u64) {}
         fn on_pair_code(&self, _: String, _: u64) {}
         fn on_pair_code_error(&self, _: bool, _: Option<u64>) {}
+        fn on_chats_changed(&self, _: Vec<String>) {}
     }
 
     #[test]

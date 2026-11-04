@@ -9,7 +9,6 @@ use anyhow::{Context, Result};
 use whatsapp_rust_sqlite_storage::{SqliteDatabase, SqliteDatabaseConfig, SqliteStore};
 
 use crate::inbox::{Fault, Inbox};
-use crate::peer::Peer;
 use crate::vault::{self, Key, MasterKey};
 
 /// Development identity, separate from any future release build (plan 11.2).
@@ -30,7 +29,7 @@ pub struct Stores {
 ///
 /// # Errors
 /// The data directory, Keychain, or a database cannot be opened.
-pub async fn open(peer: Peer, fault: Fault) -> Result<Stores> {
+pub async fn open(fault: Fault) -> Result<Stores> {
     let dir = data_dir()?;
     let lock = lock_dir(&dir)?;
     let master = MasterKey::load_or_create(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
@@ -41,12 +40,7 @@ pub async fn open(peer: Peer, fault: Fault) -> Result<Stores> {
         master.derive(vault::PROTOCOL_DB),
     ));
     let protocol = SqliteDatabase::open(url, config).await?.store(1);
-    let inbox = Inbox::open(
-        &dir.join("app.db"),
-        &master.derive(vault::APP_DB),
-        peer,
-        fault,
-    )?;
+    let inbox = Inbox::open(&dir.join("app.db"), &master.derive(vault::APP_DB), fault)?;
     let media_dir = private_dir(&dir.join("media"))?;
     Ok(Stores {
         lock,

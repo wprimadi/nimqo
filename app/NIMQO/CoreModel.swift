@@ -20,8 +20,13 @@ final class CoreModel {
     /// Bound by the confirmation dialog in `RootView`.
     var confirmingReset = false
     private(set) var isResetting = false
-    /// ponytail: always empty until the core exposes `list_chats` (Phase 3).
     private(set) var chats: [ChatSummary] = []
+    /// Timeline of `selectedChat`, oldest first.
+    private(set) var messages: [ChatMessage] = []
+    var selectedChat: ChatSummary.ID? {
+        didSet { loadMessages() }
+    }
+
     private var core: Core?
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
@@ -142,6 +147,45 @@ final class CoreModel {
         }
     }
 
+    func chatsChanged(_ ids: [String]) {
+        reloadChats()
+        if let selectedChat, ids.contains(selectedChat) {
+            loadMessages()
+        }
+    }
+
+    /// Reads off the main thread; the store can be busy committing.
+    func reloadChats() {
+        guard let core else { return }
+        Task.detached {
+            let result = Result { try core.chats() }
+            await MainActor.run {
+                switch result {
+                case let .success(chats): self.chats = chats.map(ChatSummary.init)
+                case let .failure(error): self.log.error("chats: \(String(describing: error), privacy: .private)")
+                }
+            }
+        }
+    }
+
+    private func loadMessages() {
+        guard let core, let id = selectedChat else {
+            messages = []
+            return
+        }
+        Task.detached {
+            let result = Result { try core.messages(chatId: id) }
+            await MainActor.run {
+                // A newer selection may have won the race.
+                guard self.selectedChat == id else { return }
+                switch result {
+                case let .success(messages): self.messages = messages
+                case let .failure(error): self.log.error("messages: \(String(describing: error), privacy: .private)")
+                }
+            }
+        }
+    }
+
     func update(qrPayload payload: String) {
         qrPayload = payload
     }
@@ -212,6 +256,8 @@ final class CoreModel {
     private func finishReset(_ result: Result<Void, Error>) {
         isResetting = false
         core = nil
+        chats = []
+        selectedChat = nil
         state = nil
         qrPayload = nil
         pairCode = nil
@@ -227,6 +273,7 @@ final class CoreModel {
 
     private func attach(_ core: Core) {
         self.core = core
+        reloadChats()
         observers.start(
             networkChanged: { [weak self] available in self?.networkReported(available) },
             didWake: { [weak self] in self?.core?.reconnectNow() }
@@ -283,9 +330,37 @@ private struct SystemObservers {
 struct ChatSummary: Identifiable, Hashable {
     let id: String
     let title: String
+    let isGroup: Bool
     let preview: String
     let lastActivity: Date
-    let unreadCount: Int
+}
+
+extension ChatSummary {
+    init(_ chat: Chat) {
+        id = chat.id
+        title = chat.name ?? chat.phone ?? (chat.isGroup ? "Group" : "Unknown contact")
+        isGroup = chat.isGroup
+        let text = ChatMessage.describe(kind: chat.lastKind, body: chat.lastBody)
+        preview = chat.lastFromMe ? "You: \(text)" : text
+        lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
+    }
+}
+
+extension ChatMessage {
+    /// Text, or a label for content the timeline cannot show yet.
+    static func describe(kind: MessageKind, body: String?) -> String {
+        let label = switch kind {
+        case .text: ""
+        case .image: "Photo"
+        case .video: "Video"
+        case .audio: "Audio"
+        case .document: "Document"
+        case .sticker: "Sticker"
+        case .unsupported: "Message not supported yet"
+        }
+        guard let body, !body.isEmpty else { return label }
+        return label.isEmpty || kind == .document ? body : "\(label): \(body)"
+    }
 }
 
 /// Receives callbacks on Rust worker threads and hops to the main actor.
@@ -306,6 +381,10 @@ private final class Listener: CoreListener, Sendable {
 
     func onPairCode(code: String, timeoutSecs _: UInt64) {
         Task { @MainActor [model] in model?.update(pairCode: code) }
+    }
+
+    func onChatsChanged(chatIds: [String]) {
+        Task { @MainActor [model] in model?.chatsChanged(chatIds) }
     }
 
     func onPairCodeError(throttled: Bool, retryAfterSecs: UInt64?) {

@@ -62,6 +62,21 @@ struct CoreModelTests {
         #expect(model.pairCodeMessage?.contains("2 minutes") == true)
     }
 
+    @Test func chatRowsNameTheChatAndDescribeMedia() {
+        func chat(name: String?, phone: String?, group: Bool, kind: MessageKind, body: String?) -> ChatSummary {
+            ChatSummary(Chat(
+                id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
+                lastKind: kind, lastBody: body, lastFromMe: false
+            ))
+        }
+        #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: "hi").title == "Ana")
+        #expect(chat(name: nil, phone: "+62", group: false, kind: .text, body: "hi").title == "+62")
+        #expect(chat(name: nil, phone: nil, group: true, kind: .text, body: nil).title == "Group")
+        #expect(chat(name: nil, phone: nil, group: false, kind: .image, body: "beach").preview == "Photo: beach")
+        #expect(chat(name: nil, phone: nil, group: false, kind: .document, body: "a.pdf").preview == "a.pdf")
+        #expect(chat(name: nil, phone: nil, group: false, kind: .sticker, body: nil).preview == "Sticker")
+    }
+
     @Test func startDoesNothingUnderTests() {
         let model = CoreModel()
         model.start()
