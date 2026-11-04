@@ -6,7 +6,7 @@ struct RootView: View {
     let model: CoreModel
 
     var body: some View {
-        if model.failure == nil, model.status == .connected {
+        if model.failure == nil, model.isSessionUp {
             MainView(chats: model.chats)
         } else {
             PairingView(model: model)
