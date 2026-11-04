@@ -13,6 +13,10 @@ struct NimqoApp: App {
                 .task { model.start() }
         }
 
+        .commands {
+            CommandGroup(after: .appInfo) { ResetCommand(model: model) }
+        }
+
         MenuBarExtra {
             StatusMenu(model: model)
         } label: {
@@ -24,6 +28,20 @@ struct NimqoApp: App {
 
 enum MainWindow {
     static let id = "main"
+}
+
+/// App menu > Log Out. Opens the window, where the confirmation is shown.
+struct ResetCommand: View {
+    let model: CoreModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Log Out and Remove Data…") {
+            openWindow(id: MainWindow.id)
+            model.confirmingReset = true
+        }
+        .disabled(!model.canReset)
+    }
 }
 
 /// Kept small on purpose (plan 7.5): status, open, quit. Recent chats join

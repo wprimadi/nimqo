@@ -7,7 +7,7 @@
 use anyhow::{Context, Result, bail};
 use hkdf::Hkdf;
 use security_framework::passwords::{
-    PasswordOptions, generic_password, set_generic_password_options,
+    PasswordOptions, delete_generic_password, generic_password, set_generic_password_options,
 };
 use security_framework::random::SecRandom;
 use sha2::Sha256;
@@ -18,6 +18,19 @@ pub type Key = Zeroizing<[u8; 32]>;
 
 /// `errSecItemNotFound`.
 const ITEM_NOT_FOUND: i32 = -25300;
+
+/// Deletes the master key. Everything encrypted under it becomes unreadable,
+/// which is the point: this is how a reset destroys local data (plan 11.3).
+///
+/// # Errors
+/// The Keychain refuses the deletion. A missing item is not an error.
+pub fn destroy(service: &str, account: &str) -> Result<()> {
+    match delete_generic_password(service, account) {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == ITEM_NOT_FOUND => Ok(()),
+        Err(e) => bail!("cannot delete the Keychain master key: {e}"),
+    }
+}
 
 /// Labels for derived keys. Changing a label makes existing data unreadable.
 pub const PROTOCOL_DB: &str = "nimqo/v1/protocol-db";

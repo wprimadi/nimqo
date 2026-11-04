@@ -58,6 +58,32 @@ pub async fn open(peer: Peer, fault: Fault) -> Result<Stores> {
     })
 }
 
+/// Destroys the session and all local data: the Keychain key first, so
+/// anything a failed delete leaves behind is already unreadable, then every
+/// file except the lock, which the caller still holds.
+///
+/// # Errors
+/// The Keychain key or a file cannot be deleted.
+pub fn reset(dir: &Path) -> Result<()> {
+    vault::destroy(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
+    clear_dir(dir)
+}
+
+fn clear_dir(dir: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.file_name() == Some(".lock".as_ref()) {
+            continue;
+        }
+        if path.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    Ok(())
+}
+
 /// Another NIMQO process (app or CLI) holds the data directory.
 #[derive(Debug)]
 pub struct AlreadyRunning;
@@ -122,5 +148,20 @@ mod tests {
         assert!(err.downcast_ref::<AlreadyRunning>().is_some(), "{err}");
         drop(first);
         lock_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn clearing_keeps_only_the_lock() {
+        let dir = std::env::temp_dir().join(format!("nimqo-clear-{}", std::process::id()));
+        private_dir(&dir.join("media")).unwrap();
+        let _lock = lock_dir(&dir).unwrap();
+        std::fs::write(dir.join("app.db"), b"x").unwrap();
+        std::fs::write(dir.join("media/a.nqm"), b"x").unwrap();
+        clear_dir(&dir).unwrap();
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, [".lock"]);
     }
 }

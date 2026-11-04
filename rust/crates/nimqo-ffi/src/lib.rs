@@ -5,6 +5,7 @@
 //! is acknowledged without being kept.
 
 use std::fs::File;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -116,8 +117,9 @@ pub struct Core {
     machine: Arc<Machine>,
     /// Number used for code pairing, kept to re-request when the server asks.
     pair_phone: Arc<Mutex<Option<String>>>,
-    /// Data-directory lock; released when the core is dropped.
-    _lock: File,
+    dir: PathBuf,
+    /// Data-directory lock; released on drop or after a reset.
+    lock: Mutex<Option<File>>,
 }
 
 #[uniffi::export]
@@ -143,7 +145,7 @@ impl Core {
             listener,
         });
         let pair_phone = Arc::new(Mutex::new(None));
-        let (handle, client, lock) = runtime.block_on(connect(
+        let (handle, client, (lock, dir)) = runtime.block_on(connect(
             test_peer,
             Arc::clone(&machine),
             Arc::clone(&pair_phone),
@@ -154,7 +156,8 @@ impl Core {
             client,
             machine,
             pair_phone,
-            _lock: lock,
+            dir,
+            lock: Mutex::new(Some(lock)),
         }))
     }
 
@@ -209,6 +212,31 @@ impl Core {
             .spawn(async move { client.reconnect_immediately().await });
     }
 
+    /// Unlinks this Mac (when still linked), then destroys the Keychain key
+    /// and all local data. Drop the core afterwards and start a new one to
+    /// pair again. Blocks for up to the logout and shutdown timeouts.
+    ///
+    /// # Errors
+    /// The key or local files could not be deleted. The session is stopped
+    /// either way.
+    pub fn log_out_and_reset(&self) -> Result<(), CoreError> {
+        const LOGOUT: Duration = Duration::from_secs(10);
+        if !self.machine.current().is_terminal() {
+            let client = Arc::clone(&self.client);
+            let report = self
+                .runtime
+                .block_on(async { tokio::time::timeout(LOGOUT, client.logout()).await });
+            // Not fatal: the phone can still remove the device by hand.
+            log::info!("logout sent: {}", report.is_ok());
+        }
+        self.stop();
+        stores::reset(&self.dir).map_err(err(|detail| CoreError::Storage { detail }))?;
+        log::info!("local data destroyed");
+        // Let the next core in even if Swift still holds this one.
+        drop(self.lock.lock().map(|mut l| l.take()));
+        Ok(())
+    }
+
     /// Disconnects, waiting at most a few seconds so quitting never hangs.
     /// Safe to call more than once.
     pub fn stop(&self) {
@@ -236,7 +264,7 @@ async fn connect(
     test_peer: &str,
     machine: Arc<Machine>,
     pair_phone: Arc<Mutex<Option<String>>>,
-) -> Result<(BotHandle, Arc<Client>, File), CoreError> {
+) -> Result<(BotHandle, Arc<Client>, (File, PathBuf)), CoreError> {
     let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
     let stores = stores::open(peer, Fault::None).await.map_err(|e| {
         if e.downcast_ref::<AlreadyRunning>().is_some() {
@@ -304,7 +332,7 @@ async fn connect(
         .await
         .map_err(err(|detail| CoreError::Startup { detail }))?;
     let client = bot.client();
-    Ok((bot.spawn(), client, stores.lock))
+    Ok((bot.spawn(), client, (stores.lock, stores.dir)))
 }
 
 /// Failures are reported through the `PairingCodeError` event, so the

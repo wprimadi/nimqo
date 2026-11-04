@@ -6,12 +6,20 @@ struct RootView: View {
     let model: CoreModel
 
     var body: some View {
-        if !model.hasAcceptedDisclosure {
-            OnboardingView(model: model)
-        } else if model.failure == nil, model.isSessionUp {
-            MainView(chats: model.chats)
-        } else {
-            PairingView(model: model)
+        Group {
+            if !model.hasAcceptedDisclosure {
+                OnboardingView(model: model)
+            } else if model.failure == nil, model.isSessionUp {
+                MainView(chats: model.chats)
+            } else {
+                PairingView(model: model)
+            }
+        }
+        .confirmationDialog("Log out and remove all data?", isPresented: Bindable(model).confirmingReset) {
+            Button("Log Out and Remove Data", role: .destructive) { model.logOutAndReset() }
+        } message: {
+            Text("This unlinks this Mac from WhatsApp and permanently deletes the messages, media, and keys " +
+                "stored here. Your phone keeps its chats.")
         }
     }
 }

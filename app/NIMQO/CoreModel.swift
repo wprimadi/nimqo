@@ -17,6 +17,9 @@ final class CoreModel {
     private(set) var pairCodeMessage: String?
     private(set) var hasAcceptedDisclosure: Bool
     private(set) var failure: String?
+    /// Bound by the confirmation dialog in `RootView`.
+    var confirmingReset = false
+    private(set) var isResetting = false
     /// ponytail: always empty until the core exposes `list_chats` (Phase 3).
     private(set) var chats: [ChatSummary] = []
     private var core: Core?
@@ -33,6 +36,10 @@ final class CoreModel {
         case .connected, .reconnecting, .offline: true
         default: false
         }
+    }
+
+    var canReset: Bool {
+        core != nil && !isResetting
     }
 
     var statusText: String {
@@ -105,6 +112,19 @@ final class CoreModel {
         observers.stop()
         core?.stop()
         core = nil
+    }
+
+    /// Unlinks, destroys the key and local data, then pairs again. Only
+    /// reached through the confirmation dialog.
+    func logOutAndReset() {
+        guard let core, !isResetting else { return }
+        isResetting = true
+        observers.stop()
+        lastNetworkAvailable = nil
+        Task.detached {
+            let result = Result { try core.logOutAndReset() }
+            await MainActor.run { self.finishReset(result) }
+        }
     }
 
     func update(state: ConnectionState) {
@@ -187,6 +207,22 @@ final class CoreModel {
         defer { lastNetworkAvailable = available }
         guard let last = lastNetworkAvailable, last != available else { return }
         core?.networkChanged(available: available)
+    }
+
+    private func finishReset(_ result: Result<Void, Error>) {
+        isResetting = false
+        core = nil
+        state = nil
+        qrPayload = nil
+        pairCode = nil
+        pairCodeMessage = nil
+        switch result {
+        case .success:
+            failure = nil
+            start()
+        case let .failure(error):
+            fail(error)
+        }
     }
 
     private func attach(_ core: Core) {

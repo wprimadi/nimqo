@@ -30,9 +30,15 @@ struct PairingView: View {
                 case .qrCode: qrSection
                 case .phone: phoneSection
                 }
+            } else if model.isResetting {
+                ProgressView("Removing local data…")
             } else {
                 Label(model.statusText, systemImage: model.statusSymbol)
                     .font(.title2)
+                if model.state == .loggedOut {
+                    Button("Remove Data and Link Again…") { model.confirmingReset = true }
+                        .disabled(!model.canReset)
+                }
             }
         }
         .padding(Theme.Spacing.large)
