@@ -12,6 +12,8 @@ target/
 
 # Generated UniFFI bindings and SwiftPM build output
 app/Generated/
+app/NIMQO.xcodeproj/
+app/build/
 .build/
 
 # Local data: never commit sessions, databases, keys, or logs

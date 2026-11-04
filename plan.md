@@ -1992,7 +1992,7 @@ Do not silently change architecture through implementation details.
 ### Epic C --- Swift/Rust bridge
 
 -   [ ] Define NIMQO DTOs.
--   [ ] Define typed error model.
+-   [x] Define typed error model (`CoreError`: invalid peer, storage, startup).
 -   [x] Expose client lifecycle (Phase 0: start/stop).
 -   [x] Expose pairing API (Phase 0: QR payload callback).
 -   [x] Expose connection state.
@@ -2003,13 +2003,14 @@ Do not silently change architecture through implementation details.
 
 ### Epic D --- Native shell
 
--   [ ] Build main window.
--   [ ] Build navigation sidebar.
--   [ ] Build chat list placeholder with real model contract.
--   [ ] Build conversation shell.
+-   [x] Build main window.
+-   [x] Build navigation sidebar.
+-   [x] Build chat list placeholder with real model contract (Swift
+    `ChatSummary`; the Rust DTO arrives with `list_chats`).
+-   [x] Build conversation shell.
 -   [ ] Add Menu Bar Extra.
 -   [ ] Define close/hide/quit behavior.
--   [ ] Add light/dark support.
+-   [x] Add light/dark support (system semantic styles).
 -   [ ] Add accessibility foundations.
 
 ### Epic E --- Core messaging

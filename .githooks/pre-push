@@ -33,8 +33,7 @@ if [ -f .swiftlint.yml ]; then
   swiftformat --lint .
   swiftlint lint --strict --quiet
 fi
-if [ -f app/Package.swift ]; then
-  ./scripts/build-core.sh
-  (cd app && swift build)
+if [ -f app/project.yml ]; then
+  need xcodegen
+  ./scripts/build-app.sh test
 fi
-# ponytail: SwiftPM app for Phase 0; an Xcode project (signing, entitlements) replaces it in Phase 1.

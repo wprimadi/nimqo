@@ -32,23 +32,34 @@ pub trait CoreListener: Send + Sync {
     fn on_qr(&self, code: String, timeout_secs: u64);
 }
 
-#[derive(Debug, uniffi::Error)]
-#[uniffi(flat_error)]
+/// Grouped by what the user can do about it. `detail` is for logs and bug
+/// reports; it never contains message content.
+#[derive(Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
-    Failed(String),
+    /// The configured test number is not an international number.
+    InvalidPeer { detail: String },
+    /// The Keychain key or an encrypted database is unavailable. NIMQO fails
+    /// closed here and never falls back to plaintext.
+    Storage { detail: String },
+    /// The client could not be built or started.
+    Startup { detail: String },
 }
 
 impl std::fmt::Display for CoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self::Failed(msg) = self;
-        f.write_str(msg)
+        let (kind, detail) = match self {
+            Self::InvalidPeer { detail } => ("invalid test number", detail),
+            Self::Storage { detail } => ("encrypted storage unavailable", detail),
+            Self::Startup { detail } => ("cannot start", detail),
+        };
+        write!(f, "{kind}: {detail}")
     }
 }
 
-impl From<anyhow::Error> for CoreError {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Failed(format!("{e:#}"))
-    }
+impl std::error::Error for CoreError {}
+
+fn err<E: std::fmt::Display>(make: fn(String) -> CoreError) -> impl Fn(E) -> CoreError {
+    move |e| make(format!("{e:#}"))
 }
 
 #[derive(uniffi::Object)]
@@ -66,10 +77,13 @@ impl Core {
     /// The peer number is invalid, or the stores or client cannot start.
     #[uniffi::constructor]
     pub fn start(test_peer: &str, listener: Arc<dyn CoreListener>) -> Result<Arc<Self>, CoreError> {
+        init_logging();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .map_err(|e| CoreError::Failed(e.to_string()))?;
+            .map_err(|e| CoreError::Startup {
+                detail: e.to_string(),
+            })?;
         listener.on_status(ConnectionStatus::Connecting);
         let handle = runtime.block_on(connect(test_peer, listener))?;
         Ok(Arc::new(Self {
@@ -96,8 +110,11 @@ impl Drop for Core {
     }
 }
 
-async fn connect(test_peer: &str, listener: Arc<dyn CoreListener>) -> anyhow::Result<BotHandle> {
-    let stores = stores::open(Peer::parse(test_peer)?, Fault::None).await?;
+async fn connect(test_peer: &str, listener: Arc<dyn CoreListener>) -> Result<BotHandle, CoreError> {
+    let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
+    let stores = stores::open(peer, Fault::None)
+        .await
+        .map_err(err(|detail| CoreError::Storage { detail }))?;
     let (on_qr, on_up, on_down, on_out) = (
         Arc::clone(&listener),
         Arc::clone(&listener),
@@ -125,6 +142,35 @@ async fn connect(test_peer: &str, listener: Arc<dyn CoreListener>) -> anyhow::Re
             async {}
         })
         .build()
-        .await?;
+        .await
+        .map_err(err(|detail| CoreError::Startup { detail }))?;
     Ok(bot.spawn())
+}
+
+/// Sends Rust `log` records to the unified log (Console.app, `log stream`).
+fn init_logging() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Fails only if another logger is already installed; keep that one.
+        let _ = oslog::OsLogger::new("app.nimqo.core")
+            .level_filter(log::LevelFilter::Info)
+            .init();
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Silent;
+    impl CoreListener for Silent {
+        fn on_status(&self, _: ConnectionStatus) {}
+        fn on_qr(&self, _: String, _: u64) {}
+    }
+
+    #[test]
+    fn invalid_peer_fails_before_touching_storage() {
+        let e = Core::start("not a number", Arc::new(Silent)).err().unwrap();
+        assert!(matches!(e, CoreError::InvalidPeer { .. }), "{e}");
+    }
 }
