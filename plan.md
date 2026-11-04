@@ -1978,11 +1978,11 @@ Do not silently change architecture through implementation details.
 
 -   [x] Inspect upstream README and API docs.
 -   [x] Inspect feature flags and storage implementation.
--   [ ] Pair a dedicated test account.
+-   [x] Pair a dedicated test account.
 -   [ ] Persist session in SQLCipher with a Keychain key.
 -   [ ] Verify the durability hook with a crash test.
--   [ ] Receive a text message.
--   [ ] Send a text message.
+-   [x] Receive a text message.
+-   [x] Send a text message.
 -   [ ] Test reconnect.
 -   [ ] Test media transfer.
 -   [ ] Document limitations.
