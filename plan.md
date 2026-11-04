@@ -2018,8 +2018,9 @@ Do not silently change architecture through implementation details.
 
 ### Epic E --- Core messaging
 
--   [ ] Implement pairing UX.
--   [ ] Implement session restoration.
+-   [x] Implement pairing UX (disclosure, QR, phone number code).
+-   [x] Implement session restoration (reconnect, single instance,
+    logout/reset with key destruction).
 -   [ ] Implement event dispatcher.
 -   [ ] Implement chat list.
 -   [ ] Implement message timeline.

@@ -35,6 +35,9 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | App: Offline on Wi-Fi off, reconnect on return (`NWPathMonitor`) | Pass | 2026-11-05 |
 | App: reconnect after system sleep and wake | Pass | 2026-11-05 |
 | Second process refused while the app holds the data directory lock | Pass | 2026-11-05 |
+| First-run disclosure shown once, before any connection | Pass | 2026-11-05 |
+| Unlinked from the phone: app shows Logged out; reset destroys key and data | Pass | 2026-11-05 |
+| Pairing by phone number code after reset | Pass | 2026-11-05 |
 
 ## Limitations register
 
