@@ -1,3 +1,4 @@
+import Foundation
 @testable import NIMQO
 import NimqoCore
 import Testing
@@ -36,6 +37,29 @@ struct CoreModelTests {
     @Test func storageFailureSaysItFailsClosed() {
         let message = CoreModel.message(for: CoreError.Storage(detail: "x"))
         #expect(message.contains("will not continue"))
+    }
+
+    @Test func disclosureIsRememberedAndGatesStart() throws {
+        let defaults = try #require(UserDefaults(suiteName: "nimqo.tests.\(UUID())"))
+        let model = CoreModel(defaults: defaults)
+        #expect(!model.hasAcceptedDisclosure)
+        model.acceptDisclosure()
+        #expect(CoreModel(defaults: defaults).hasAcceptedDisclosure)
+    }
+
+    @Test func pairCodeIsGroupedAndClearedAfterPairing() {
+        let model = CoreModel()
+        model.update(state: .pairing)
+        model.update(pairCode: "ABCDEFGH")
+        #expect(model.pairCode == "ABCD-EFGH")
+        model.update(state: .connected)
+        #expect(model.pairCode == nil)
+    }
+
+    @Test func throttledPairCodeSaysWhenToRetry() {
+        let model = CoreModel()
+        model.pairCodeFailed(throttled: true, retryAfterSecs: 120)
+        #expect(model.pairCodeMessage?.contains("2 minutes") == true)
     }
 
     @Test func startDoesNothingUnderTests() {

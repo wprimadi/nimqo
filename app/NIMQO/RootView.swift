@@ -6,7 +6,9 @@ struct RootView: View {
     let model: CoreModel
 
     var body: some View {
-        if model.failure == nil, model.isSessionUp {
+        if !model.hasAcceptedDisclosure {
+            OnboardingView(model: model)
+        } else if model.failure == nil, model.isSessionUp {
             MainView(chats: model.chats)
         } else {
             PairingView(model: model)

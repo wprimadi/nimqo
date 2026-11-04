@@ -12,6 +12,10 @@ import SwiftUI
 final class CoreModel {
     private(set) var state: ConnectionState?
     private(set) var qrPayload: String?
+    /// Code for linking by phone number, shown as `ABCD-EFGH`.
+    private(set) var pairCode: String?
+    private(set) var pairCodeMessage: String?
+    private(set) var hasAcceptedDisclosure: Bool
     private(set) var failure: String?
     /// ponytail: always empty until the core exposes `list_chats` (Phase 3).
     private(set) var chats: [ChatSummary] = []
@@ -19,6 +23,9 @@ final class CoreModel {
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
     private let log = Logger(subsystem: "app.nimqo", category: "core-model")
+    private let defaults: UserDefaults
+    /// Bump the version when the disclosure text changes materially.
+    static let disclosureKey = "disclosureAccepted.v1"
 
     /// The main window replaces pairing once the session has been up.
     var isSessionUp: Bool {
@@ -55,7 +62,9 @@ final class CoreModel {
         }
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        hasAcceptedDisclosure = defaults.bool(forKey: Self.disclosureKey)
         // Quit is the only path that ends the session (plan 7.6); closing the
         // window does not. Disconnect cleanly before the process exits.
         NotificationCenter.default.addObserver(
@@ -65,9 +74,16 @@ final class CoreModel {
         }
     }
 
+    /// Nothing connects before the user has read the disclosure (plan 21).
+    func acceptDisclosure() {
+        defaults.set(true, forKey: Self.disclosureKey)
+        hasAcceptedDisclosure = true
+        start()
+    }
+
     func start() {
         // Unit tests host the app; never connect a real account from a test.
-        guard core == nil, NSClassFromString("XCTestCase") == nil else { return }
+        guard core == nil, hasAcceptedDisclosure, NSClassFromString("XCTestCase") == nil else { return }
         // Development talks to one allowlisted number only, given at launch.
         guard let peer = ProcessInfo.processInfo.environment["NIMQO_TEST_PEER"] else {
             failure = "Set NIMQO_TEST_PEER before launching."
@@ -101,11 +117,38 @@ final class CoreModel {
         }
         if state != .pairing {
             qrPayload = nil
+            pairCode = nil
+            pairCodeMessage = nil
         }
     }
 
     func update(qrPayload payload: String) {
         qrPayload = payload
+    }
+
+    func requestPairCode(phoneNumber: String) {
+        pairCode = nil
+        do {
+            try core?.requestPairCode(phoneNumber: phoneNumber)
+            pairCodeMessage = "Requesting a code…"
+        } catch {
+            pairCodeMessage = Self.message(for: error)
+        }
+    }
+
+    func update(pairCode code: String) {
+        // Shown in two groups of four, the way WhatsApp displays it.
+        pairCode = code.count == 8 ? "\(code.prefix(4))-\(code.suffix(4))" : code
+        pairCodeMessage = nil
+    }
+
+    func pairCodeFailed(throttled: Bool, retryAfterSecs: UInt64?) {
+        pairCode = nil
+        pairCodeMessage = if throttled {
+            "Too many requests. Try again in \(Self.duration(retryAfterSecs ?? 60))."
+        } else {
+            "WhatsApp did not issue a code. Check the number, or use the QR code."
+        }
     }
 
     func fail(_ error: Error) {
@@ -118,6 +161,8 @@ final class CoreModel {
         switch error as? CoreError {
         case .InvalidPeer:
             "NIMQO_TEST_PEER is not an international phone number."
+        case .InvalidPhoneNumber:
+            "Enter the number in international format, for example +62 812 3456 7890."
         case .AlreadyRunning:
             "NIMQO is already running. Use the open copy, or quit it first."
         case .Storage:
@@ -221,5 +266,13 @@ private final class Listener: CoreListener, Sendable {
 
     func onQr(code: String, timeoutSecs _: UInt64) {
         Task { @MainActor [model] in model?.update(qrPayload: code) }
+    }
+
+    func onPairCode(code: String, timeoutSecs _: UInt64) {
+        Task { @MainActor [model] in model?.update(pairCode: code) }
+    }
+
+    func onPairCodeError(throttled: Bool, retryAfterSecs: UInt64?) {
+        Task { @MainActor [model] in model?.pairCodeFailed(throttled: throttled, retryAfterSecs: retryAfterSecs) }
     }
 }

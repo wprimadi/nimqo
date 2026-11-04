@@ -13,6 +13,7 @@ use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use whatsapp_rust::Client;
 use whatsapp_rust::bot::BotHandle;
+use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::{Event, EventKind};
 
@@ -29,6 +30,10 @@ pub trait CoreListener: Send + Sync {
     fn on_state(&self, state: ConnectionState);
     /// Raw pairing payload; the app renders it as a QR code.
     fn on_qr(&self, code: String, timeout_secs: u64);
+    /// Eight-character code to type on the phone, after `request_pair_code`.
+    fn on_pair_code(&self, code: String, timeout_secs: u64);
+    /// No code is coming. `throttled` means wait before asking again.
+    fn on_pair_code_error(&self, throttled: bool, retry_after_secs: Option<u64>);
 }
 
 /// Grouped by what the user can do about it. `detail` is for logs and bug
@@ -37,6 +42,8 @@ pub trait CoreListener: Send + Sync {
 pub enum CoreError {
     /// The configured test number is not an international number.
     InvalidPeer { detail: String },
+    /// The number entered for pairing is not an international number.
+    InvalidPhoneNumber,
     /// Another NIMQO process (app or CLI) has the session open.
     AlreadyRunning,
     /// The Keychain key or an encrypted database is unavailable. NIMQO fails
@@ -50,6 +57,10 @@ impl std::fmt::Display for CoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (kind, detail) = match self {
             Self::InvalidPeer { detail } => ("invalid test number", detail.as_str()),
+            Self::InvalidPhoneNumber => (
+                "invalid phone number",
+                "use the international format, e.g. +62 812 3456 7890",
+            ),
             Self::AlreadyRunning => (
                 "already running",
                 "another NIMQO process has the session open",
@@ -103,6 +114,8 @@ pub struct Core {
     handle: Mutex<Option<BotHandle>>,
     client: Arc<Client>,
     machine: Arc<Machine>,
+    /// Number used for code pairing, kept to re-request when the server asks.
+    pair_phone: Arc<Mutex<Option<String>>>,
     /// Data-directory lock; released when the core is dropped.
     _lock: File,
 }
@@ -129,12 +142,18 @@ impl Core {
             state: Mutex::new(ConnectionState::Connecting),
             listener,
         });
-        let (handle, client, lock) = runtime.block_on(connect(test_peer, Arc::clone(&machine)))?;
+        let pair_phone = Arc::new(Mutex::new(None));
+        let (handle, client, lock) = runtime.block_on(connect(
+            test_peer,
+            Arc::clone(&machine),
+            Arc::clone(&pair_phone),
+        ))?;
         Ok(Arc::new(Self {
             runtime,
             handle: Mutex::new(Some(handle)),
             client,
             machine,
+            pair_phone,
             _lock: lock,
         }))
     }
@@ -155,6 +174,27 @@ impl Core {
         if available {
             self.reconnect_now();
         }
+    }
+
+    /// Asks for an eight-character code to link by phone number instead of a
+    /// QR scan. The code arrives through `CoreListener::on_pair_code`, or a
+    /// failure through `on_pair_code_error`. Only meaningful while pairing.
+    ///
+    /// # Errors
+    /// `phone_number` is not an international number.
+    pub fn request_pair_code(&self, phone_number: &str) -> Result<(), CoreError> {
+        let digits = Peer::parse(phone_number)
+            .map_err(|_| CoreError::InvalidPhoneNumber)?
+            .jid()
+            .user
+            .to_string();
+        if let Ok(mut phone) = self.pair_phone.lock() {
+            *phone = Some(digits.clone());
+        }
+        let client = Arc::clone(&self.client);
+        self.runtime
+            .spawn(async move { request_code(&client, digits).await });
+        Ok(())
     }
 
     /// Drops the socket and reconnects without backoff, e.g. after wake from
@@ -195,6 +235,7 @@ impl Drop for Core {
 async fn connect(
     test_peer: &str,
     machine: Arc<Machine>,
+    pair_phone: Arc<Mutex<Option<String>>>,
 ) -> Result<(BotHandle, Arc<Client>, File), CoreError> {
     let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
     let stores = stores::open(peer, Fault::None).await.map_err(|e| {
@@ -206,7 +247,11 @@ async fn connect(
             }
         }
     })?;
-    let on_qr = Arc::clone(&machine);
+    let (on_qr, on_code, on_code_err) = (
+        Arc::clone(&machine),
+        Arc::clone(&machine),
+        Arc::clone(&machine),
+    );
     let bot = Bot::builder()
         .with_backend(stores.protocol)
         .with_inbound_durability_hook(stores.inbox)
@@ -214,6 +259,27 @@ async fn connect(
             on_qr.feed(Input::QrShown);
             on_qr.listener.on_qr(code, timeout.as_secs());
             async {}
+        })
+        .on_pair_code(move |code, timeout| {
+            on_code.listener.on_pair_code(code, timeout.as_secs());
+            async {}
+        })
+        .on_pair_code_error(move |e, _| {
+            // Only the classification is logged; the message can echo the number.
+            log::warn!("pair code refused: {:?}", e.rejection);
+            on_code_err.listener.on_pair_code_error(
+                e.rejection.is_some_and(PairCodeRejection::is_throttled),
+                e.backoff.map(|d| d.as_secs()),
+            );
+            async {}
+        })
+        .on_pair_code_refresh(move |_, client| {
+            let phone = pair_phone.lock().ok().and_then(|p| p.clone());
+            async move {
+                if let Some(phone) = phone {
+                    request_code(&client, phone).await;
+                }
+            }
         })
         .on_event_for(
             &[
@@ -239,6 +305,18 @@ async fn connect(
         .map_err(err(|detail| CoreError::Startup { detail }))?;
     let client = bot.client();
     Ok((bot.spawn(), client, stores.lock))
+}
+
+/// Failures are reported through the `PairingCodeError` event, so the
+/// returned error carries nothing new.
+async fn request_code(client: &Arc<Client>, phone_number: String) {
+    let options = PairCodeOptions {
+        phone_number,
+        ..PairCodeOptions::default()
+    };
+    if client.pair_with_code(options).await.is_err() {
+        log::warn!("pair code request failed");
+    }
 }
 
 /// Maps the upstream events plan 10.1 names onto state machine inputs.
@@ -301,6 +379,8 @@ mod tests {
     impl CoreListener for Silent {
         fn on_state(&self, _: ConnectionState) {}
         fn on_qr(&self, _: String, _: u64) {}
+        fn on_pair_code(&self, _: String, _: u64) {}
+        fn on_pair_code_error(&self, _: bool, _: Option<u64>) {}
     }
 
     #[test]
