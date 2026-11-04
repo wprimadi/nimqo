@@ -3,5 +3,6 @@
 
 pub mod db;
 pub mod inbox;
+pub mod media;
 pub mod peer;
 pub mod vault;

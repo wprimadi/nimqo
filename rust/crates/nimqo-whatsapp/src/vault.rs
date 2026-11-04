@@ -22,6 +22,7 @@ const ITEM_NOT_FOUND: i32 = -25300;
 /// Labels for derived keys. Changing a label makes existing data unreadable.
 pub const PROTOCOL_DB: &str = "nimqo/v1/protocol-db";
 pub const APP_DB: &str = "nimqo/v1/app-db";
+pub const MEDIA: &str = "nimqo/v1/media";
 
 pub struct MasterKey(Key);
 
@@ -57,9 +58,7 @@ impl MasterKey {
             }
             Err(e) if e.code() == ITEM_NOT_FOUND => {
                 let mut bytes = Zeroizing::new([0u8; 32]);
-                SecRandom::default()
-                    .copy_bytes(bytes.as_mut_slice())
-                    .map_err(|e| anyhow::anyhow!("system random generator failed: {e}"))?;
+                fill_random(bytes.as_mut_slice())?;
                 set_generic_password_options(bytes.as_slice(), options())
                     .context("storing master key in the Keychain")?;
                 Ok(Self(bytes))
@@ -80,6 +79,16 @@ impl MasterKey {
             .expect("32 bytes is a valid HKDF-SHA256 output length");
         out
     }
+}
+
+/// Fills `buf` from the system CSPRNG.
+///
+/// # Errors
+/// The system random generator fails.
+pub fn fill_random(buf: &mut [u8]) -> Result<()> {
+    SecRandom::default()
+        .copy_bytes(buf)
+        .map_err(|e| anyhow::anyhow!("system random generator failed: {e}"))
 }
 
 #[cfg(test)]
