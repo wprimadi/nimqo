@@ -24,12 +24,16 @@ final class CoreModel {
                 let core = try Core.start(testPeer: peer, listener: listener)
                 await MainActor.run { self.core = core }
             } catch {
-                await MainActor.run { self.error = error.localizedDescription }
+                await MainActor.run {
+                    print("error: \(error)")
+                    self.error = error.localizedDescription
+                }
             }
         }
     }
 
     fileprivate func update(status: ConnectionStatus) {
+        print("status: \(status)")
         self.status = status
         if status != .waitingForScan {
             qrPayload = nil
