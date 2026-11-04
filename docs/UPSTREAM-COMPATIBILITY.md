@@ -25,12 +25,13 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Protocol and app databases encrypted on disk after a real session | Pass | 2026-11-04 |
 | Session restored after restart without re-pairing | Pass | 2026-11-04 |
 | Message redelivered once after a refused commit (`NIMQO_FAIL_COMMIT`) | Pass | 2026-11-04 |
-| Message redelivered after a hard kill between decrypt and commit | Pending | |
+| Message redelivered after `kill -9` between decrypt and commit (`NIMQO_COMMIT_DELAY`) | Pass | 2026-11-05 |
 | Reconnect after Wi-Fi off for about 30 s | Pass | 2026-11-04 |
 | Incoming image event delivered (content not yet handled; shown as `<non-text>`) | Pass | 2026-11-04 |
 | Receive an image from the test peer, stored encrypted (ADR 0006), opened with `/show` | Pass | 2026-11-05 |
 | Send an image to the test peer with `/img` | Pass | 2026-11-05 |
 | SwiftUI app through UniFFI: session restored, status shown, reconnect after Wi-Fi off | Pass | 2026-11-05 |
+| Xcode-built app (Phase 1 shell): connects, main window with sidebar | Pass | 2026-11-05 |
 
 ## Limitations register
 
@@ -41,7 +42,7 @@ run on macOS; everything else is untested here, whatever upstream documents.
 | --- | --- | --- | --- | --- |
 | QR pairing | `Bot::on_qr_code` | `nimqo-poc`, `nimqo-ffi` | Verified | Pairing code login not tried |
 | Session store | `SqliteDatabase` + `with_connection_init` | `stores::open` (SQLCipher) | Verified | Store uses device id 1; one linked device per data dir |
-| Inbound durability | `InboundDurabilityHook` | `inbox::Inbox` | Verified (refused commit); hard kill pending | Peer-only storage in Phase 0; other chats are acknowledged unstored |
+| Inbound durability | `InboundDurabilityHook` | `inbox::Inbox` | Verified (refused commit, `kill -9`) | Peer-only storage in Phase 0; other chats are acknowledged unstored. Upstream warns when processing exceeds `MAX_MESSAGE_DELAY` (20 s): commits must stay well below it |
 | Text send/receive | `Client::send_message`, `on_message` | `nimqo-poc` | Verified | One-to-one only; groups untested |
 | Images | `Client::download`, `Client::upload`, `media::image_message` | `nimqo-poc`, `media` (ADR 0006) | Verified | Whole file in memory, 16 MiB cap; video, audio, documents untested |
 | Reconnect | built in | none | Verified (Wi-Fi off ~30 s) | Sleep/wake and long outages untested |

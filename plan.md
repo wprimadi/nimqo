@@ -1982,7 +1982,7 @@ Do not silently change architecture through implementation details.
 -   [x] Pair a dedicated test account.
 -   [x] Persist session in SQLCipher with a Keychain key.
 -   [x] Verify the durability hook with a refused commit.
--   [ ] Verify the durability hook with a hard kill (`kill -9`).
+-   [x] Verify the durability hook with a hard kill (`kill -9`).
 -   [x] Receive a text message.
 -   [x] Send a text message.
 -   [x] Test reconnect.
