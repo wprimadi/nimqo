@@ -8,5 +8,5 @@
 - [ ] Tests added or updated; the default suite needs no real account.
 - [ ] No secrets, session files, or real conversation data.
 - [ ] No new data is persisted without encryption.
-- [ ] Any suppressed SonarQube issue is justified below.
+- [ ] `.githooks/pre-push` passes; any `#[allow]` or `swiftlint:disable` is justified below.
 - [ ] Docs or ADRs updated if behavior or architecture changed.

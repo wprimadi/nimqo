@@ -1,0 +1,36 @@
+#!/bin/sh
+# NIMQO local quality gate (plan section 16.6). Enable once per clone:
+#   git config core.hooksPath .githooks
+# Each check runs as soon as its code exists. Never bypass with --no-verify.
+set -eu
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "pre-push: '$1' is required; see CONTRIBUTING.md" >&2; exit 1; }; }
+
+zero=0000000000000000000000000000000000000000
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # branch deletion
+  if [ "$remote_sha" = "$zero" ]; then range="$local_sha"; else range="$remote_sha..$local_sha"; fi
+  need gitleaks
+  gitleaks git --redact --no-banner --log-opts="$range" .
+done
+
+if [ -f rust/Cargo.toml ]; then
+  need cargo-audit
+  need cargo-deny
+  (
+    cd rust
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo test --workspace --locked
+    cargo audit
+    cargo deny check
+  )
+fi
+
+if [ -f .swiftlint.yml ]; then
+  need swiftlint
+  need swiftformat
+  swiftformat --lint .
+  swiftlint lint --strict --quiet
+fi
+# ponytail: Xcode build+test joins here once the app target exists; scheme name unknown until then.

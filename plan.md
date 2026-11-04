@@ -4,7 +4,7 @@
 
 **Document type:** Product Requirements + Technical Architecture +
 Delivery Plan\
-**Version:** 1.1\
+**Version:** 1.2\
 **Status:** Proposed baseline for development\
 **Date:** 4 November 2026\
 **Platform:** macOS\
@@ -15,10 +15,15 @@ Delivery Plan\
 UniFFI, SQLCipher\
 **Working product name:** NIMQO
 
+### Changes in 1.2
+
+-   No GitHub Actions CI and no SonarQube. Quality is enforced by a local
+    gate in a versioned `pre-push` hook and by review (Section 16.6).
+
 ### Changes in 1.1
 
 -   Minimum OS set to macOS 14 with a Liquid Glass fallback.
--   Open source distribution and a mandatory SonarQube quality gate.
+-   Open source distribution with a mandatory quality gate.
 -   Encryption at rest is mandatory from the first persisted byte.
 -   Corrections from a review of upstream `whatsapp-rust` at v0.7.0 and
     `main`, including its macOS qualification status, message storage,
@@ -141,8 +146,8 @@ trademark search or legal opinion.
     behavior.
 -   Make the application testable independently of the SwiftUI
     interface.
--   Publish maintainable open source code that passes the SonarQube
-    quality gate.
+-   Publish maintainable open source code that passes the
+    local quality gate (Section 16.6).
 
 ### 3.2 Non-goals for the initial release
 
@@ -177,7 +182,7 @@ A release candidate is successful when:
     model.
 -   Critical accessibility, keyboard, and VoiceOver flows are usable.
 -   No known critical or high-severity security defect remains open.
--   The SonarQube quality gate passes on the release commit.
+-   The local quality gate passes on the release commit.
 -   No message, session, or media content is stored unencrypted by
     NIMQO, except the documented temporary and OS-owned cases.
 -   Performance goals are measured on supported hardware rather than
@@ -783,8 +788,8 @@ actually wants.
 
   Build                   Cargo + Xcode           Native build pipeline
 
-  Code quality            SonarQube, Clippy,      Mandatory PR quality
-                          SwiftLint               gate
+  Code quality            rustfmt, Clippy,        Mandatory local gate
+                          SwiftLint, SwiftFormat  in `pre-push` hook
 
   Distribution            Developer ID signing +  Outside-App-Store
                           notarization            distribution
@@ -924,8 +929,8 @@ also describe breaking API changes before 1.0.
 production-ready or that every API has been verified in NIMQO.**
 
 Upstream's `agent_docs/support.md` lists **macOS as unqualified**, with no
-maintained macOS runner. NIMQO's macOS CI and real-account tests are
-therefore the only evidence of macOS support.
+maintained macOS runner. NIMQO's local macOS test runs and real-account
+tests are therefore the only evidence of macOS support.
 
 Upstream's MSRV is Rust 1.95, and its workspace tooling uses a pinned
 nightly. Release v0.7.0 is 533 commits behind `main` as of this document.
@@ -948,12 +953,13 @@ Before implementation:
     compatibility. Reassess the choice at each upgrade.
 -   Disable upstream default features and select them explicitly, because
     the defaults include plain bundled SQLite.
--   CI must reject `tracing-pii`, `danger-skip-tls-verify`, `test-support`,
+-   The release script must reject `tracing-pii`, `danger-skip-tls-verify`, `test-support`,
     and `bench-harness` in release builds.
 -   Commit `Cargo.lock` for the application.
 -   Avoid floating Git branches in release builds.
 -   Review transitive dependency changes.
--   Run `cargo audit`, `cargo deny`, formatting, and Clippy in CI.
+-   Run `cargo audit`, `cargo deny`, formatting, and Clippy in the local
+    gate.
 -   Track upstream releases and breaking changes.
 -   Keep the adapter layer small and well tested.
 
@@ -1279,7 +1285,7 @@ Protect against:
 -   Insecure update/package delivery.
 -   FFI memory/lifecycle bugs.
 -   Unintended network requests or telemetry.
--   Malicious contributions or compromised CI in a public repository.
+-   Malicious contributions to a public repository.
 -   Attachments that execute or disguise their file type.
 -   Data remaining after logout/reset.
 
@@ -1358,15 +1364,14 @@ Before beta:
     equivalent.
 -   The repository is public from its first commit, so every push is a
     publication. Run a secret scanner (for example gitleaks) as a
-    pre-commit hook and in CI, and enable GitHub push protection before
-    the first push. A leaked secret is rotated, never just deleted from
+    `pre-push` hook, and keep GitHub push protection enabled. A leaked secret is rotated, never just deleted from
     history.
 -   Never commit test account data, session files, or real conversation
     fixtures.
--   Fork pull requests run without secrets. Signing and notarization
-    credentials live only in a protected release environment requiring
-    maintainer approval.
--   Pin GitHub Actions to commit SHAs and grant least-privilege tokens.
+-   Contributed code is reviewed before it is run locally with any
+    credential available. Signing credentials stay in the maintainer's
+    Keychain and never enter the repository.
+-   Signing and notarization run only on the maintainer's machine.
 -   Publish release checksums, build provenance, and an SBOM.
 -   Security depends on keys and OS protections, never on hidden source.
 
@@ -1543,7 +1548,7 @@ Requirements:
 
 Use dedicated test accounts and consenting participants. Do not test
 against unrelated users or automate activity that violates platform
-policies. Real-account tests never run in public CI. Contributors must be
+policies. Real-account tests are never part of the default gate. Contributors must be
 able to run the default test suite with no account or secret, and
 fixtures must be synthetic.
 
@@ -1588,12 +1593,12 @@ A feature is done only when:
 -   Performance impact is measured for expensive paths.
 -   Documentation is updated.
 -   No unresolved critical/high defect remains.
--   The SonarQube quality gate passes on new code.
+-   The local quality gate (Section 16.6) passes.
 -   No new persisted data bypasses encryption.
 
 ------------------------------------------------------------------------
 
-## 16. Build, CI, Signing, and Release Engineering
+## 16. Build, Quality Gate, Signing, and Release Engineering
 
 ### 16.1 Local development
 
@@ -1606,8 +1611,8 @@ Required tooling:
 -   UniFFI CLI version pinned to the crate version.
 -   SwiftLint and SwiftFormat, with committed configurations.
 -   `cargo fmt`, Clippy with warnings denied, audit, and deny checks.
--   SonarScanner with coverage conversion.
--   Git hooks optional; CI is authoritative.
+-   `cargo-llvm-cov`, `cargo-audit`, `cargo-deny`, and gitleaks.
+-   The versioned `pre-push` hook is authoritative. There is no hosted CI.
 
 ### 16.2 Build pipeline
 
@@ -1618,7 +1623,7 @@ Required tooling:
 5.  Build Swift application.
 6.  Run Swift tests.
 7.  Run integration/UI tests where available.
-8.  Run SonarQube analysis and fail on quality gate failure.
+8.  Run the local quality gate and stop on any failure.
 9.  Verify release feature flags and SQLCipher linkage.
 10. Assemble app bundle.
 11. Sign nested binaries and frameworks.
@@ -1667,38 +1672,41 @@ compliant.
 
 ### 16.6 Open source and code quality gate
 
-**The SonarQube quality gate is mandatory.** Use SonarQube Cloud for the
-public repository if its open source terms and Rust/Swift support are
-confirmed in Phase 1; otherwise self-host SonarQube Server.
+There is no hosted CI and no SonarQube; GitHub Actions is unavailable and
+SonarQube's free Docker edition cannot analyze Swift. Quality is enforced
+by a local gate and by review.
 
-Gate conditions on new code, starting from the "Sonar way" profile:
+**The local gate is mandatory.** It lives in `.githooks/pre-push`, enabled
+with `git config core.hooksPath .githooks`, and blocks the push on failure.
+Each check runs once its code exists:
 
--   No new bugs, vulnerabilities, or code smells above the agreed severity.
--   100% of new security hotspots reviewed.
--   At least 80% test coverage.
--   At most 3% duplicated lines.
--   Maintainability, reliability, and security ratings of A.
+-   gitleaks over the commits being pushed.
+-   `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+    (pedantic lints enabled per crate), and `cargo test`.
+-   `cargo audit` and `cargo deny check`.
+-   SwiftFormat lint, SwiftLint in strict mode, and Xcode tests with
+    warnings treated as errors.
+-   The release script additionally checks release feature flags and
+    SQLCipher linkage (Section 11.3).
 
-Rules:
+Code standards:
 
--   Branch protection requires the gate plus formatting, lint, tests,
-    `cargo audit`, and `cargo deny`.
--   Exclude only generated UniFFI bindings, generated protocol code, and
-    documented declarative preview code. Each exclusion has a reason in
-    `sonar-project.properties`.
--   Any suppressed issue needs a written justification in the pull request.
--   Do not lower gate conditions to pass a release.
--   Rust coverage uses `cargo llvm-cov`. Swift coverage converts `xccov`
-    output to Sonar's supported format. Keep logic in testable view models
-    and services rather than excluding it.
--   Fork pull requests cannot read `SONAR_TOKEN`. Do not run untrusted code
-    with `pull_request_target`. Run local checks on the fork, and run Sonar
-    on trusted branches or through a reviewed `workflow_run` step.
+-   Do not bypass the hook with `--no-verify`. A broken check is fixed or
+    removed in its own reviewed commit.
+-   No `#[allow]` or `swiftlint:disable` without a comment stating why.
+-   Coverage is measured with `cargo llvm-cov` and Xcode, and reported in
+    pull requests. Domain, storage, encryption, and state machine code
+    aims for at least 80% line coverage; this is reviewed, not a hook
+    threshold.
+-   Keep functions small and logic in testable view models and services,
+    not in views.
 -   Avoid `unsafe` Rust outside FFI-generated code. Any other use needs a
     `SAFETY` comment and review.
 -   Avoid `@unchecked Sendable` and `nonisolated(unsafe)` in Swift unless
     documented.
--   SonarQube complements review and does not replace security review,
+-   Contributors run the same hook. The maintainer runs it again on a pull
+    request's head before merging, after reviewing the code.
+-   Automated checks complement review and do not replace security review,
     real-account tests, or Instruments profiling.
 
 Public repository requirements:
@@ -1756,7 +1764,7 @@ after the proof of concept reveals integration complexity.
 -   Reproducible local build.
 -   UniFFI generation script.
 -   Logging and error model.
--   CI with SonarQube gate, branch protection, and public repo documents.
+-   Local quality gate hook and public repo documents.
 -   Encrypted storage layer and Keychain key lifecycle.
 -   App lifecycle and window skeleton.
 -   Basic design tokens and navigation shell.
@@ -1766,8 +1774,8 @@ after the proof of concept reveals integration complexity.
 -   One command or documented command sequence builds the app.
 -   Generated bindings are reproducible.
 -   No protocol logic is embedded in SwiftUI views.
--   The quality gate runs and passes on the default branch.
--   The encryption test suite runs in CI.
+-   The local quality gate runs and passes on `main`.
+-   The encryption test suite runs in the local gate.
 
 ### Phase 2 --- Pairing and session lifecycle
 
@@ -1897,7 +1905,7 @@ after the proof of concept reveals integration complexity.
 
 -   Clean installation and upgrade verified.
 -   Release artifacts, checksums, provenance, and SBOM published.
--   The quality gate passes on the release commit.
+-   The local quality gate passes on the release commit.
 -   Known limitations are disclosed.
 
 ------------------------------------------------------------------------
@@ -1915,7 +1923,7 @@ THIRD-PARTY-NOTICES
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 SECURITY.md
-sonar-project.properties
+.githooks/pre-push
 docs/
 ├── ARCHITECTURE.md
 ├── FEATURES.md
@@ -1956,7 +1964,7 @@ Do not silently change architecture through implementation details.
 -   [ ] Enable push protection, secret scanning, and a gitleaks hook
     before the first push.
 -   [ ] Add `LICENSE` and community documents.
--   [ ] Configure SonarQube, coverage, and branch protection.
+-   [x] Add local quality gate hook.
 -   [ ] Create Xcode macOS app target.
 -   [ ] Create Rust workspace.
 -   [x] Upgrade local Rust to 1.99.1 (upstream MSRV is 1.95).
@@ -1964,7 +1972,6 @@ Do not silently change architecture through implementation details.
 -   [ ] Pin `whatsapp-rust` version/commit.
 -   [ ] Pin UniFFI version.
 -   [ ] Create build scripts.
--   [ ] Add CI checks.
 -   [ ] Add documentation skeleton.
 
 ### Epic B --- Protocol proof of concept
@@ -2045,7 +2052,7 @@ Do not silently change architecture through implementation details.
   complexity              exposed or lost         closed, tests, external
                                                   review, disclosed risks
 
-  macOS unqualified       Runtime defects on the  NIMQO macOS CI and
+  macOS unqualified       Runtime defects on the  Local macOS gate and
   upstream                only target platform    real-account regression
 
   Keychain loss           Local history lost      Onboarding disclosure,
@@ -2056,37 +2063,18 @@ Do not silently change architecture through implementation details.
                                                   remains buildable; seek
                                                   legal review
 
-  Public CI compromise    Stolen signing          No secrets for forks,
-                          credentials             pinned actions, protected
-                                                  release environment
+  Signing credential      Stolen signing          Keychain only, never in
+  exposure                credentials             repo; review before
+                                                  running contributed code
 
-  Sonar gate blocks       Slow delivery or        Testable architecture;
-  delivery                gaming of metrics       justified exclusions only
+  No hosted CI            Checks skipped or       Versioned pre-push hook,
+                          environment-specific    re-run before merge and
+                                                  release
 
-  UniFFI lifecycle bugs   Crashes or leaks        Small API surface,
-                                                  contract tests,
-                                                  lifecycle review
+  Quality gate blocks     Slow delivery or        Testable architecture;
+  delivery                gaming of checks        justified suppressions
+                                                  only
 
-  SwiftUI performance     UI stutter              Virtualization,
-                                                  Instruments, avoid
-                                                  heavy glass in lists
-
-  Background lifecycle    Missed messages         Explicit app lifecycle
-  issues                                          and sleep/wake tests
-
-  Media pipeline          Memory/battery issues   Size limits, streaming,
-  complexity                                      lazy loading, staged
-                                                  implementation
-
-  Calls complexity        Large scope increase    Separate milestone and
-                                                  optional feature gate
-
-  App Store constraints   Distribution blocked    Start with Developer ID
-                                                  distribution; assess
-                                                  store separately
-
-  Dependency compromise   Supply-chain risk       Lockfile, audit, deny,
-                                                  SBOM, signed release
   -----------------------------------------------------------------------
 
 ------------------------------------------------------------------------
@@ -2148,7 +2136,7 @@ dependable native messaging client with a complete core experience.
 -   Encrypted databases, media, and thumbnails.
 -   Privacy-safe logging.
 -   Tests and signed beta packaging.
--   SonarQube quality gate passing on the release commit.
+-   Local quality gate passing on the release commit.
 
 ### MVP should not be blocked by
 
@@ -2167,8 +2155,8 @@ dependable native messaging client with a complete core experience.
 
 The first implementation sprint should follow this order:
 
-1.  Create the repository, documentation skeleton, and CI with the
-    SonarQube gate. Upgrade Rust to at least 1.95.
+1.  Create the repository, documentation skeleton, and local quality
+    gate hook. Upgrade Rust to at least 1.95.
 2.  Inspect the current upstream `whatsapp-rust` source and examples.
 3.  Pin the exact upstream revision and confirm its MIT license.
 4.  Create a minimal Rust binary that pairs and exchanges text messages
@@ -2243,7 +2231,7 @@ on top of stable state and API contracts.
 
   Repository                          github.com/wprimadi/nimqo (public)
 
-  Quality                             Mandatory SonarQube quality gate
+  Quality                             Mandatory local gate (pre-push)
 
   First release scope                 Core messaging MVP
 
@@ -2290,8 +2278,6 @@ findings. Any change should be recorded in an ADR.
 
 -   [`whatsapp-rust` support qualification](https://github.com/oxidezap/whatsapp-rust/blob/main/agent_docs/support.md)
 -   [SQLCipher documentation](https://www.zetetic.net/sqlcipher/documentation/)
--   [SonarQube Rust analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/languages/rust)
--   [SonarQube Swift analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/languages/swift)
 -   [RustSec Advisory Database](https://rustsec.org/)
 -   [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit)
 -   [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
@@ -2313,4 +2299,4 @@ provide a focused, testable, and efficient core.
 The first milestone is not a polished screenshot. It is a repeatable
 proof that NIMQO can pair, persist its session **in encrypted storage**,
 reconnect, send and receive messages, and remain responsive through the
-Swift/Rust boundary, with the quality gate passing.
+Swift/Rust boundary, with the local quality gate passing.

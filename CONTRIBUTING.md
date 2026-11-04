@@ -5,14 +5,15 @@ changes; architectural changes need an ADR in [`docs/ADR`](docs/ADR).
 
 ## Ground rules
 
-- Every pull request must pass CI, including the SonarQube quality gate. Do
-  not suppress an issue without a written justification in the pull request.
+- Every push must pass the local quality gate in `.githooks/pre-push`. There
+  is no hosted CI. Do not bypass it with `--no-verify`, and justify any
+  `#[allow]` or `swiftlint:disable` in a comment.
 - Never commit secrets, session files, databases, test account data, or real
   conversations. Fixtures must be synthetic.
 - Never persist message, session, or media data without encryption.
 - Report security issues through [SECURITY.md](SECURITY.md), not here.
-- Tests that need a real WhatsApp account never run in CI. The default test
-  suite must run without any account or secret.
+- Tests that need a real WhatsApp account are never part of the quality
+  gate. The default test suite must run without any account or secret.
 
 ## Commits
 
@@ -24,15 +25,17 @@ changes; architectural changes need an ADR in [`docs/ADR`](docs/ADR).
 
 ## Local checks
 
-Scan for secrets before every push. CI runs the same check:
+Enable the quality gate once per clone. It runs on every `git push`:
 
 ```sh
-brew install gitleaks
-gitleaks git --redact
+brew install gitleaks cargo-audit cargo-deny swiftlint swiftformat
+git config core.hooksPath .githooks
 ```
 
-Build and test commands will be documented here once the Rust workspace and
-Xcode project exist.
+The gate scans pushed commits for secrets and, once the code exists, runs
+rustfmt, Clippy, tests, `cargo audit`, `cargo deny`, SwiftFormat, and
+SwiftLint. Build commands will be documented here once the Rust workspace
+and Xcode project exist.
 
 ## Code of conduct
 

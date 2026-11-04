@@ -24,7 +24,7 @@ decisions already made.
 - Native macOS, requiring macOS 14 Sonoma or later.
 - All local data encrypted at rest from the first run.
 - No telemetry.
-- Every merge passes a SonarQube quality gate.
+- Every push passes a local quality gate (`.githooks/pre-push`).
 
 ## Contributing
 
