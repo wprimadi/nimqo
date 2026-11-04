@@ -21,7 +21,7 @@ anyhow = "1"
 async-trait = "0.1"
 log = "0.4"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
-qrcode = { version = "0.14", default-features = false }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal", "time"] }
 
 [lints]

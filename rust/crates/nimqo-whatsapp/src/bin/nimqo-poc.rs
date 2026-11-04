@@ -8,8 +8,10 @@
 //! Safety for real accounts: it never auto-replies, never sends read
 //! receipts, never sends to anyone but the peer, and rate-limits sends.
 
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::path::PathBuf;
+use std::io::Write;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -18,7 +20,7 @@ use nimqo_whatsapp::inbox::Inbox;
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::vault::{self, MasterKey};
 use qrcode::QrCode;
-use qrcode::render::unicode::Dense1x2;
+use qrcode::render::svg;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust_sqlite_storage::{SqliteDatabase, SqliteDatabaseConfig};
@@ -68,20 +70,27 @@ async fn run(peer_number: &str) -> Result<()> {
     drop(master);
 
     let filter = Peer::parse(peer_number)?;
+    let qr_page = dir.join("pair-qr.html");
+    let (qr_for_code, qr_for_connect) = (qr_page.clone(), qr_page.clone());
     let bot = Bot::builder()
         .with_backend(store)
         .with_inbound_durability_hook(inbox)
-        .on_qr_code(|code, timeout| async move {
-            match QrCode::new(code.as_bytes()) {
-                Ok(qr) => println!(
-                    "\nScan within {}s: WhatsApp > Linked devices > Link a device\n{}",
-                    timeout.as_secs(),
-                    qr.render::<Dense1x2>().quiet_zone(true).build()
-                ),
-                Err(e) => error!("cannot render QR code: {e}"),
+        .on_qr_code(move |code, timeout| {
+            let page = qr_for_code.clone();
+            async move {
+                if let Err(e) = show_qr(&page, &code, timeout) {
+                    error!("cannot show QR code: {e}");
+                }
             }
         })
-        .on_connected(|_| async { info!("connected; type a line to send it to the test peer") })
+        .on_connected(move |_| {
+            let page = qr_for_connect.clone();
+            async move {
+                // Replace the pairing secret with a plain notice for the open tab.
+                let _ = write_private(&page, &html_page("Connected. You can close this tab."));
+                info!("connected; type a line to send it to the test peer");
+            }
+        })
         .on_logged_out(|_| async { error!("logged out: device was unlinked") })
         .on_message(move |ctx| {
             let shown = filter.matches(&ctx.info.source).then(|| {
@@ -132,6 +141,53 @@ async fn run(peer_number: &str) -> Result<()> {
         }
     }
     info!("shutting down: {:?}", handle.shutdown().await);
+    let _ = std::fs::remove_file(&qr_page);
+    Ok(())
+}
+
+/// Renders the QR as SVG in a self-refreshing local page and opens it once.
+/// Terminal block rendering proved unscannable (inverted colors on dark
+/// themes, line spacing gaps), so the browser draws it instead.
+fn show_qr(page: &Path, code: &str, timeout: Duration) -> Result<()> {
+    static OPENED: AtomicBool = AtomicBool::new(false);
+    let svg = QrCode::new(code.as_bytes())
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .render::<svg::Color>()
+        .min_dimensions(360, 360)
+        .build();
+    let body = format!(
+        "{svg}<p>Scan within {}s: WhatsApp &gt; Linked devices &gt; Link a device</p>",
+        timeout.as_secs()
+    );
+    write_private(page, &html_page(&body))?;
+    if !OPENED.swap(true, Ordering::Relaxed) {
+        std::process::Command::new("open").arg(page).status()?;
+    }
+    info!("QR code shown in your browser (refreshes automatically)");
+    Ok(())
+}
+
+fn html_page(body: &str) -> String {
+    format!(
+        "<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=2>\
+         <title>NIMQO pairing</title><body style=\"background:#fff;color:#000;\
+         display:grid;place-items:center;height:100vh;margin:0;font:16px system-ui\">\
+         <div style=text-align:center>{body}</div>"
+    )
+}
+
+/// Owner-only file, replaced atomically so a refresh never reads half a page.
+fn write_private(path: &Path, contents: &str) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    f.write_all(contents.as_bytes())?;
+    drop(f);
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 
