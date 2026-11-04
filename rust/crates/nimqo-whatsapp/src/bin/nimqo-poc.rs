@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use log::{error, info, warn};
+use nimqo_whatsapp::inbox::Fault;
 use nimqo_whatsapp::media;
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores;
@@ -50,11 +51,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(peer_number: &str) -> Result<()> {
-    let fail_commits = std::env::var_os("NIMQO_FAIL_COMMIT").is_some();
-    if fail_commits {
-        warn!("NIMQO_FAIL_COMMIT set: no message will be acknowledged this run");
-    }
-    let stores = stores::open(Peer::parse(peer_number)?, fail_commits).await?;
+    let stores = stores::open(Peer::parse(peer_number)?, fault_from_env()?).await?;
     info!(
         "encrypted stores ready; {} stored peer message(s)",
         stores.inbox.count()?
@@ -306,4 +303,23 @@ fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
     drop(f);
     std::fs::rename(&tmp, path)?;
     Ok(())
+}
+
+/// `NIMQO_FAIL_COMMIT=1` refuses commits; `NIMQO_COMMIT_DELAY=<secs>` holds
+/// them so the process can be killed between decrypt and commit.
+fn fault_from_env() -> Result<Fault> {
+    if std::env::var_os("NIMQO_FAIL_COMMIT").is_some() {
+        warn!("NIMQO_FAIL_COMMIT set: no peer message will be acknowledged this run");
+        return Ok(Fault::RefuseCommits);
+    }
+    match std::env::var("NIMQO_COMMIT_DELAY") {
+        Ok(secs) => {
+            let secs: u64 = secs
+                .parse()
+                .context("NIMQO_COMMIT_DELAY must be whole seconds")?;
+            warn!("NIMQO_COMMIT_DELAY set: peer messages are committed after {secs}s");
+            Ok(Fault::DelayCommits(Duration::from_secs(secs)))
+        }
+        Err(_) => Ok(Fault::None),
+    }
 }

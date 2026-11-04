@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use whatsapp_rust_sqlite_storage::{SqliteDatabase, SqliteDatabaseConfig, SqliteStore};
 
-use crate::inbox::Inbox;
+use crate::inbox::{Fault, Inbox};
 use crate::peer::Peer;
 use crate::vault::{self, Key, MasterKey};
 
@@ -27,7 +27,7 @@ pub struct Stores {
 ///
 /// # Errors
 /// The data directory, Keychain, or a database cannot be opened.
-pub async fn open(peer: Peer, fail_commits: bool) -> Result<Stores> {
+pub async fn open(peer: Peer, fault: Fault) -> Result<Stores> {
     let dir = data_dir()?;
     let master = MasterKey::load_or_create(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)?;
 
@@ -41,7 +41,7 @@ pub async fn open(peer: Peer, fail_commits: bool) -> Result<Stores> {
         &dir.join("app.db"),
         &master.derive(vault::APP_DB),
         peer,
-        fail_commits,
+        fault,
     )?;
     let media_dir = private_dir(&dir.join("media"))?;
     Ok(Stores {

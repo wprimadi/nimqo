@@ -7,6 +7,7 @@
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use diesel::sql_types::{BigInt, Text};
@@ -18,11 +19,20 @@ use whatsapp_rust::{Client, InboundDurabilityHook};
 use crate::peer::Peer;
 use crate::vault::Key;
 
+/// Fault injection for redelivery tests. Always `None` outside tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    None,
+    /// Refuse every commit.
+    RefuseCommits,
+    /// Wait before committing, leaving time to `kill -9` the process.
+    DelayCommits(Duration),
+}
+
 pub struct Inbox {
     conn: Arc<Mutex<SqliteConnection>>,
     peer: Peer,
-    /// Test knob: refuse every commit to prove redelivery. Never set in use.
-    fail_commits: bool,
+    fault: Fault,
 }
 
 impl Inbox {
@@ -30,7 +40,7 @@ impl Inbox {
     ///
     /// # Errors
     /// The database cannot be opened, keyed, or migrated.
-    pub fn open(path: &Path, key: &Key, peer: Peer, fail_commits: bool) -> Result<Self> {
+    pub fn open(path: &Path, key: &Key, peer: Peer, fault: Fault) -> Result<Self> {
         let url = path.to_str().context("database path is not UTF-8")?;
         let mut conn = SqliteConnection::establish(url)?;
         crate::db::apply_key(&mut conn, key).map_err(|e| anyhow!("{e}"))?;
@@ -48,7 +58,7 @@ impl Inbox {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
             peer,
-            fail_commits,
+            fault,
         })
     }
 
@@ -75,9 +85,6 @@ impl Inbox {
 #[async_trait::async_trait]
 impl InboundDurabilityHook for Inbox {
     async fn on_messages(&self, _client: Arc<Client>, batch: &[InboundMessage]) -> Result<()> {
-        if self.fail_commits {
-            return Err(anyhow!("commit refused by NIMQO_FAIL_COMMIT"));
-        }
         // Only the allowlisted chat is stored; other chats are acknowledged
         // without being read or kept.
         let rows: Vec<_> = batch
@@ -95,6 +102,14 @@ impl InboundDurabilityHook for Inbox {
             .collect();
         if rows.is_empty() {
             return Ok(());
+        }
+        match self.fault {
+            Fault::None => {}
+            Fault::RefuseCommits => return Err(anyhow!("commit refused by fault injection")),
+            Fault::DelayCommits(d) => {
+                log::warn!("holding {} message(s) uncommitted for {d:?}", rows.len());
+                tokio::time::sleep(d).await;
+            }
         }
         let conn = Arc::clone(&self.conn);
         tokio::task::spawn_blocking(move || -> Result<()> {

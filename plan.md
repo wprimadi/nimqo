@@ -1987,7 +1987,7 @@ Do not silently change architecture through implementation details.
 -   [x] Send a text message.
 -   [x] Test reconnect.
 -   [x] Test media transfer (images).
--   [ ] Document limitations.
+-   [x] Document limitations (`docs/UPSTREAM-COMPATIBILITY.md`).
 
 ### Epic C --- Swift/Rust bridge
 

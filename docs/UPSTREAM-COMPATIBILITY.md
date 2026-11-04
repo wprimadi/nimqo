@@ -32,9 +32,34 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | Send an image to the test peer with `/img` | Pass | 2026-11-05 |
 | SwiftUI app through UniFFI: session restored, status shown, reconnect after Wi-Fi off | Pass | 2026-11-05 |
 
+## Limitations register
+
+Last verified at the upstream commit above. "Verified" means a real-account
+run on macOS; everything else is untested here, whatever upstream documents.
+
+| Feature | Upstream API | NIMQO adapter | Result | Known limitation |
+| --- | --- | --- | --- | --- |
+| QR pairing | `Bot::on_qr_code` | `nimqo-poc`, `nimqo-ffi` | Verified | Pairing code login not tried |
+| Session store | `SqliteDatabase` + `with_connection_init` | `stores::open` (SQLCipher) | Verified | Store uses device id 1; one linked device per data dir |
+| Inbound durability | `InboundDurabilityHook` | `inbox::Inbox` | Verified (refused commit); hard kill pending | Peer-only storage in Phase 0; other chats are acknowledged unstored |
+| Text send/receive | `Client::send_message`, `on_message` | `nimqo-poc` | Verified | One-to-one only; groups untested |
+| Images | `Client::download`, `Client::upload`, `media::image_message` | `nimqo-poc`, `media` (ADR 0006) | Verified | Whole file in memory, 16 MiB cap; video, audio, documents untested |
+| Reconnect | built in | none | Verified (Wi-Fi off ~30 s) | Sleep/wake and long outages untested |
+| Swift bridge | n/a | `nimqo-ffi` (UniFFI 0.32) | Verified | Status and QR only; see ADR 0002 |
+| Proxy, VPN, custom root CA | `ureq-client`, `tokio-transport` | none | Untested | Plan 9.3 requires a recorded result |
+| History sync, receipts, presence | various | none | Untested | Phase 3 |
+
+Upstream is pinned to a `main` commit (crate version 0.7.0), not a release,
+and is pre-1.0 with breaking changes between releases. Every upstream bump
+re-runs this table.
+
 ## Known issues
 
 - Terminal-rendered QR codes were not scannable; the QR is shown as SVG in
   a local browser page instead.
 - The unsigned development binary may trigger a Keychain access prompt after
   each rebuild. Signed builds will not.
+- `swift run` starts the app without a bundle, so macOS treats it as a
+  background tool. The app sets a regular activation policy itself.
+- Running `nimqo-poc` and the app at the same time makes two connections
+  for one linked device. Run one at a time.

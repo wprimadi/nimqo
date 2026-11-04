@@ -6,6 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use nimqo_whatsapp::inbox::Fault;
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores;
 use whatsapp_rust::bot::BotHandle;
@@ -96,7 +97,7 @@ impl Drop for Core {
 }
 
 async fn connect(test_peer: &str, listener: Arc<dyn CoreListener>) -> anyhow::Result<BotHandle> {
-    let stores = stores::open(Peer::parse(test_peer)?, false).await?;
+    let stores = stores::open(Peer::parse(test_peer)?, Fault::None).await?;
     let (on_qr, on_up, on_down, on_out) = (
         Arc::clone(&listener),
         Arc::clone(&listener),
