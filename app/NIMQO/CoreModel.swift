@@ -326,43 +326,6 @@ private struct SystemObservers {
     }
 }
 
-/// UI model for one row in the chat list.
-struct ChatSummary: Identifiable, Hashable {
-    let id: String
-    let title: String
-    let isGroup: Bool
-    let preview: String
-    let lastActivity: Date
-}
-
-extension ChatSummary {
-    init(_ chat: Chat) {
-        id = chat.id
-        title = chat.name ?? chat.phone ?? (chat.isGroup ? "Group" : "Unknown contact")
-        isGroup = chat.isGroup
-        let text = ChatMessage.describe(kind: chat.lastKind, body: chat.lastBody)
-        preview = chat.lastFromMe ? "You: \(text)" : text
-        lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
-    }
-}
-
-extension ChatMessage {
-    /// Text, or a label for content the timeline cannot show yet.
-    static func describe(kind: MessageKind, body: String?) -> String {
-        let label = switch kind {
-        case .text: ""
-        case .image: "Photo"
-        case .video: "Video"
-        case .audio: "Audio"
-        case .document: "Document"
-        case .sticker: "Sticker"
-        case .unsupported: "Message not supported yet"
-        }
-        guard let body, !body.isEmpty else { return label }
-        return label.isEmpty || kind == .document ? body : "\(label): \(body)"
-    }
-}
-
 /// Receives callbacks on Rust worker threads and hops to the main actor.
 private final class Listener: CoreListener, Sendable {
     private weak let model: CoreModel?

@@ -30,7 +30,9 @@ struct MessageBubble: View {
     }
 
     private var sender: String {
-        message.fromMe ? "You" : message.senderName ?? "Unknown"
+        // ponytail: push names only until contacts are mapped; "~" marks them
+        // as self-chosen.
+        message.fromMe ? "You" : message.senderName.map { "~\($0)" } ?? "Unknown"
     }
 
     private var time: Date {
