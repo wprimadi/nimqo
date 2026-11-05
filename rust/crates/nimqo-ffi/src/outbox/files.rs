@@ -129,7 +129,8 @@ impl Sender {
             self.client
                 .upload(bytes.to_vec(), media_type, UploadOptions::new())
                 .await
-                .map_err(|e| format!("upload failed: {e:#}"))
+                // The error can carry the media server URL and its auth token.
+                .map_err(|_| "upload failed".to_owned())
         };
         Ok(match p.kind.as_str() {
             "image" => {
