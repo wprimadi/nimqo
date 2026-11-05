@@ -160,6 +160,14 @@ mod spoofing {
         let reply = rows.iter().find(|r| r.id == "r1").unwrap();
         assert_eq!(reply.quote_body.as_deref(), Some("the real text"));
         assert_eq!(reply.quote_from_me, Some(true));
+        // Another sender reusing the id: no longer attributable.
+        inbox.insert_for_test(chat, "62999@s.whatsapp.net", "mine");
+        let rows = inbox.messages(chat, 10).unwrap();
+        let reply = rows.iter().find(|r| r.id == "r1").unwrap();
+        assert_eq!(
+            (reply.quote_body.as_deref(), reply.quote_from_me),
+            (Some("forged"), None)
+        );
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

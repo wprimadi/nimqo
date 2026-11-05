@@ -230,11 +230,11 @@ impl Inbox {
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = m.chat AND x.target = m.id) AS reactions
                FROM messages m
-               -- The first stored message with that id; a later one reusing
-               -- it cannot take its place.
+               -- Only an unambiguous match: in groups another member can
+               -- reuse an id, and then the quote stays unattributed.
                LEFT JOIN messages q ON q.rowid = (
-                 SELECT rowid FROM messages
-                 WHERE chat = m.chat AND id = m.reply_to ORDER BY rowid LIMIT 1)
+                 SELECT min(rowid) FROM messages
+                 WHERE chat = m.chat AND id = m.reply_to HAVING count(*) = 1)
                WHERE m.chat = ? AND (m.ts < ? OR (m.ts = ? AND m.rowid < ?))
                ORDER BY m.ts DESC, m.rowid DESC LIMIT ?)
              ORDER BY ts, seq",
