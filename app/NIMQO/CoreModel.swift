@@ -187,6 +187,8 @@ final class CoreModel {
                     }
                     self.messages = kept + latest
                     self.messagesChat = id
+                    let (count, older) = (self.messages.count, self.hasOlderMessages)
+                    self.log.notice("chat loaded: \(count, privacy: .public) message(s), older: \(older, privacy: .public)")
                 case let .failure(error): self.log.error("messages: \(String(describing: error), privacy: .private)")
                 }
             }
@@ -207,14 +209,14 @@ final class CoreModel {
         isLoadingOlder = true
         defer { isLoadingOlder = false }
         let cursor = Cursor(timestampSecs: first.timestampSecs, seq: first.seq)
-        log.info("loading an older page")
+        log.notice("loading an older page")
         let result = await Task.detached {
             Result { try core.olderMessages(chatId: id, before: cursor, limit: Self.pageSize) }
         }.value
         guard messagesChat == id, messages.first?.seq == first.seq else { return }
         switch result {
         case let .success(page):
-            log.info("older page: \(page.count, privacy: .public) message(s)")
+            log.notice("older page: \(page.count, privacy: .public) message(s)")
             messages.insert(contentsOf: page, at: 0)
             hasOlderMessages = page.count >= Int(Self.pageSize)
         case let .failure(error):
