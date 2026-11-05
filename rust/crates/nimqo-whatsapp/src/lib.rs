@@ -8,5 +8,6 @@ pub mod lids;
 pub mod media;
 pub mod outbox;
 pub mod peer;
+pub mod reads;
 pub mod stores;
 pub mod vault;

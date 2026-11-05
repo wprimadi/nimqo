@@ -237,7 +237,17 @@ impl Sender {
         }
     }
 
-    /// Delivered and read receipts for own messages.
+    /// Read receipts to the test chat only (the caller checks the chat).
+    /// ponytail: lost when offline; queue them like messages if that matters.
+    pub async fn send_read_receipts(&self, ids: Vec<String>) {
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        if let Err(e) = self.client.mark_as_read(&self.peer, None, &ids).await {
+            log::warn!("read receipts not sent: {}", e.root_cause());
+        }
+    }
+
+    /// Delivered and read receipts for own messages, and reads of received
+    /// messages on the account's other devices.
     pub fn on_receipt(&self, receipt: &Receipt) {
         // Diagnostics only: the type and count, never ids or addresses.
         log::info!(
@@ -245,6 +255,19 @@ impl Sender {
             receipt.r#type,
             receipt.message_ids.len()
         );
+        if receipt.r#type == ReceiptType::ReadSelf {
+            let ids: Vec<&str> = receipt
+                .message_ids
+                .iter()
+                .map(whatsapp_rust::CompactString::as_str)
+                .collect();
+            match self.inbox.read_elsewhere(&receipt.source, &ids) {
+                Ok(Some(chat)) => self.listener.on_chats_changed(vec![chat]),
+                Ok(None) => {}
+                Err(e) => log::warn!("read state not stored: {e:#}"),
+            }
+            return;
+        }
         let to = match receipt.r#type {
             ReceiptType::Delivered => Status::Delivered,
             ReceiptType::Read | ReceiptType::Played => Status::Read,

@@ -64,6 +64,8 @@ pub struct Chat {
     pub last_kind: MessageKind,
     pub last_body: Option<String>,
     pub last_from_me: bool,
+    /// Received messages not read yet.
+    pub unread: u32,
 }
 
 impl From<ChatRow> for Chat {
@@ -77,6 +79,7 @@ impl From<ChatRow> for Chat {
             last_kind: MessageKind::parse(&r.kind),
             last_body: r.body,
             last_from_me: r.from_me,
+            unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
             id: r.chat,
         }
     }

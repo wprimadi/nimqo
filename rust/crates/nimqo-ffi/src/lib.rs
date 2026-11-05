@@ -210,12 +210,39 @@ impl Core {
         self.sender.peer_chat()
     }
 
+    /// Marks the chat read here. Only the test chat also tells the sender
+    /// (read receipts); every other chat stays read-only toward WhatsApp.
+    ///
+    /// # Errors
+    /// `Storage` if the read state cannot be written.
+    pub fn mark_chat_read(&self, chat_id: &str) -> Result<(), CoreError> {
+        let read = self
+            .inbox
+            .mark_chat_read(chat_id)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?;
+        if read.is_empty() {
+            return Ok(());
+        }
+        self.sender
+            .listener
+            .on_chats_changed(vec![chat_id.to_owned()]);
+        if chat_id == self.sender.peer_chat() {
+            let sender = Arc::clone(&self.sender);
+            let ids: Vec<String> = read.into_iter().map(|u| u.id).collect();
+            self.runtime
+                .spawn(async move { sender.send_read_receipts(ids).await });
+        }
+        Ok(())
+    }
+
     /// Queues a text message and starts sending it. Returns once it is
     /// stored; delivery state arrives through `on_chats_changed`.
     ///
     /// # Errors
     /// `SendRefused` for anything but the test chat, an empty or too long
-    /// message, or a burst; `Storage` if it cannot be queued.
+    /// message, or a full queue; `Storage` if it cannot be queued.
     pub fn send_text(&self, chat_id: &str, text: &str) -> Result<(), CoreError> {
         self.sender.enqueue(chat_id, text)?;
         let sender = Arc::clone(&self.sender);

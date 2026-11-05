@@ -58,6 +58,9 @@ pub struct ChatRow {
     pub body: Option<String>,
     #[diesel(sql_type = Bool)]
     pub from_me: bool,
+    /// Received messages not yet read here or on another device.
+    #[diesel(sql_type = BigInt)]
+    pub unread: i64,
 }
 
 #[derive(Debug, diesel::QueryableByName)]
@@ -117,7 +120,9 @@ impl Inbox {
                  THEN (SELECT name FROM chat_names WHERE chat = m.chat) ELSE
                  (SELECT n.sender_name FROM messages n
                   WHERE n.chat = m.chat AND n.from_me = 0 AND n.sender_name <> ''
-                  ORDER BY n.ts DESC LIMIT 1) END AS name
+                  ORDER BY n.ts DESC LIMIT 1) END AS name,
+               (SELECT COUNT(*) FROM messages u
+                WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread
              FROM messages m
              WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
@@ -184,6 +189,7 @@ impl Inbox {
             kind: "text".into(),
             sender_name: String::new(),
             status: "",
+            read: false,
         };
         self.store(vec![row]).unwrap();
     }
@@ -246,8 +252,8 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
     for r in rows {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
-               (chat, sender, id, ts, body, from_me, kind, sender_name, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               (chat, sender, id, ts, body, from_me, kind, sender_name, status, read)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -258,10 +264,41 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Text, _>(r.kind)
         .bind::<Text, _>(r.sender_name)
         .bind::<Text, _>(r.status)
+        .bind::<Bool, _>(r.read)
         .execute(c)?;
     }
     Ok(())
 }
+
+/// Plain migrations after version 3, each applied with its version bump.
+const LATER: &[(i64, &[&str])] = &[
+    // Outbox: own messages carry a delivery state and send attempts.
+    (
+        4,
+        &[
+            "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE messages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+            "CREATE INDEX messages_outbox ON messages (status) WHERE status = 'pending'",
+        ],
+    ),
+    // Own messages sent from the phone had no state to show; LID -> phone
+    // number pairs learned from history.
+    (
+        5,
+        &[
+            "UPDATE messages SET status = 'sent' WHERE from_me = 1 AND status = ''",
+            "CREATE TABLE lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL)",
+        ],
+    ),
+    // Unread tracking; everything stored before it counts as read.
+    (
+        6,
+        &[
+            "ALTER TABLE messages ADD COLUMN read INTEGER NOT NULL DEFAULT 1",
+            "CREATE INDEX messages_unread ON messages (chat) WHERE read = 0",
+        ],
+    ),
+];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
 fn migrate(conn: &mut SqliteConnection) -> Result<()> {
@@ -347,26 +384,12 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
                 diesel::sql_query(sql).execute(c)?;
             }
         }
-        if version < 4 {
-            // Outbox: own messages carry a delivery state and send attempts.
-            for sql in [
-                "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT ''",
-                "ALTER TABLE messages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
-                "CREATE INDEX messages_outbox ON messages (status) WHERE status = 'pending'",
-                "PRAGMA user_version = 4",
-            ] {
-                diesel::sql_query(sql).execute(c)?;
-            }
-        }
-        if version < 5 {
-            for sql in [
-                // Own messages sent from the phone had no state to show.
-                "UPDATE messages SET status = 'sent' WHERE from_me = 1 AND status = ''",
-                // LID -> phone number pairs learned from history.
-                "CREATE TABLE lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL)",
-                "PRAGMA user_version = 5",
-            ] {
-                diesel::sql_query(sql).execute(c)?;
+        for (target, steps) in LATER {
+            if version < *target {
+                for sql in *steps {
+                    diesel::sql_query(*sql).execute(c)?;
+                }
+                diesel::sql_query(format!("PRAGMA user_version = {target}")).execute(c)?;
             }
         }
         Ok::<_, diesel::result::Error>(())
@@ -386,6 +409,7 @@ pub(crate) struct Row {
     /// Delivery state of own messages; never "pending", which belongs to
     /// the outbox and would make it send the message again.
     pub status: &'static str,
+    pub read: bool,
 }
 
 impl Row {
@@ -406,6 +430,7 @@ impl Row {
             sender_name: m.info.push_name.to_string(),
             // Sent from the phone: the server has it, receipts move it on.
             status: if src.is_from_me { "sent" } else { "" },
+            read: src.is_from_me,
         })
     }
 }
@@ -429,7 +454,7 @@ pub(crate) const ME: &str = "me";
 /// One chat per person: a one-to-one chat addressed by LID is filed under
 /// the phone number when the message carries it, so both addressings of the
 /// same contact land in the same chat.
-fn chat_key(src: &MessageSource) -> String {
+pub(crate) fn chat_key(src: &MessageSource) -> String {
     if src.is_group || src.chat.is_pn() {
         return src.chat.to_non_ad_string();
     }
@@ -489,6 +514,7 @@ mod tests {
             kind: "text".into(),
             sender_name: name.into(),
             status: "",
+            read: from_me,
         }
     }
 

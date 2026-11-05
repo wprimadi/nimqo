@@ -66,7 +66,7 @@ struct CoreModelTests {
         func chat(name: String?, phone: String?, group: Bool, kind: MessageKind, body: String?) -> ChatSummary {
             ChatSummary(Chat(
                 id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
-                lastKind: kind, lastBody: body, lastFromMe: false
+                lastKind: kind, lastBody: body, lastFromMe: false, unread: 3
             ))
         }
         #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: "hi").title == "+62 ~Ana")
@@ -77,6 +77,7 @@ struct CoreModelTests {
         #expect(chat(name: nil, phone: nil, group: false, kind: .image, body: "beach").preview == "Photo: beach")
         #expect(chat(name: nil, phone: nil, group: false, kind: .document, body: "a.pdf").preview == "a.pdf")
         #expect(chat(name: nil, phone: nil, group: false, kind: .sticker, body: nil).preview == "Sticker")
+        #expect(chat(name: nil, phone: nil, group: false, kind: .text, body: nil).unread == 3)
     }
 
     @Test func startDoesNothingUnderTests() {

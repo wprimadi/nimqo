@@ -74,7 +74,18 @@ struct ChatRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(chat.preview).foregroundStyle(.secondary).lineLimit(1)
+            HStack {
+                Text(chat.preview).foregroundStyle(.secondary).lineLimit(1)
+                if chat.unread > 0 {
+                    Spacer()
+                    Text(chat.unread > 99 ? "99+" : "\(chat.unread)")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .background(Capsule().fill(.tint))
+                        .accessibilityLabel("\(chat.unread) unread")
+                }
+            }
         }
         .accessibilityElement(children: .combine)
     }

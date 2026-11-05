@@ -86,6 +86,12 @@ final class CoreModel {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.stop() }
         }
+        // Returning to the app reads the open chat.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.loadMessages() }
+        }
     }
 
     /// Nothing connects before the user has read the disclosure (plan 21).
@@ -175,7 +181,14 @@ final class CoreModel {
             messages = []
             return
         }
+        // Only what is on screen in the active app counts as read.
+        let reading = NSApp?.isActive == true
         Task.detached {
+            if reading {
+                do { try core.markChatRead(chatId: id) } catch {
+                    self.log.error("mark read: \(String(describing: error), privacy: .private)")
+                }
+            }
             let result = Result { try core.messages(chatId: id) }
             await MainActor.run {
                 // A newer selection may have won the race.

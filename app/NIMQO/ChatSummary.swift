@@ -8,6 +8,7 @@ struct ChatSummary: Identifiable, Hashable {
     let isGroup: Bool
     let preview: String
     let lastActivity: Date
+    let unread: Int
 }
 
 extension ChatSummary {
@@ -30,6 +31,7 @@ extension ChatSummary {
         let text = ChatMessage.describe(kind: chat.lastKind, body: chat.lastBody)
         preview = chat.lastFromMe ? "You: \(text)" : text
         lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
+        unread = Int(chat.unread)
     }
 }
 
