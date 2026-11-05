@@ -154,3 +154,13 @@ impl From<MessageRow> for ChatMessage {
         }
     }
 }
+
+/// A message found by local search.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SearchHit {
+    pub chat_id: String,
+    pub seq: i64,
+    pub timestamp_secs: i64,
+    pub body: String,
+    pub from_me: bool,
+}

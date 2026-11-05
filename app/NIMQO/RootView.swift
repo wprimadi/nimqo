@@ -26,21 +26,18 @@ struct RootView: View {
 
 struct MainView: View {
     let model: CoreModel
+    @State private var query = ""
 
     var body: some View {
         NavigationSplitView {
-            List(model.chats, selection: Bindable(model).selectedChat) { chat in
-                ChatRow(chat: chat, avatars: model.avatars)
-            }
-            .overlay {
-                if model.chats.isEmpty {
-                    ContentUnavailableView(
-                        "No chats yet",
-                        systemImage: "bubble.left.and.bubble.right",
-                        description: Text("New messages appear here as they arrive.")
-                    )
+            Group {
+                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    chatList
+                } else {
+                    SearchResults(model: model, query: query)
                 }
             }
+            .searchable(text: $query, placement: .sidebar, prompt: "Search messages")
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 280)
         } detail: {
             if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
@@ -63,6 +60,21 @@ struct MainView: View {
                 }
             } else {
                 ContentUnavailableView("Select a chat", systemImage: "text.bubble")
+            }
+        }
+    }
+
+    private var chatList: some View {
+        List(model.chats, selection: Bindable(model).selectedChat) { chat in
+            ChatRow(chat: chat, avatars: model.avatars)
+        }
+        .overlay {
+            if model.chats.isEmpty {
+                ContentUnavailableView(
+                    "No chats yet",
+                    systemImage: "bubble.left.and.bubble.right",
+                    description: Text("New messages appear here as they arrive.")
+                )
             }
         }
     }

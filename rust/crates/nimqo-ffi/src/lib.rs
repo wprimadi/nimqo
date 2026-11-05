@@ -27,7 +27,7 @@ mod chats;
 mod outbox;
 mod state;
 
-pub use chats::{Chat, ChatMessage, Delivery, MessageKind};
+pub use chats::{Chat, ChatMessage, Delivery, MessageKind, SearchHit};
 
 pub use state::ConnectionState;
 use state::Input;
@@ -230,6 +230,27 @@ impl Core {
             .map_err(err(|detail| CoreError::Storage { detail }))?
             .into_iter()
             .map(ChatMessage::from)
+            .collect())
+    }
+
+    /// Messages containing `text` in any chat, newest first, at most 100.
+    /// Runs on this Mac only.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read.
+    pub fn search_messages(&self, text: &str) -> Result<Vec<SearchHit>, CoreError> {
+        Ok(self
+            .inbox
+            .search(text, 100)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(|h| SearchHit {
+                chat_id: h.chat,
+                seq: h.seq,
+                timestamp_secs: h.ts,
+                body: h.body.unwrap_or_default(),
+                from_me: h.from_me,
+            })
             .collect())
     }
 

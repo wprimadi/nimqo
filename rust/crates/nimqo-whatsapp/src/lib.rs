@@ -14,6 +14,7 @@ pub mod outbox;
 pub mod peer;
 pub mod reads;
 pub mod replies;
+pub mod search;
 pub mod stores;
 pub mod timers;
 pub mod vault;
