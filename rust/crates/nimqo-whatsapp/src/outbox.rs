@@ -41,8 +41,16 @@ pub struct Pending {
     pub chat: String,
     #[diesel(sql_type = Text)]
     pub id: String,
+    /// Text, a caption, or a document's file name.
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    pub body: Option<String>,
+    /// "text", "image", or "document".
     #[diesel(sql_type = Text)]
-    pub body: String,
+    pub kind: String,
+    /// For files: the media message drafted before upload (type, name,
+    /// thumbnail), completed when sent.
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Binary>)]
+    pub media: Option<Vec<u8>>,
     /// The chat's timer when it was queued, sent with it.
     #[diesel(sql_type = diesel::sql_types::Nullable<BigInt>)]
     pub timer: Option<i64>,
@@ -71,6 +79,55 @@ impl Inbox {
         Ok(())
     }
 
+    /// Stores an own file message as pending: `kind` is "image" or
+    /// "document", `draft` the encoded media message before upload. The
+    /// file itself is stored by `Attachments::store_outgoing`.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn enqueue_file(
+        &self,
+        chat: &str,
+        id: &str,
+        ts: i64,
+        kind: &str,
+        body: Option<&str>,
+        draft: &[u8],
+    ) -> Result<()> {
+        let mut conn = self.lock()?;
+        diesel::sql_query(
+            "INSERT INTO messages (chat, sender, id, ts, body, from_me, kind, status, media,
+               expires_at)
+             VALUES (?, ?, ?, ?, ?, 1, ?, 'pending', ?,
+               ? + (SELECT NULLIF(seconds, 0) FROM chat_timers WHERE chat = ?))",
+        )
+        .bind::<Text, _>(chat)
+        .bind::<Text, _>(ME)
+        .bind::<Text, _>(id)
+        .bind::<BigInt, _>(ts)
+        .bind::<diesel::sql_types::Nullable<Text>, _>(body)
+        .bind::<Text, _>(kind)
+        .bind::<diesel::sql_types::Binary, _>(draft)
+        .bind::<BigInt, _>(ts)
+        .bind::<Text, _>(chat)
+        .execute(&mut *conn)?;
+        Ok(())
+    }
+
+    /// Replaces an own message's draft with the media message as sent.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn set_sent_media(&self, id: &str, media: &[u8]) -> Result<()> {
+        let mut conn = self.lock()?;
+        diesel::sql_query("UPDATE messages SET media = ? WHERE sender = ? AND id = ?")
+            .bind::<diesel::sql_types::Binary, _>(media)
+            .bind::<Text, _>(ME)
+            .bind::<Text, _>(id)
+            .execute(&mut *conn)?;
+        Ok(())
+    }
+
     /// Pending messages, oldest first.
     ///
     /// # Errors
@@ -78,7 +135,7 @@ impl Inbox {
     pub fn pending(&self) -> Result<Vec<Pending>> {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, id, body, expires_at - ts AS timer FROM messages
+            "SELECT chat, id, body, kind, media, expires_at - ts AS timer FROM messages
              WHERE status = 'pending' AND sender = ? ORDER BY ts, rowid",
         )
         .bind::<Text, _>(ME)

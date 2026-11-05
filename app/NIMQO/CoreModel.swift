@@ -44,7 +44,7 @@ final class CoreModel {
         didSet { loadMessages() }
     }
 
-    private var core: Core? {
+    private(set) var core: Core? {
         didSet {
             avatars.core = core
             pictures.core = core

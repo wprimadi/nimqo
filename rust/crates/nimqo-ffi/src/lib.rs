@@ -14,6 +14,7 @@ use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use nimqo_whatsapp::{history, lids};
+use outbox::OutgoingFile;
 use whatsapp_rust::Client;
 use whatsapp_rust::bot::BotHandle;
 use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
@@ -348,6 +349,23 @@ impl Core {
         Ok(())
     }
 
+    /// Queues a photo or document and starts sending it, like `send_text`.
+    ///
+    /// # Errors
+    /// `SendRefused` for anything but the test chat, an empty or too large
+    /// file, a photo that is not JPEG, or a full queue; `Storage` if it
+    /// cannot be queued.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "UniFFI passes records by value"
+    )]
+    pub fn send_file(&self, chat_id: &str, file: OutgoingFile) -> Result<(), CoreError> {
+        self.sender.enqueue_file(chat_id, &file)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
     /// Queues a text message and starts sending it. Returns once it is
     /// stored; delivery state arrives through `on_chats_changed`.
     ///
@@ -626,6 +644,7 @@ async fn connect(
         Arc::clone(&client),
         peer.jid(),
         sender_listener,
+        Arc::clone(&attachments),
         Box::new(move || sender_machine.current() == ConnectionState::Connected),
     ));
     let _ = sender_cell.set(Arc::clone(&sender));

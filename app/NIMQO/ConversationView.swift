@@ -14,13 +14,14 @@ struct ConversationView: View {
     let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
     let send: (@MainActor (String) async -> String?)?
+    let sendFile: @MainActor (URL) async -> String?
 
     var body: some View {
         VStack(spacing: 0) {
             timeline
             if let send {
                 Divider()
-                Composer(send: send)
+                Composer(send: send, sendFile: sendFile)
             }
         }
         .navigationTitle(chat.title)
@@ -92,7 +93,9 @@ struct ConversationView: View {
 
 struct Composer: View {
     let send: @MainActor (String) async -> String?
+    let sendFile: @MainActor (URL) async -> String?
     @State private var text = ""
+    @State private var picking = false
     @State private var refusal: String?
     @State private var isSending = false
     @FocusState private var focused: Bool
@@ -103,6 +106,10 @@ struct Composer: View {
                 Text(refusal).font(.caption).foregroundStyle(.red)
             }
             HStack(alignment: .bottom) {
+                Button("Attach a photo or file", systemImage: "paperclip") { picking = true }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .disabled(isSending)
                 TextField("Message", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1 ... 6)
@@ -116,6 +123,15 @@ struct Composer: View {
         }
         .padding(Theme.Spacing.medium)
         .onAppear { focused = true }
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
+            guard case let .success(url) = result else { return }
+            refusal = nil
+            isSending = true
+            Task {
+                refusal = await sendFile(url)
+                isSending = false
+            }
+        }
     }
 
     private func submit() {

@@ -15,8 +15,10 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nimqo_whatsapp::attachments::Attachments;
 use nimqo_whatsapp::inbox::Inbox;
 use nimqo_whatsapp::lids;
+use nimqo_whatsapp::outbox::Pending;
 use nimqo_whatsapp::outbox::Status;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::{Receipt, ServerAck};
@@ -24,6 +26,9 @@ use whatsapp_rust::types::presence::ReceiptType;
 use whatsapp_rust::{Client, MessageId, SendOptions, SendRequest};
 
 use crate::{CoreError, CoreListener};
+
+mod files;
+pub use files::OutgoingFile;
 
 const MAX_CHARS: usize = 1000;
 /// Spacing between sends (the account is real; no blasting).
@@ -59,6 +64,7 @@ pub struct Sender {
     pub client: Arc<Client>,
     pub peer: Jid,
     pub listener: Arc<dyn CoreListener>,
+    attachments: Arc<Attachments>,
     /// True while the connection is up; sends wait for it otherwise, so a
     /// message written offline does not burn its retries.
     online: Box<dyn Fn() -> bool + Send + Sync>,
@@ -78,6 +84,7 @@ impl Sender {
         client: Arc<Client>,
         peer: Jid,
         listener: Arc<dyn CoreListener>,
+        attachments: Arc<Attachments>,
         online: Box<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
         Self {
@@ -85,6 +92,7 @@ impl Sender {
             client,
             peer,
             listener,
+            attachments,
             online,
             last_send: Mutex::new(None),
             queueing: Mutex::new(()),
@@ -149,7 +157,7 @@ impl Sender {
             }
             let outcome = if p.chat == peer_chat {
                 self.pace().await;
-                self.send(&p.id, p.body, p.timer).await
+                self.send(&p).await
             } else {
                 // Defense in depth: never send to anyone else, whatever is stored.
                 Err("not the test chat".to_owned())
@@ -175,20 +183,31 @@ impl Sender {
         }
     }
 
-    async fn send(&self, id: &str, body: String, timer: Option<i64>) -> Result<(), String> {
-        let id = MessageId::try_from(id.to_owned()).map_err(|e| format!("{e:?}"))?;
+    async fn send(&self, p: &Pending) -> Result<(), String> {
+        let id = MessageId::try_from(p.id.clone()).map_err(|e| format!("{e:?}"))?;
         let mut options = SendOptions::default().with_message_id(id);
         // A chat with disappearing messages on: ours disappear too.
-        if let Some(seconds) = timer.and_then(|t| u32::try_from(t).ok()) {
+        if let Some(seconds) = p.timer.and_then(|t| u32::try_from(t).ok()) {
             options = options.with_ephemeral_expiration(seconds);
         }
-        let request = SendRequest::new(&self.peer, wa::Message::text(body)).with_options(options);
+        let message = if p.kind == "text" {
+            wa::Message::text(p.body.clone().unwrap_or_default())
+        } else {
+            self.file_message(p).await?
+        };
+        let request = SendRequest::new(&self.peer, message.clone()).with_options(options);
         // Only the error kind is logged; it can carry the recipient.
         self.client
             .send(request)
             .await
-            .map(|_| ())
-            .map_err(|e| format!("{:?}", std::mem::discriminant(&e)))
+            .map_err(|e| format!("{:?}", std::mem::discriminant(&e)))?;
+        // Keep the message as sent, so the file can be fetched again later.
+        if let Some(media) = nimqo_whatsapp::inbox::media_of(&message)
+            && let Err(e) = self.inbox.set_sent_media(&p.id, &media)
+        {
+            log::warn!("sent media not recorded: {e:#}");
+        }
+        Ok(())
     }
 
     /// Waits until `MIN_INTERVAL` has passed since the previous send, then

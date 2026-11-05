@@ -677,12 +677,16 @@ pub(crate) fn chat_key(src: &MessageSource) -> String {
         .to_non_ad_string()
 }
 
-/// The encoded image message, kept so the picture can be downloaded when
-/// it is shown. ponytail: images only; other media keep a placeholder.
-pub(crate) fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
+/// The encoded image or document message, kept so the file can be
+/// downloaded later. ponytail: other media keep a placeholder.
+#[must_use]
+pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     use whatsapp_rust::buffa::Message as _;
-    let image = message.get_base_message().image_message.as_option()?;
-    Some(image.encode_to_vec())
+    let base = message.get_base_message();
+    if let Some(image) = base.image_message.as_option() {
+        return Some(image.encode_to_vec());
+    }
+    Some(base.document_message.as_option()?.encode_to_vec())
 }
 
 /// What the timeline shows, or `None` for messages that only change other

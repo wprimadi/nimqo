@@ -127,6 +127,25 @@ impl Attachments {
         Ok(true)
     }
 
+    /// Keeps a file being sent, encrypted, under the name a download of the
+    /// same message would get; a sent photo then shows at full size.
+    ///
+    /// # Errors
+    /// The file cannot be written.
+    pub fn store_outgoing(&self, chat: &str, id: &str, bytes: &[u8]) -> Result<()> {
+        let file = self.dir.join(file_name(chat, crate::inbox::ME, id));
+        crate::avatars::write_private(&file, &media::encrypt(&self.key, bytes)?)
+    }
+
+    /// The file of an own pending message.
+    ///
+    /// # Errors
+    /// The file is missing, unreadable, or fails authentication.
+    pub fn outgoing(&self, chat: &str, id: &str) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+        let sealed = std::fs::read(self.dir.join(file_name(chat, crate::inbox::ME, id)))?;
+        media::decrypt(&self.key, &sealed)
+    }
+
     /// Deletes stored images whose message is gone (expired, deleted by
     /// its sender, or removed). Returns how many were deleted.
     ///
@@ -169,7 +188,7 @@ impl Attachments {
         let mut conn = self.inbox.lock()?;
         Ok(diesel::sql_query(
             "SELECT chat, sender, id, media FROM messages
-             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind <> 'deleted'",
+             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind = 'image'",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)

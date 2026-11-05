@@ -55,7 +55,8 @@ struct MainView: View {
                         isFetchingOlder: model.isFetchingOlder,
                         pictures: model.pictures,
                         loadOlder: { await model.loadOlderMessages() },
-                        send: chat.id == model.sendableChatId ? model.send : nil
+                        send: chat.id == model.sendableChatId ? model.send : nil,
+                        sendFile: model.sendFile
                     )
                     // A new view per chat: it opens at the latest message.
                     .id(chat.id)
