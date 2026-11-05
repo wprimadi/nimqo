@@ -6,7 +6,7 @@ use anyhow::Result;
 use whatsapp_rust::prelude::wa;
 use whatsapp_rust::types::events::LazyHistorySync;
 
-use crate::inbox::{Inbox, Row, classify};
+use crate::inbox::{Inbox, ME, Row, classify};
 
 /// Stores every displayable message in one history chunk, one transaction
 /// per conversation. Returns the number of messages read.
@@ -65,11 +65,17 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
     let key = m.key.as_option()?;
     let (kind, body) = classify(m.message.as_option()?)?;
     let from_me = key.from_me.unwrap_or(false);
-    let sender = key
-        .participant
-        .as_deref()
-        .or(m.participant.as_deref())
-        .unwrap_or(chat);
+    // Same normalization as live messages (`inbox::sender_key`).
+    // ponytail: a group member addressed by LID here but by phone number
+    // live can be stored twice around pairing; resolve via the LID map later.
+    let sender = if from_me {
+        ME
+    } else {
+        key.participant
+            .as_deref()
+            .or(m.participant.as_deref())
+            .unwrap_or(chat)
+    };
     Some(Row {
         chat: chat.to_owned(),
         sender: strip_device(sender),

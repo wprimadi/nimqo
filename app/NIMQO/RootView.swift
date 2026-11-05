@@ -58,6 +58,12 @@ struct ChatRow: View {
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
+                // The icon keeps a group subject from passing as a person.
+                if chat.isGroup {
+                    Image(systemName: "person.3.fill")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Group")
+                }
                 Text(chat.title).font(.headline).lineLimit(1)
                 Spacer()
                 Text(chat.lastActivity, format: .relative(presentation: .numeric))

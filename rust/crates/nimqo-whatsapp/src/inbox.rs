@@ -272,9 +272,6 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
             }
         }
         if version < 2 {
-            // A message id is unique within its chat; keying on the sender as
-            // well let a live copy (LID sender) and a history copy (phone
-            // sender) of the same message both be stored.
             for sql in [
                 "CREATE TABLE messages2 (
                     chat TEXT NOT NULL,
@@ -294,6 +291,32 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
                 "CREATE INDEX messages_chat_ts ON messages (chat, ts)",
                 "CREATE TABLE chat_names (chat TEXT PRIMARY KEY, name TEXT NOT NULL)",
                 "PRAGMA user_version = 2",
+            ] {
+                diesel::sql_query(sql).execute(c)?;
+            }
+        }
+        if version < 3 {
+            // Back to (chat, sender, id): message ids are chosen by the
+            // sending client, so keying on (chat, id) let one group member
+            // suppress another's message by reusing its id. Senders are
+            // normalized instead (see `sender_key`).
+            for sql in [
+                "CREATE TABLE messages3 (
+                    chat TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    ts INTEGER NOT NULL,
+                    body TEXT,
+                    from_me INTEGER NOT NULL DEFAULT 0,
+                    kind TEXT NOT NULL DEFAULT 'text',
+                    sender_name TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (chat, sender, id)
+                )",
+                "INSERT OR IGNORE INTO messages3 SELECT * FROM messages",
+                "DROP TABLE messages",
+                "ALTER TABLE messages3 RENAME TO messages",
+                "CREATE INDEX messages_chat_ts ON messages (chat, ts)",
+                "PRAGMA user_version = 3",
             ] {
                 diesel::sql_query(sql).execute(c)?;
             }
@@ -323,7 +346,7 @@ impl Row {
         let (kind, body) = classify(&m.message)?;
         Some(Self {
             chat: chat_key(src),
-            sender: src.sender.to_non_ad_string(),
+            sender: sender_key(src),
             id: m.info.id.to_string(),
             ts: m.info.timestamp.timestamp(),
             body,
@@ -333,6 +356,22 @@ impl Row {
         })
     }
 }
+
+/// Own messages are "me"; others use the phone number when the message
+/// carries it, so live and history copies of a message share one key.
+fn sender_key(src: &MessageSource) -> String {
+    if src.is_from_me {
+        return ME.to_owned();
+    }
+    src.sender_alt
+        .as_ref()
+        .filter(|j| j.is_pn())
+        .unwrap_or(&src.sender)
+        .to_non_ad_string()
+}
+
+/// Sender key of the user's own messages.
+pub(crate) const ME: &str = "me";
 
 /// One chat per person: a one-to-one chat addressed by LID is filed under
 /// the phone number when the message carries it, so both addressings of the
@@ -445,19 +484,20 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let inbox = Inbox::open(&path, &Key::new([9; 32]), Fault::None).unwrap();
         let group = "1-2@g.us";
-        let mut live = row(group, "m1", 10, false, "Ana");
-        live.sender = "77@lid".into();
-        inbox.store(vec![live]).unwrap();
-        let mut history = row(group, "m1", 10, false, "Ana");
-        history.sender = "62811@s.whatsapp.net".into();
-        inbox
-            .import(
-                group,
-                Some("Family".into()),
-                vec![history, row(group, "m0", 5, false, "Ana")],
-            )
-            .unwrap();
-        assert_eq!(inbox.count().unwrap(), 2);
+        let ana = "62811@s.whatsapp.net";
+        let sent = |sender: &str, id: &str| Row {
+            sender: sender.into(),
+            ..row(group, id, 10, false, "Ana")
+        };
+        inbox.store(vec![sent(ana, "m1")]).unwrap();
+        // The same message again, plus another member reusing its id.
+        let again = vec![sent(ana, "m1"), sent("62999@s.whatsapp.net", "m1")];
+        inbox.import(group, Some("Family".into()), again).unwrap();
+        assert_eq!(
+            inbox.count().unwrap(),
+            2,
+            "a reused id must not hide a message"
+        );
         assert_eq!(inbox.chats(10).unwrap()[0].name.as_deref(), Some("Family"));
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
