@@ -5,6 +5,10 @@
 //! dead connection that succeeds and the message is lost. So a message stays
 //! pending until the server acks it, and anything unacked is sent again (same
 //! id) when the connection comes back.
+//!
+//! Messages are queued at once (the UI shows them as sending) and sent one
+//! at a time, at least `MIN_INTERVAL` apart. The anti-burst guard is a cap
+//! on unsent messages rather than a refusal of fast typing.
 
 use std::collections::HashSet;
 
@@ -21,15 +25,17 @@ use whatsapp_rust::{Client, MessageId, SendOptions, SendRequest};
 use crate::{CoreError, CoreListener};
 
 const MAX_CHARS: usize = 1000;
-/// Guard against accidental bursts (the account is real; no blasting).
+/// Spacing between sends (the account is real; no blasting).
 const MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// Unsent messages allowed at once; stops runaway repeats, not typing.
+const MAX_QUEUED: usize = 10;
 
-/// The allowlist and burst guard. Returns the trimmed text to send.
+/// The allowlist and queue cap. Returns the trimmed text to send.
 fn check<'a>(
     chat_id: &str,
     peer_chat: &str,
     text: &'a str,
-    last_send: Option<Instant>,
+    queued: usize,
 ) -> Result<&'a str, &'static str> {
     if chat_id != peer_chat {
         return Err("During development NIMQO only sends to the test number.");
@@ -41,8 +47,8 @@ fn check<'a>(
     if text.chars().count() > MAX_CHARS {
         return Err("The message is longer than 1000 characters.");
     }
-    if last_send.is_some_and(|t| t.elapsed() < MIN_INTERVAL) {
-        return Err("Wait a moment between messages.");
+    if queued >= MAX_QUEUED {
+        return Err("Too many messages waiting to send. Try again when they have gone out.");
     }
     Ok(text)
 }
@@ -55,7 +61,10 @@ pub struct Sender {
     /// True while the connection is up; sends wait for it otherwise, so a
     /// message written offline does not burn its retries.
     online: Box<dyn Fn() -> bool + Send + Sync>,
+    /// When the last message was written; paces the next one.
     last_send: Mutex<Option<Instant>>,
+    /// Makes the queue-cap check and the insert one step.
+    queueing: Mutex<()>,
     /// Written on this connection, waiting for the server's ack.
     in_flight: Mutex<HashSet<String>>,
     /// One flush at a time, so a message is never sent twice concurrently.
@@ -77,6 +86,7 @@ impl Sender {
             listener,
             online,
             last_send: Mutex::new(None),
+            queueing: Mutex::new(()),
             in_flight: Mutex::new(HashSet::new()),
             flushing: tokio::sync::Mutex::new(()),
         }
@@ -91,11 +101,18 @@ impl Sender {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
-        let mut last = self
-            .last_send
+        let _queueing = self
+            .queueing
             .lock()
             .map_err(|_| refused("internal lock poisoned"))?;
-        let text = check(chat_id, &self.peer_chat(), text, *last).map_err(refused)?;
+        let queued = self
+            .inbox
+            .pending()
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?
+            .len();
+        let text = check(chat_id, &self.peer_chat(), text, queued).map_err(refused)?;
         let id = self.client.generate_message_id();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -105,8 +122,6 @@ impl Sender {
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e:#}"),
             })?;
-        *last = Some(Instant::now());
-        drop(last);
         self.listener.on_chats_changed(vec![chat_id.to_owned()]);
         Ok(())
     }
@@ -132,6 +147,7 @@ impl Sender {
                 continue; // written already; waiting for the ack
             }
             let outcome = if p.chat == peer_chat {
+                self.pace().await;
                 self.send(&p.id, p.body).await
             } else {
                 // Defense in depth: never send to anyone else, whatever is stored.
@@ -168,6 +184,22 @@ impl Sender {
             .await
             .map(|_| ())
             .map_err(|e| format!("{:?}", std::mem::discriminant(&e)))
+    }
+
+    /// Waits until `MIN_INTERVAL` has passed since the previous send, then
+    /// claims the slot. Only called under the flush lock.
+    async fn pace(&self) {
+        let wait = self
+            .last_send
+            .lock()
+            .ok()
+            .and_then(|l| l.and_then(|t| MIN_INTERVAL.checked_sub(t.elapsed())));
+        if let Some(wait) = wait {
+            tokio::time::sleep(wait).await;
+        }
+        if let Ok(mut l) = self.last_send.lock() {
+            *l = Some(Instant::now());
+        }
     }
 
     fn in_flight(&self) -> Option<std::sync::MutexGuard<'_, HashSet<String>>> {
@@ -240,14 +272,12 @@ mod tests {
     #[test]
     fn only_the_test_chat_and_sane_messages_pass() {
         let peer = "62811@s.whatsapp.net";
-        assert_eq!(check(peer, peer, "  hi ", None), Ok("hi"));
-        assert!(check("62999@s.whatsapp.net", peer, "hi", None).is_err());
-        assert!(check("1-2@g.us", peer, "hi", None).is_err());
-        assert!(check(peer, peer, "   ", None).is_err());
-        assert!(check(peer, peer, &"x".repeat(MAX_CHARS + 1), None).is_err());
-        assert!(
-            check(peer, peer, "hi", Some(Instant::now())).is_err(),
-            "burst"
-        );
+        assert_eq!(check(peer, peer, "  hi ", 0), Ok("hi"));
+        assert_eq!(check(peer, peer, "hi", MAX_QUEUED - 1), Ok("hi"));
+        assert!(check("62999@s.whatsapp.net", peer, "hi", 0).is_err());
+        assert!(check("1-2@g.us", peer, "hi", 0).is_err());
+        assert!(check(peer, peer, "   ", 0).is_err());
+        assert!(check(peer, peer, &"x".repeat(MAX_CHARS + 1), 0).is_err());
+        assert!(check(peer, peer, "hi", MAX_QUEUED).is_err(), "queue cap");
     }
 }
