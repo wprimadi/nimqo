@@ -46,10 +46,27 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         }
         chats.push(chat);
     }
-    for m in stream.remainder()?.phone_number_to_lid_mappings {
+    let rest = stream.remainder()?;
+    for m in rest.phone_number_to_lid_mappings {
         pairs.extend(lid_pair(m.lid_jid.as_deref(), m.pn_jid.as_deref()));
     }
     inbox.record_lids(&pairs)?;
+    let names: Vec<(String, String)> = rest
+        .pushnames
+        .into_iter()
+        .filter_map(|p| {
+            Some((
+                strip_device(&p.id?),
+                p.pushname.filter(|n| !n.trim().is_empty())?,
+            ))
+        })
+        .collect();
+    if !names.is_empty() {
+        log::info!("{} profile name(s) from history", names.len());
+        inbox.record_push_names(&names)?;
+        // Chat titles may change for chats not in this chunk.
+        chats.push(String::new());
+    }
     inbox.notify(chats);
     Ok(total)
 }

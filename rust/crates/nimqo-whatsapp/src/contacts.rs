@@ -40,6 +40,62 @@ impl Inbox {
             diesel::sql_query("SELECT COUNT(*) AS n FROM contacts").load(&mut *conn)?;
         Ok(rows.first().map_or(0, |r| r.n))
     }
+
+    /// Profile names from history (self-chosen, shown marked as such).
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn record_push_names(&self, names: &[(String, String)]) -> Result<()> {
+        let mut conn = self.lock()?;
+        diesel::Connection::transaction(&mut *conn, |c| {
+            for (jid, name) in names {
+                diesel::sql_query("INSERT OR REPLACE INTO push_names (jid, name) VALUES (?, ?)")
+                    .bind::<Text, _>(jid)
+                    .bind::<Text, _>(name.trim())
+                    .execute(c)?;
+            }
+            Ok::<_, diesel::result::Error>(())
+        })?;
+        Ok(())
+    }
+
+    /// Diagnostics, counts only: saved names, how many are keyed by LID,
+    /// and how many name a stored 1:1 chat.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn contact_stats(&self) -> Result<(i64, i64, i64, i64, i64, i64)> {
+        #[derive(diesel::QueryableByName)]
+        struct S {
+            #[diesel(sql_type = BigInt)]
+            total: i64,
+            #[diesel(sql_type = BigInt)]
+            by_lid: i64,
+            #[diesel(sql_type = BigInt)]
+            matched: i64,
+            #[diesel(sql_type = BigInt)]
+            by_pn: i64,
+            #[diesel(sql_type = BigInt)]
+            direct: i64,
+            #[diesel(sql_type = BigInt)]
+            pushed: i64,
+        }
+        let mut conn = self.lock()?;
+        let s: S = diesel::sql_query(
+            "SELECT COUNT(*) AS total,
+               COALESCE(SUM(jid LIKE '%@lid'), 0) AS by_lid,
+               COALESCE(SUM(EXISTS (SELECT 1 FROM messages WHERE chat = contacts.jid)), 0)
+                 AS matched,
+               COALESCE(SUM(jid LIKE '%@s.whatsapp.net'), 0) AS by_pn,
+               (SELECT COUNT(DISTINCT chat) FROM messages
+                WHERE chat NOT LIKE '%@g.us' AND chat NOT LIKE '%@newsletter') AS direct,
+               (SELECT COUNT(DISTINCT chat) FROM messages
+                WHERE chat NOT LIKE '%@g.us' AND from_me = 0 AND sender_name <> '') AS pushed
+             FROM contacts",
+        )
+        .get_result(&mut *conn)?;
+        Ok((s.total, s.by_lid, s.matched, s.by_pn, s.direct, s.pushed))
+    }
 }
 
 #[cfg(test)]
@@ -66,6 +122,18 @@ mod tests {
         assert_eq!(inbox.contact_count().unwrap(), 1);
         inbox.save_contact(a, "").unwrap();
         assert_eq!(inbox.chats(10).unwrap()[0].contact_name, None);
+        // Not in the address book: the profile name from history, found by
+        // number or through the LID the history used.
+        inbox
+            .record_push_names(&[("77@lid".into(), "Ana P".into())])
+            .unwrap();
+        assert_eq!(inbox.chats(10).unwrap()[0].name, None);
+        inbox.record_lids(&[("77@lid".into(), a.into())]).unwrap();
+        assert_eq!(inbox.chats(10).unwrap()[0].name.as_deref(), Some("Ana P"));
+        inbox
+            .record_push_names(&[(a.into(), "Ana N".into())])
+            .unwrap();
+        assert_eq!(inbox.chats(10).unwrap()[0].name.as_deref(), Some("Ana N"));
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

@@ -347,6 +347,12 @@ impl Sender {
     /// address book once when none is known. A read, nothing is sent.
     pub async fn load_contacts_once(&self) {
         static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if let Ok((total, by_lid, matched, by_pn, direct, pushed)) = self.inbox.contact_stats() {
+            log::info!(
+                "address book: {total} names, {by_lid} by LID, {by_pn} by number, \
+                 {matched} on chats; {direct} 1:1 chats, {pushed} with a push name"
+            );
+        }
         if self.inbox.contact_count().unwrap_or(1) > 0
             || DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
         {

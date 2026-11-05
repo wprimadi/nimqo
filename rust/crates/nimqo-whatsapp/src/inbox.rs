@@ -150,9 +150,14 @@ impl Inbox {
             "SELECT m.chat, m.ts, m.kind, m.body, m.from_me,
                CASE WHEN m.chat LIKE '%@g.us'
                  THEN (SELECT name FROM chat_names WHERE chat = m.chat) ELSE
-                 (SELECT n.sender_name FROM messages n
-                  WHERE n.chat = m.chat AND n.from_me = 0 AND n.sender_name <> ''
-                  ORDER BY n.ts DESC LIMIT 1) END AS name,
+                 coalesce(
+                   (SELECT n.sender_name FROM messages n
+                    WHERE n.chat = m.chat AND n.from_me = 0 AND n.sender_name <> ''
+                    ORDER BY n.ts DESC LIMIT 1),
+                   -- History names a person by number or by LID.
+                   (SELECT name FROM push_names WHERE jid = m.chat),
+                   (SELECT p.name FROM push_names p JOIN lid_map l ON l.lid = p.jid
+                    WHERE l.pn = m.chat LIMIT 1)) END AS name,
                (SELECT COUNT(*) FROM messages u
                 WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread,
                (SELECT name FROM contacts WHERE jid = m.chat) AS contact_name,
@@ -538,6 +543,11 @@ const LATER: &[(i64, &[&str])] = &[
             "ALTER TABLE messages ADD COLUMN quote_body TEXT",
             "CREATE INDEX messages_chat_id ON messages (chat, id)",
         ],
+    ),
+    // Profile names from history, for people not in the address book.
+    (
+        13,
+        &["CREATE TABLE push_names (jid TEXT PRIMARY KEY, name TEXT NOT NULL)"],
     ),
 ];
 
