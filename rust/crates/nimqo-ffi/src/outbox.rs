@@ -1,5 +1,12 @@
 //! Sending (plan 10.5). During development only the allowlisted test chat
 //! may be sent to; everything else is refused before it reaches the store.
+//!
+//! A successful `send` only means the stanza was written to the socket; on a
+//! dead connection that succeeds and the message is lost. So a message stays
+//! pending until the server acks it, and anything unacked is sent again (same
+//! id) when the connection comes back.
+
+use std::collections::HashSet;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -7,7 +14,7 @@ use std::time::{Duration, Instant};
 use nimqo_whatsapp::inbox::Inbox;
 use nimqo_whatsapp::outbox::Status;
 use whatsapp_rust::prelude::*;
-use whatsapp_rust::types::events::Receipt;
+use whatsapp_rust::types::events::{Receipt, ServerAck};
 use whatsapp_rust::types::presence::ReceiptType;
 use whatsapp_rust::{Client, MessageId, SendOptions, SendRequest};
 
@@ -45,7 +52,12 @@ pub struct Sender {
     pub client: Arc<Client>,
     pub peer: Jid,
     pub listener: Arc<dyn CoreListener>,
+    /// True while the connection is up; sends wait for it otherwise, so a
+    /// message written offline does not burn its retries.
+    online: Box<dyn Fn() -> bool + Send + Sync>,
     last_send: Mutex<Option<Instant>>,
+    /// Written on this connection, waiting for the server's ack.
+    in_flight: Mutex<HashSet<String>>,
     /// One flush at a time, so a message is never sent twice concurrently.
     flushing: tokio::sync::Mutex<()>,
 }
@@ -56,13 +68,16 @@ impl Sender {
         client: Arc<Client>,
         peer: Jid,
         listener: Arc<dyn CoreListener>,
+        online: Box<dyn Fn() -> bool + Send + Sync>,
     ) -> Self {
         Self {
             inbox,
             client,
             peer,
             listener,
+            online,
             last_send: Mutex::new(None),
+            in_flight: Mutex::new(HashSet::new()),
             flushing: tokio::sync::Mutex::new(()),
         }
     }
@@ -98,8 +113,14 @@ impl Sender {
 
     /// Sends every pending message. Called after enqueueing and whenever the
     /// connection comes up, so messages written offline go out later.
-    pub async fn flush(&self) {
+    ///
+    /// `connected` is true when called from the connect event, which can run
+    /// before the state machine has seen it.
+    pub async fn flush(&self, connected: bool) {
         let _guard = self.flushing.lock().await;
+        if !connected && !(self.online)() {
+            return; // flushed again on Connected
+        }
         let pending = match self.inbox.pending() {
             Ok(p) => p,
             Err(e) => return log::warn!("outbox unreadable: {e:#}"),
@@ -107,23 +128,29 @@ impl Sender {
         let peer_chat = self.peer_chat();
         let mut changed = Vec::new();
         for p in pending {
+            if self.in_flight().is_some_and(|f| f.contains(&p.id)) {
+                continue; // written already; waiting for the ack
+            }
             let outcome = if p.chat == peer_chat {
                 self.send(&p.id, p.body).await
             } else {
                 // Defense in depth: never send to anyone else, whatever is stored.
                 Err("not the test chat".to_owned())
             };
-            let result = match outcome {
-                Ok(()) => self.inbox.advance(&p.id, Status::Sent).map(|_| ()),
+            match outcome {
+                Ok(()) => {
+                    if let Some(mut f) = self.in_flight() {
+                        f.insert(p.id);
+                    }
+                }
                 Err(e) => {
                     log::warn!("send failed: {e}");
-                    self.inbox.attempt_failed(&p.id)
+                    if let Err(e) = self.inbox.attempt_failed(&p.id) {
+                        log::warn!("outbox not updated: {e:#}");
+                    }
+                    changed.push(p.chat);
                 }
-            };
-            if let Err(e) = result {
-                log::warn!("outbox not updated: {e:#}");
             }
-            changed.push(p.chat);
         }
         changed.dedup();
         if !changed.is_empty() {
@@ -143,8 +170,49 @@ impl Sender {
             .map_err(|e| format!("{:?}", std::mem::discriminant(&e)))
     }
 
+    fn in_flight(&self) -> Option<std::sync::MutexGuard<'_, HashSet<String>>> {
+        self.in_flight.lock().ok()
+    }
+
+    /// Unacked writes on the old connection may never have left this Mac;
+    /// the next flush sends them again with the same id.
+    pub fn connection_restarted(&self) {
+        if let Some(mut f) = self.in_flight() {
+            f.clear();
+        }
+    }
+
+    /// The server took (or refused) a message: only now is it "sent".
+    pub fn on_server_ack(&self, ack: &ServerAck) {
+        if ack.class.as_deref() != Some("message")
+            || !self.in_flight().is_some_and(|mut f| f.remove(&ack.id))
+        {
+            return;
+        }
+        let result = match &ack.error {
+            None => self.inbox.advance(&ack.id, Status::Sent),
+            Some(code) => {
+                log::warn!("server refused a message: {code}");
+                self.inbox
+                    .attempt_failed(&ack.id)
+                    .map(|()| Some(self.peer_chat()))
+            }
+        };
+        match result {
+            Ok(Some(chat)) => self.listener.on_chats_changed(vec![chat]),
+            Ok(None) => {}
+            Err(e) => log::warn!("outbox not updated: {e:#}"),
+        }
+    }
+
     /// Delivered and read receipts for own messages.
     pub fn on_receipt(&self, receipt: &Receipt) {
+        // Diagnostics only: the type and count, never ids or addresses.
+        log::info!(
+            "receipt {:?} for {} message(s)",
+            receipt.r#type,
+            receipt.message_ids.len()
+        );
         let to = match receipt.r#type {
             ReceiptType::Delivered => Status::Delivered,
             ReceiptType::Read | ReceiptType::Played => Status::Read,

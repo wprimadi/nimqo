@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use nimqo_whatsapp::history;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
+use nimqo_whatsapp::{history, lids};
 use whatsapp_rust::Client;
 use whatsapp_rust::bot::BotHandle;
 use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
@@ -219,7 +219,7 @@ impl Core {
     pub fn send_text(&self, chat_id: &str, text: &str) -> Result<(), CoreError> {
         self.sender.enqueue(chat_id, text)?;
         let sender = Arc::clone(&self.sender);
-        self.runtime.spawn(async move { sender.flush().await });
+        self.runtime.spawn(async move { sender.flush(false).await });
         Ok(())
     }
 
@@ -355,6 +355,7 @@ async fn connect(
     // Handlers are built before the client exists; they find the sender here.
     let sender_cell: Arc<OnceLock<Arc<outbox::Sender>>> = Arc::default();
     let sender_listener = Arc::clone(&machine.listener);
+    let sender_machine = Arc::clone(&machine);
     let (on_qr, on_code, on_code_err) = (
         Arc::clone(&machine),
         Arc::clone(&machine),
@@ -417,6 +418,7 @@ async fn connect(
         Arc::clone(&client),
         peer.jid(),
         sender_listener,
+        Box::new(move || sender_machine.current() == ConnectionState::Connected),
     ));
     let _ = sender_cell.set(Arc::clone(&sender));
     Ok(Session {
@@ -437,7 +439,7 @@ fn message_handlers<B, T, H, R>(
 ) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
     let (on_up, on_receipt) = (Arc::clone(sender_cell), Arc::clone(sender_cell));
     builder
-        .on_event_for(&[EventKind::HistorySync], move |event, _| {
+        .on_event_for(&[EventKind::HistorySync], move |event, client| {
             let inbox = history_inbox.clone();
             async move {
                 let Event::HistorySync(sync) = &*event else {
@@ -446,25 +448,36 @@ fn message_handlers<B, T, H, R>(
                 let sync = (**sync).clone(); // shares the compressed bytes
                 // Inflating and storing a chunk takes a while; keep it off
                 // the protocol runtime.
-                match tokio::task::spawn_blocking(move || history::import(&inbox, &sync)).await {
+                let importer = inbox.clone();
+                match tokio::task::spawn_blocking(move || history::import(&importer, &sync)).await {
                     Ok(Ok(n)) => log::info!("history chunk stored: {n} message(s)"),
                     Ok(Err(e)) => log::warn!("history chunk not stored: {e:#}"),
                     Err(e) => log::warn!("history import panicked: {e}"),
                 }
+                // History teaches upstream LID numbers; merge what it learned.
+                lids::resolve(&inbox, &client).await;
             }
         })
-        .on_event_for(&[EventKind::Receipt], move |event, _| {
-            if let (Event::Receipt(receipt), Some(sender)) = (&*event, on_receipt.get()) {
-                sender.on_receipt(receipt);
-            }
-            async {}
-        })
+        .on_event_for(
+            &[EventKind::Receipt, EventKind::ServerAck],
+            move |event, _| {
+                if let Some(sender) = on_receipt.get() {
+                    match &*event {
+                        Event::Receipt(receipt) => sender.on_receipt(receipt),
+                        Event::ServerAck(ack) => sender.on_server_ack(ack),
+                        _ => {}
+                    }
+                }
+                async {}
+            },
+        )
         .on_connected(move |_| {
             // Messages queued while offline go out now.
             let sender = on_up.get().cloned();
             async move {
                 if let Some(sender) = sender {
-                    sender.flush().await;
+                    sender.connection_restarted();
+                    sender.flush(true).await;
                 }
             }
         })

@@ -172,6 +172,21 @@ impl Inbox {
         Ok(())
     }
 
+    #[cfg(test)]
+    pub(crate) fn insert_for_test(&self, chat: &str, sender: &str, id: &str) {
+        let row = Row {
+            chat: chat.into(),
+            sender: sender.into(),
+            id: id.into(),
+            ts: 1,
+            body: None,
+            from_me: false,
+            kind: "text".into(),
+            sender_name: String::new(),
+        };
+        self.store(vec![row]).unwrap();
+    }
+
     pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, SqliteConnection>> {
         self.conn.lock().map_err(|_| anyhow!("inbox lock poisoned"))
     }
@@ -195,7 +210,7 @@ impl Inbox {
 
 #[async_trait::async_trait]
 impl InboundDurabilityHook for Inbox {
-    async fn on_messages(&self, _client: Arc<Client>, batch: &[InboundMessage]) -> Result<()> {
+    async fn on_messages(&self, client: Arc<Client>, batch: &[InboundMessage]) -> Result<()> {
         let rows: Vec<Row> = batch.iter().filter_map(Row::from_inbound).collect();
         if rows.is_empty() {
             return Ok(());
@@ -209,11 +224,17 @@ impl InboundDurabilityHook for Inbox {
             }
         }
         let inbox = self.clone();
+        let has_lid = rows
+            .iter()
+            .any(|r| r.chat.ends_with("@lid") || r.sender.ends_with("@lid"));
         let mut chats: Vec<String> = rows.iter().map(|r| r.chat.clone()).collect();
         tokio::task::spawn_blocking(move || inbox.store(rows)).await??;
         chats.sort_unstable();
         chats.dedup();
         self.notify(chats);
+        if has_lid {
+            crate::lids::resolve(self, &client).await;
+        }
         Ok(())
     }
 }
