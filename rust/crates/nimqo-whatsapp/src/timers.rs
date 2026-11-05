@@ -22,11 +22,20 @@ impl Inbox {
         let mut conn = self.lock()?;
         let mut chats: Vec<String> = conn
             .transaction(|c| {
+                // Reactions are keyed by (chat, id) only, so another sender's
+                // timed message reusing an id must not take a kept message's
+                // reactions with it: drop them only when no message keeps them.
                 diesel::sql_query(
-                    "DELETE FROM reactions WHERE EXISTS (SELECT 1 FROM messages m
-                   WHERE m.chat = reactions.chat AND m.id = reactions.target
-                     AND m.expires_at <= ?)",
+                    "DELETE FROM reactions
+                     WHERE EXISTS (SELECT 1 FROM messages m
+                       WHERE m.chat = reactions.chat AND m.id = reactions.target
+                         AND m.expires_at <= ? AND m.status <> 'pending')
+                     AND NOT EXISTS (SELECT 1 FROM messages k
+                       WHERE k.chat = reactions.chat AND k.id = reactions.target
+                         AND (k.expires_at IS NULL OR k.expires_at > ?
+                              OR k.status = 'pending'))",
                 )
+                .bind::<BigInt, _>(now)
                 .bind::<BigInt, _>(now)
                 .execute(c)?;
                 // Unsent own messages stay until sent; the phone counts from then.
@@ -81,6 +90,22 @@ mod tests {
             .map(|m| m.id)
             .collect();
         assert_eq!(ids, ["keep", "mine"]);
+
+        // In a group, a timed message reusing a kept message's id does not
+        // take that message's reactions when it expires.
+        let g = "1-2@g.us";
+        inbox.insert_for_test(g, "victim@s.whatsapp.net", "x");
+        inbox.insert_timed_for_test(g, "x", Some(200)); // another sender, same id
+        inbox.apply_for_test(&[crate::effects::Effect::React {
+            chat: g.into(),
+            reactor: "r@s.whatsapp.net".into(),
+            target: "x".into(),
+            emoji: Some("👍".into()),
+        }]);
+        inbox.purge_expired(300).unwrap();
+        let kept = inbox.messages(g, 10).unwrap();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].reactions.as_deref(), Some("👍"));
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

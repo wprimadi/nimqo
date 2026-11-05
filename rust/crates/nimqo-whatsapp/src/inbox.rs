@@ -220,12 +220,15 @@ impl Inbox {
     pub(crate) fn insert_timed_for_test(&self, chat: &str, id: &str, expires_at: Option<i64>) {
         self.insert_for_test(chat, chat, id);
         let mut conn = self.lock().unwrap();
-        diesel::sql_query("UPDATE messages SET expires_at = ? WHERE chat = ? AND id = ?")
-            .bind::<Nullable<BigInt>, _>(expires_at)
-            .bind::<Text, _>(chat)
-            .bind::<Text, _>(id)
-            .execute(&mut *conn)
-            .unwrap();
+        diesel::sql_query(
+            "UPDATE messages SET expires_at = ? WHERE chat = ? AND sender = ? AND id = ?",
+        )
+        .bind::<Nullable<BigInt>, _>(expires_at)
+        .bind::<Text, _>(chat)
+        .bind::<Text, _>(chat)
+        .bind::<Text, _>(id)
+        .execute(&mut *conn)
+        .unwrap();
     }
 
     #[cfg(test)]
