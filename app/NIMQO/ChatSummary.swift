@@ -19,6 +19,9 @@ extension ChatSummary {
         let pushName = chat.name.map { "~\($0)" }
         title = if chat.isGroup {
             chat.name ?? "Group"
+        } else if let saved = chat.contactName {
+            // The user's own address book: trusted, shown as is.
+            saved
         } else {
             switch (chat.phone, pushName) {
             case let (phone?, name?): "\(phone) \(name)"

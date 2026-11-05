@@ -66,6 +66,8 @@ pub struct Chat {
     pub last_from_me: bool,
     /// Received messages not read yet.
     pub unread: u32,
+    /// Name saved in the phone's address book.
+    pub contact_name: Option<String>,
 }
 
 impl From<ChatRow> for Chat {
@@ -80,6 +82,7 @@ impl From<ChatRow> for Chat {
             last_body: r.body,
             last_from_me: r.from_me,
             unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
+            contact_name: r.contact_name,
             id: r.chat,
         }
     }
@@ -90,6 +93,8 @@ pub struct ChatMessage {
     pub id: String,
     pub sender: String,
     pub sender_name: Option<String>,
+    /// The sender's name in the phone's address book.
+    pub contact_name: Option<String>,
     pub from_me: bool,
     pub timestamp_secs: i64,
     pub kind: MessageKind,
@@ -104,6 +109,7 @@ impl From<MessageRow> for ChatMessage {
             id: r.id,
             sender: r.sender,
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
+            contact_name: r.contact_name,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),

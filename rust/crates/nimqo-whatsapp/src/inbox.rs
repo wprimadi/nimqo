@@ -61,6 +61,9 @@ pub struct ChatRow {
     /// Received messages not yet read here or on another device.
     #[diesel(sql_type = BigInt)]
     pub unread: i64,
+    /// Name from the phone's address book, for 1:1 chats.
+    #[diesel(sql_type = Nullable<Text>)]
+    pub contact_name: Option<String>,
 }
 
 #[derive(Debug, diesel::QueryableByName)]
@@ -82,6 +85,8 @@ pub struct MessageRow {
     /// Delivery state of own messages; empty for received ones.
     #[diesel(sql_type = Text)]
     pub status: String,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub contact_name: Option<String>,
 }
 
 impl Inbox {
@@ -122,7 +127,8 @@ impl Inbox {
                   WHERE n.chat = m.chat AND n.from_me = 0 AND n.sender_name <> ''
                   ORDER BY n.ts DESC LIMIT 1) END AS name,
                (SELECT COUNT(*) FROM messages u
-                WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread
+                WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread,
+               (SELECT name FROM contacts WHERE jid = m.chat) AS contact_name
              FROM messages m
              WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
@@ -141,7 +147,8 @@ impl Inbox {
         // ponytail: newest page only; scrollback paging comes with the timeline.
         Ok(diesel::sql_query(
             "SELECT * FROM (
-               SELECT id, sender, sender_name, ts, kind, body, from_me, status, rowid AS r
+               SELECT id, sender, sender_name, ts, kind, body, from_me, status, rowid AS r,
+                 (SELECT name FROM contacts WHERE jid = sender) AS contact_name
                FROM messages WHERE chat = ? ORDER BY ts DESC, rowid DESC LIMIT ?)
              ORDER BY ts, r",
         )
@@ -297,6 +304,11 @@ const LATER: &[(i64, &[&str])] = &[
             "ALTER TABLE messages ADD COLUMN read INTEGER NOT NULL DEFAULT 1",
             "CREATE INDEX messages_unread ON messages (chat) WHERE read = 0",
         ],
+    ),
+    // Names from the phone's address book, by phone-number jid.
+    (
+        7,
+        &["CREATE TABLE contacts (jid TEXT PRIMARY KEY, name TEXT NOT NULL)"],
     ),
 ];
 
@@ -502,6 +514,11 @@ mod tests {
     use whatsapp_rust::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn later_migrations_run_in_version_order() {
+        assert!(LATER.windows(2).all(|w| w[0].0 < w[1].0));
+    }
 
     fn row(chat: &str, id: &str, ts: i64, from_me: bool, name: &str) -> Row {
         Row {

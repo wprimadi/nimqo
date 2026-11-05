@@ -256,6 +256,41 @@ impl Sender {
         }
     }
 
+    /// A contact saved, renamed, or removed in the phone's address book.
+    pub async fn on_contact(&self, jid: &Jid, name: &str, pn: Option<&str>) {
+        // The action can name the phone number when the jid is a LID.
+        let chat = match pn.and_then(|p| p.parse::<Jid>().ok()) {
+            Some(pn) if pn.is_pn() => pn.to_non_ad_string(),
+            _ => lids::phone_chat(&self.inbox, &self.client, jid).await,
+        };
+        match self.inbox.save_contact(&chat, name) {
+            Ok(()) => self.listener.on_chats_changed(vec![chat]),
+            Err(e) => log::warn!("contact not stored: {e:#}"),
+        }
+    }
+
+    /// Contacts synced before this version were never stored: fetch the
+    /// address book once when none is known. A read, nothing is sent.
+    pub async fn load_contacts_once(&self) {
+        static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if self.inbox.contact_count().unwrap_or(1) > 0
+            || DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return;
+        }
+        match self
+            .client
+            .resync_app_state(
+                [whatsapp_rust::WAPatchName::CriticalUnblockLow],
+                whatsapp_rust::AppStateResyncMode::Snapshot,
+            )
+            .await
+        {
+            Ok(_) => log::info!("address book loaded"),
+            Err(e) => log::warn!("address book not loaded: {e}"),
+        }
+    }
+
     /// Read receipts to the test chat only (the caller checks the chat).
     /// ponytail: lost when offline; queue them like messages if that matters.
     pub async fn send_read_receipts(&self, ids: Vec<String>) {

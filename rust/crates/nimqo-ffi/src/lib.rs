@@ -490,6 +490,8 @@ fn message_handlers<B, T, H, R>(
                 EventKind::Receipt,
                 EventKind::ServerAck,
                 EventKind::MarkChatAsReadUpdate,
+                EventKind::ContactUpdate,
+                EventKind::ContactRemoved,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
@@ -498,6 +500,14 @@ fn message_handlers<B, T, H, R>(
                     match &*event {
                         Event::Receipt(receipt) => sender.on_receipt(receipt).await,
                         Event::ServerAck(ack) => sender.on_server_ack(ack),
+                        Event::ContactUpdate(c) => {
+                            let a = &c.action;
+                            let name = a.full_name.as_deref().or(a.first_name.as_deref());
+                            sender
+                                .on_contact(&c.jid, name.unwrap_or(""), a.pn_jid.as_deref())
+                                .await;
+                        }
+                        Event::ContactRemoved(c) => sender.on_contact(&c.jid, "", None).await,
                         Event::MarkChatAsReadUpdate(update) => {
                             let range = update.action.message_range.as_option();
                             sender
@@ -522,6 +532,7 @@ fn message_handlers<B, T, H, R>(
                     sender.flush(true).await;
                     // Also cleans up chats stored by LID in earlier runs.
                     lids::resolve(&sender.inbox, &sender.client).await;
+                    sender.load_contacts_once().await;
                 }
             }
         })
