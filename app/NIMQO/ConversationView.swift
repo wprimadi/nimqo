@@ -63,7 +63,9 @@ struct Composer: View {
     }
 
     private func submit() {
-        guard !isSending else { return }
+        // Return on an empty field does nothing, like other chat apps.
+        guard !isSending, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        refusal = nil
         isSending = true
         let draft = text
         Task {
