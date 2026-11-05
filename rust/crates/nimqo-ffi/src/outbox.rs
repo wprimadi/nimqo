@@ -273,6 +273,15 @@ impl Sender {
         }
     }
 
+    /// A contact changed their disappearing-messages default.
+    pub async fn on_timer(&self, jid: &Jid, seconds: u32) {
+        let chat = lids::phone_chat(&self.inbox, &self.client, jid).await;
+        match self.inbox.set_timer(&chat, seconds) {
+            Ok(()) => self.listener.on_chats_changed(vec![chat]),
+            Err(e) => log::warn!("timer not stored: {e:#}"),
+        }
+    }
+
     /// Contacts synced before this version were never stored: fetch the
     /// address book once when none is known. A read, nothing is sent.
     pub async fn load_contacts_once(&self) {

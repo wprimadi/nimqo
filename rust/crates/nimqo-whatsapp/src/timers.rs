@@ -8,6 +8,18 @@ use diesel::{Connection, RunQueryDsl};
 use crate::inbox::Inbox;
 
 impl Inbox {
+    /// Sets a chat's disappearing-message timer; 0 turns it off.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn set_timer(&self, chat: &str, seconds: u32) -> Result<()> {
+        let timer = crate::effects::Effect::Timer {
+            chat: chat.to_owned(),
+            seconds,
+        };
+        self.commit(Vec::new(), &[timer])
+    }
+
     /// Deletes messages whose time is up, with their reactions. Returns the
     /// chats that changed.
     ///

@@ -279,6 +279,14 @@ impl InboundDurabilityHook for Inbox {
             if m.info.source.chat.server == Server::Broadcast {
                 continue; // status updates, not chats
             }
+            // Diagnostics: protocol message types only, never content or ids.
+            if let Some(p) = m.message.get_base_message().protocol_message.as_option() {
+                log::info!(
+                    "protocol message {:?} (from me: {})",
+                    p.r#type,
+                    m.info.source.is_from_me
+                );
+            }
             if let Some(e) = Effect::from_inbound(m) {
                 effects.push(e);
             } else if let Some(r) = Row::from_inbound(m) {

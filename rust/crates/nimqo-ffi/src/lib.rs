@@ -515,6 +515,7 @@ fn message_handlers<B, T, H, R>(
                 EventKind::MarkChatAsReadUpdate,
                 EventKind::ContactUpdate,
                 EventKind::ContactRemoved,
+                EventKind::DisappearingModeChanged,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
@@ -531,6 +532,10 @@ fn message_handlers<B, T, H, R>(
                                 .await;
                         }
                         Event::ContactRemoved(c) => sender.on_contact(&c.jid, "", None).await,
+                        Event::DisappearingModeChanged(d) => {
+                            log::info!("disappearing mode changed: {}s", d.duration);
+                            sender.on_timer(&d.from, d.duration).await;
+                        }
                         Event::MarkChatAsReadUpdate(update) => {
                             let range = update.action.message_range.as_option();
                             sender
