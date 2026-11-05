@@ -38,6 +38,8 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 | First-run disclosure shown once, before any connection | Pass | 2026-11-05 |
 | Unlinked from the phone: app shows Logged out; reset destroys key and data | Pass | 2026-11-05 |
 | Pairing by phone number code after reset | Pass | 2026-11-05 |
+| Read-only chat list and timeline for all chats (live delivery) | Pass | 2026-11-05 |
+| History sync after pairing: chats, groups with subjects, no UI stalls | Pass | 2026-11-05 |
 
 ## Limitations register
 

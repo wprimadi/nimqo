@@ -2021,9 +2021,9 @@ Do not silently change architecture through implementation details.
 -   [x] Implement pairing UX (disclosure, QR, phone number code).
 -   [x] Implement session restoration (reconnect, single instance,
     logout/reset with key destruction).
--   [ ] Implement event dispatcher.
--   [ ] Implement chat list.
--   [ ] Implement message timeline.
+-   [x] Implement event dispatcher (durability hook, history sync, state events).
+-   [x] Implement chat list (read-only; names and unread pending).
+-   [x] Implement message timeline (newest 200; paging pending).
 -   [ ] Implement text composer.
 -   [ ] Implement send/receive.
 -   [ ] Implement unread state and mark as read.
