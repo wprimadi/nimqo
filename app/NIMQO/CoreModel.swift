@@ -229,18 +229,6 @@ final class CoreModel {
         return Array(loaded.prefix { ($0.timestampSecs, $0.seq) < (first.timestampSecs, first.seq) })
     }
 
-    /// Queues `text` for the selected chat. Returns the reason it was not
-    /// queued, or nil. Storing can wait on a history import, so it runs off
-    /// the main thread.
-    func send(_ text: String) async -> String? {
-        guard let core, let chat = selectedChat else { return "Not connected." }
-        let result = await Task.detached { Result { try core.sendText(chatId: chat, text: text) } }.value
-        if case let .failure(error) = result {
-            return Self.message(for: error)
-        }
-        return nil
-    }
-
     func update(qrPayload payload: String) {
         qrPayload = payload
     }

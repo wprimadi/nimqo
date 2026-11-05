@@ -91,7 +91,8 @@ struct CoreModelTests {
         func msg(_ time: Int64, _ seq: Int64) -> ChatMessage {
             ChatMessage(
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
-                reactions: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil, delivery: .none
+                reactions: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil, delivery: .none,
+                reply: nil
             )
         }
         let loaded = [msg(1, 1), msg(2, 5), msg(2, 6), msg(3, 2)]

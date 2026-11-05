@@ -115,6 +115,18 @@ pub struct ChatMessage {
     /// Text, or a media caption or file name.
     pub body: Option<String>,
     pub delivery: Delivery,
+    /// What this message replies to.
+    pub reply: Option<Reply>,
+}
+
+/// The quoted message of a reply, as quoted.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Reply {
+    pub kind: MessageKind,
+    pub body: Option<String>,
+    /// None when the quoted message is not stored here.
+    pub from_me: Option<bool>,
+    pub sender_name: Option<String>,
 }
 
 impl From<MessageRow> for ChatMessage {
@@ -133,6 +145,12 @@ impl From<MessageRow> for ChatMessage {
             kind: MessageKind::parse(&r.kind),
             body: r.body,
             delivery: Delivery::parse(&r.status),
+            reply: r.reply_to.map(|_| Reply {
+                kind: MessageKind::parse(r.quote_kind.as_deref().unwrap_or_default()),
+                body: r.quote_body,
+                from_me: r.quote_from_me,
+                sender_name: r.quote_name,
+            }),
         }
     }
 }

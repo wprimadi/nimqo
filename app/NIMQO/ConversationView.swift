@@ -13,15 +13,16 @@ struct ConversationView: View {
     let pictures: PictureStore
     let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
-    let send: (@MainActor (String) async -> String?)?
+    let send: (@MainActor (String, Int64?) async -> String?)?
     let sendFile: @MainActor (URL) async -> String?
+    @State private var replyingTo: ChatMessage?
 
     var body: some View {
         VStack(spacing: 0) {
             timeline
             if let send {
                 Divider()
-                Composer(send: send, sendFile: sendFile)
+                Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo)
             }
         }
         .navigationTitle(chat.title)
@@ -47,6 +48,11 @@ struct ConversationView: View {
                     // seq, not id: ids repeat across senders in groups.
                     ForEach(messages, id: \.seq) { message in
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures)
+                            .contextMenu {
+                                if send != nil, message.kind != .deleted {
+                                    Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
+                                }
+                            }
                     }
                     Color.clear.frame(height: 1)
                         .onAppear { atBottom = true }
@@ -92,8 +98,9 @@ struct ConversationView: View {
 }
 
 struct Composer: View {
-    let send: @MainActor (String) async -> String?
+    let send: @MainActor (String, Int64?) async -> String?
     let sendFile: @MainActor (URL) async -> String?
+    @Binding var replyingTo: ChatMessage?
     @State private var text = ""
     @State private var picking = false
     @State private var refusal: String?
@@ -104,6 +111,21 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.small) {
             if let refusal {
                 Text(refusal).font(.caption).foregroundStyle(.red)
+            }
+            if let replyingTo {
+                HStack {
+                    QuoteView(reply: Reply(
+                        kind: replyingTo.kind,
+                        body: replyingTo.body,
+                        fromMe: replyingTo.fromMe,
+                        senderName: replyingTo.contactName ?? replyingTo.senderName
+                    ))
+                    Spacer()
+                    Button("Cancel reply", systemImage: "xmark.circle.fill") { self.replyingTo = nil }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut(.cancelAction)
+                }
             }
             HStack(alignment: .bottom) {
                 Button("Attach a photo or file", systemImage: "paperclip") { picking = true }
@@ -123,6 +145,7 @@ struct Composer: View {
         }
         .padding(Theme.Spacing.medium)
         .onAppear { focused = true }
+        .onChange(of: replyingTo?.seq) { focused = true }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
             guard case let .success(url) = result else { return }
             refusal = nil
@@ -140,11 +163,15 @@ struct Composer: View {
         refusal = nil
         isSending = true
         let draft = text
+        let reply = replyingTo
         Task {
-            refusal = await send(draft)
+            refusal = await send(draft, reply?.seq)
             // Keep the draft when it was refused, so nothing typed is lost.
             if refusal == nil, text == draft {
                 text = ""
+                if replyingTo?.seq == reply?.seq {
+                    replyingTo = nil
+                }
             }
             isSending = false
         }
@@ -197,6 +224,9 @@ struct MessageBubble: View {
                 if showsSender, !message.fromMe {
                     Text(sender).font(.caption.bold()).foregroundStyle(.tint)
                 }
+                if let reply = message.reply {
+                    QuoteView(reply: reply)
+                }
                 if message.hasMedia {
                     MessagePictureView(chat: chat, message: message, store: pictures)
                 }
@@ -246,6 +276,35 @@ struct MessageBubble: View {
                 + (message.edited ? ", edited" : "")
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
+        )
+    }
+}
+
+/// The quoted message of a reply: who wrote it and what it said.
+struct QuoteView: View {
+    let reply: Reply
+
+    private var name: String? {
+        reply.fromMe == true ? "You" : reply.senderName
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.small) {
+            RoundedRectangle(cornerRadius: 1.5).fill(.tint).frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                if let name {
+                    Text(name).font(.caption.bold()).foregroundStyle(.tint)
+                }
+                Text(ChatMessage.describe(kind: reply.kind, body: reply.body))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
         )
     }
 }

@@ -370,10 +370,17 @@ impl Core {
     /// stored; delivery state arrives through `on_chats_changed`.
     ///
     /// # Errors
+    /// `reply_to` is the `seq` of the message being replied to.
+    ///
     /// `SendRefused` for anything but the test chat, an empty or too long
     /// message, or a full queue; `Storage` if it cannot be queued.
-    pub fn send_text(&self, chat_id: &str, text: &str) -> Result<(), CoreError> {
-        self.sender.enqueue(chat_id, text)?;
+    pub fn send_text(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to: Option<i64>,
+    ) -> Result<(), CoreError> {
+        self.sender.enqueue(chat_id, text, reply_to)?;
         let sender = Arc::clone(&self.sender);
         self.runtime.spawn(async move { sender.flush(false).await });
         Ok(())

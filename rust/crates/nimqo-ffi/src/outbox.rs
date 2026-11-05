@@ -106,7 +106,12 @@ impl Sender {
     }
 
     /// Validates and stores the message as pending. The caller then flushes.
-    pub fn enqueue(&self, chat_id: &str, text: &str) -> Result<(), CoreError> {
+    pub fn enqueue(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to: Option<i64>,
+    ) -> Result<(), CoreError> {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
@@ -122,12 +127,26 @@ impl Sender {
             })?
             .len();
         let text = check(chat_id, &self.peer_chat(), text, queued).map_err(refused)?;
+        let quote = match reply_to {
+            Some(seq) => Some(
+                self.inbox
+                    .quoted_by_seq(chat_id, seq)
+                    .map_err(|e| CoreError::Storage {
+                        detail: format!("{e:#}"),
+                    })?
+                    .ok_or_else(|| refused("The message being replied to is gone."))?,
+            ),
+            None => None,
+        };
         let id = self.client.generate_message_id();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
         self.inbox
-            .enqueue(chat_id, id.as_str(), now, text)
+            .enqueue_reply(
+                chat_id,
+                id.as_str(),
+                crate::unix_now(),
+                text,
+                quote.as_ref(),
+            )
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e:#}"),
             })?;
@@ -191,7 +210,11 @@ impl Sender {
             options = options.with_ephemeral_expiration(seconds);
         }
         let message = if p.kind == "text" {
-            wa::Message::text(p.body.clone().unwrap_or_default())
+            let body = p.body.clone().unwrap_or_default();
+            match self.quote_context(p) {
+                Some(context) => wa::Message::text_with_context(body, context),
+                None => wa::Message::text(body),
+            }
         } else {
             self.file_message(p).await?
         };
@@ -208,6 +231,25 @@ impl Sender {
             log::warn!("sent media not recorded: {e:#}");
         }
         Ok(())
+    }
+
+    /// The quote sent with a reply; None when it is not one, or the quoted
+    /// message is gone (it is then sent as a plain message).
+    fn quote_context(&self, p: &Pending) -> Option<wa::ContextInfo> {
+        let quoted = self
+            .inbox
+            .quoted_by_id(&p.chat, p.reply_to.as_deref()?)
+            .ok()??;
+        let sender = if quoted.from_me {
+            self.client.pn()?.to_non_ad_string()
+        } else {
+            quoted.sender.clone()
+        };
+        Some(whatsapp_rust::wacore::proto_helpers::build_quote_context(
+            quoted.id.clone(),
+            sender,
+            &quoted.message(),
+        ))
     }
 
     /// Waits until `MIN_INTERVAL` has passed since the previous send, then

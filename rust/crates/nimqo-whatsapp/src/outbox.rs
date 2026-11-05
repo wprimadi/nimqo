@@ -51,6 +51,9 @@ pub struct Pending {
     /// thumbnail), completed when sent.
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Binary>)]
     pub media: Option<Vec<u8>>,
+    /// The id of the message this one replies to.
+    #[diesel(sql_type = diesel::sql_types::Nullable<Text>)]
+    pub reply_to: Option<String>,
     /// The chat's timer when it was queued, sent with it.
     #[diesel(sql_type = diesel::sql_types::Nullable<BigInt>)]
     pub timer: Option<i64>,
@@ -62,11 +65,27 @@ impl Inbox {
     /// # Errors
     /// The store cannot be written.
     pub fn enqueue(&self, chat: &str, id: &str, ts: i64, body: &str) -> Result<()> {
+        self.enqueue_reply(chat, id, ts, body, None)
+    }
+
+    /// Stores an own text message as pending, replying to `quote` if given.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn enqueue_reply(
+        &self,
+        chat: &str,
+        id: &str,
+        ts: i64,
+        body: &str,
+        quote: Option<&crate::replies::Quoted>,
+    ) -> Result<()> {
         let mut conn = self.lock()?;
         diesel::sql_query(
-            "INSERT INTO messages (chat, sender, id, ts, body, from_me, kind, status, expires_at)
+            "INSERT INTO messages (chat, sender, id, ts, body, from_me, kind, status, expires_at,
+               reply_to, quote_kind, quote_body)
              VALUES (?, ?, ?, ?, ?, 1, 'text', 'pending',
-               ? + (SELECT NULLIF(seconds, 0) FROM chat_timers WHERE chat = ?))",
+               ? + (SELECT NULLIF(seconds, 0) FROM chat_timers WHERE chat = ?), ?, ?, ?)",
         )
         .bind::<Text, _>(chat)
         .bind::<Text, _>(ME)
@@ -75,6 +94,9 @@ impl Inbox {
         .bind::<Text, _>(body)
         .bind::<BigInt, _>(ts)
         .bind::<Text, _>(chat)
+        .bind::<diesel::sql_types::Nullable<Text>, _>(quote.map(|q| q.id.as_str()))
+        .bind::<diesel::sql_types::Nullable<Text>, _>(quote.map(|q| q.kind.as_str()))
+        .bind::<diesel::sql_types::Nullable<Text>, _>(quote.and_then(|q| q.body.as_deref()))
         .execute(&mut *conn)?;
         Ok(())
     }
@@ -135,7 +157,7 @@ impl Inbox {
     pub fn pending(&self) -> Result<Vec<Pending>> {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, id, body, kind, media, expires_at - ts AS timer FROM messages
+            "SELECT chat, id, body, kind, media, reply_to, expires_at - ts AS timer FROM messages
              WHERE status = 'pending' AND sender = ? ORDER BY ts, rowid",
         )
         .bind::<Text, _>(ME)

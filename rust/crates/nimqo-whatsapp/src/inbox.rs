@@ -99,9 +99,21 @@ pub struct MessageRow {
     /// Every reaction's emoji, concatenated.
     #[diesel(sql_type = Nullable<Text>)]
     pub reactions: Option<String>,
-    /// Media that can be downloaded is stored for this message.
+    /// A picture can be shown for this message.
     #[diesel(sql_type = Bool)]
     pub has_media: bool,
+    /// Replies: the quoted message's id, kind, and content as quoted.
+    #[diesel(sql_type = Nullable<Text>)]
+    pub reply_to: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub quote_kind: Option<String>,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub quote_body: Option<String>,
+    /// Whether the quoted message is own; None when it is not stored here.
+    #[diesel(sql_type = Nullable<Bool>)]
+    pub quote_from_me: Option<bool>,
+    #[diesel(sql_type = Nullable<Text>)]
+    pub quote_name: Option<String>,
 }
 
 impl Inbox {
@@ -205,7 +217,16 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
-                 rowid AS seq, media IS NOT NULL AS has_media,
+                 rowid AS seq, media IS NOT NULL AND kind = 'image' AS has_media,
+                 reply_to, quote_kind, quote_body,
+                 (SELECT q.from_me FROM messages q
+                  WHERE q.chat = messages.chat AND q.id = messages.reply_to LIMIT 1)
+                   AS quote_from_me,
+                 (SELECT coalesce((SELECT name FROM contacts WHERE jid = q.sender),
+                                  nullif(q.sender_name, ''))
+                  FROM messages q
+                  WHERE q.chat = messages.chat AND q.id = messages.reply_to LIMIT 1)
+                   AS quote_name,
                  (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = messages.chat AND x.target = messages.id) AS reactions
@@ -297,6 +318,7 @@ impl Inbox {
             read: true,
             expires_at: None,
             media: Some(media),
+            quote: None,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -316,6 +338,7 @@ impl Inbox {
             read: false,
             expires_at: None,
             media: None,
+            quote: None,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -419,8 +442,8 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
                (chat, sender, id, ts, body, from_me, kind, sender_name, status, read,
-                expires_at, media)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expires_at, media, reply_to, quote_kind, quote_body)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -434,6 +457,9 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Bool, _>(r.read)
         .bind::<Nullable<BigInt>, _>(r.expires_at)
         .bind::<Nullable<diesel::sql_types::Binary>, _>(r.media)
+        .bind::<Nullable<Text>, _>(r.quote.as_ref().map(|q| q.id.clone()))
+        .bind::<Nullable<Text>, _>(r.quote.as_ref().map(|q| q.kind.clone()))
+        .bind::<Nullable<Text>, _>(r.quote.and_then(|q| q.body))
         .execute(c)?;
     }
     Ok(())
@@ -498,6 +524,16 @@ const LATER: &[(i64, &[&str])] = &[
     ),
     // What is needed to download a message's media later.
     (11, &["ALTER TABLE messages ADD COLUMN media BLOB"]),
+    // Replies: the quoted message's id and a copy of its content.
+    (
+        12,
+        &[
+            "ALTER TABLE messages ADD COLUMN reply_to TEXT",
+            "ALTER TABLE messages ADD COLUMN quote_kind TEXT",
+            "ALTER TABLE messages ADD COLUMN quote_body TEXT",
+            "CREATE INDEX messages_chat_id ON messages (chat, id)",
+        ],
+    ),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
@@ -614,6 +650,8 @@ pub(crate) struct Row {
     pub expires_at: Option<i64>,
     /// The encoded media message (keys, URL, thumbnail), for downloading.
     pub media: Option<Vec<u8>>,
+    /// The message this one replies to.
+    pub quote: Option<crate::replies::Quote>,
 }
 
 impl Row {
@@ -640,6 +678,7 @@ impl Row {
                 .get_ephemeral_expiration()
                 .map(|s| m.info.timestamp.timestamp() + i64::from(s)),
             media: media_of(&m.message),
+            quote: crate::replies::quote_of(&m.message),
         })
     }
 }
@@ -770,6 +809,7 @@ mod tests {
             read: from_me,
             expires_at: None,
             media: None,
+            quote: None,
         }
     }
 

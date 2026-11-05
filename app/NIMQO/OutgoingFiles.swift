@@ -54,6 +54,20 @@ enum OutgoingFiles {
 }
 
 extension CoreModel {
+    /// Queues `text` for the selected chat. Returns the reason it was not
+    /// queued, or nil. Storing can wait on a history import, so it runs off
+    /// the main thread.
+    func send(_ text: String, replyTo: Int64?) async -> String? {
+        guard let core, let chat = selectedChat else { return "Not connected." }
+        let result = await Task.detached {
+            Result { try core.sendText(chatId: chat, text: text, replyTo: replyTo) }
+        }.value
+        if case let .failure(error) = result {
+            return Self.message(for: error)
+        }
+        return nil
+    }
+
     /// Sends a picked file to the selected chat. Returns why it was refused.
     func sendFile(_ url: URL) async -> String? {
         guard let core, let chat = selectedChat else { return "Not connected." }
