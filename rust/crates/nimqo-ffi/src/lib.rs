@@ -592,12 +592,15 @@ fn message_handlers<B, T, H, R>(
                 let Event::PictureUpdate(update) = &*event else {
                     return;
                 };
+                log::info!("picture changed notification (removed: {})", update.removed);
                 let chat = lids::phone_chat(&inbox, &client, &update.jid).await;
-                // Fetched again next time the chat is on screen.
+                // Fetch the new one now; refresh reports the change itself.
                 if let Err(e) = avatars.invalidate(&chat) {
                     log::warn!("avatar not invalidated: {e:#}");
                 }
-                inbox.notify_changed(vec![chat]);
+                if let Err(e) = avatars.refresh(&client, &chat, unix_now()).await {
+                    log::info!("avatar not fetched: {e:#}");
+                }
             }
         })
         .on_event_for(&[EventKind::HistorySync], move |event, client| {

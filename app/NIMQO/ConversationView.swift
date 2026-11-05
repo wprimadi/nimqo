@@ -29,6 +29,9 @@ struct ConversationView: View {
     /// user scrolls; paging keys off it rather than off views appearing.
     @State private var topSeq: Int64?
     @State private var isLoading = false
+    /// Whether the end of the timeline is on screen; new messages follow
+    /// only then, so reading older ones is never interrupted.
+    @State private var atBottom = true
 
     private var timeline: some View {
         ScrollViewReader { proxy in
@@ -41,6 +44,9 @@ struct ConversationView: View {
                     ForEach(messages, id: \.seq) { message in
                         MessageBubble(message: message, showsSender: chat.isGroup)
                     }
+                    Color.clear.frame(height: 1)
+                        .onAppear { atBottom = true }
+                        .onDisappear { atBottom = false }
                 }
                 .scrollTargetLayout()
                 .padding(Theme.Spacing.medium)
@@ -52,6 +58,11 @@ struct ConversationView: View {
                 if hasOlder, let top, messages.prefix(5).contains(where: { $0.seq == top }) {
                     showOlder()
                 }
+            }
+            .onChange(of: messages.last?.seq) { _, last in
+                // A new message: follow it if the end was in view or it is ours.
+                guard let last, atBottom || messages.last?.fromMe == true else { return }
+                withAnimation { proxy.scrollTo(last, anchor: .bottom) }
             }
             .onChange(of: messages.first?.seq) { old, _ in
                 // Older messages went in above (a page, or the phone's
