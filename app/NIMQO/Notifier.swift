@@ -16,10 +16,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Clicking a notification opens its chat.
     var open: ((String) -> Void)?
 
-    /// A new session: start from its first list again.
+    /// A new session (or none, after logging out): nothing of the old one
+    /// stays in Notification Center, and counting starts again.
     func reset() {
         unread = nil
         NSApp?.dockTile.badgeLabel = nil
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        center.removeAllPendingNotificationRequests()
     }
 
     func update(_ chats: [ChatSummary], viewing: String?) {
@@ -69,6 +73,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     ) async {
         let chat = response.notification.request.identifier
         await MainActor.run {
+            // Only chats of the current session.
+            guard unread?[chat] != nil else { return }
             NSApp.activate()
             open?(chat)
         }
