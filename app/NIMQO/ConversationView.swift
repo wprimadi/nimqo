@@ -8,6 +8,7 @@ struct ConversationView: View {
     let chat: ChatSummary
     let messages: [ChatMessage]
     let hasOlder: Bool
+    let pictures: PictureStore
     let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
     let send: (@MainActor (String) async -> String?)?
@@ -42,7 +43,7 @@ struct ConversationView: View {
                     }
                     // seq, not id: ids repeat across senders in groups.
                     ForEach(messages, id: \.seq) { message in
-                        MessageBubble(message: message, showsSender: chat.isGroup)
+                        MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures)
                     }
                     Color.clear.frame(height: 1)
                         .onAppear { atBottom = true }
@@ -135,6 +136,8 @@ struct Composer: View {
 struct MessageBubble: View {
     let message: ChatMessage
     let showsSender: Bool
+    let chat: String
+    let pictures: PictureStore
 
     private var text: String {
         ChatMessage.describe(kind: message.kind, body: message.body)
@@ -176,9 +179,15 @@ struct MessageBubble: View {
                 if showsSender, !message.fromMe {
                     Text(sender).font(.caption.bold()).foregroundStyle(.tint)
                 }
-                Text(text)
-                    .italic(message.kind != .text)
-                    .textSelection(.enabled)
+                if message.hasMedia {
+                    MessagePictureView(chat: chat, message: message, store: pictures)
+                }
+                // A shown picture needs no "Photo" label, only its caption.
+                if !(message.hasMedia && message.body == nil) {
+                    Text(text)
+                        .italic(message.kind != .text && !message.hasMedia)
+                        .textSelection(.enabled)
+                }
                 HStack(spacing: 4) {
                     Text(time, format: .dateTime.hour().minute())
                     if message.edited {

@@ -90,7 +90,7 @@ struct CoreModelTests {
     @Test func reloadKeepsOlderPagesOnly() {
         func msg(_ time: Int64, _ seq: Int64) -> ChatMessage {
             ChatMessage(
-                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false,
+                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
                 reactions: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil, delivery: .none
             )
         }

@@ -172,11 +172,7 @@ impl Avatars {
     /// Named by a hash so file names reveal no numbers.
     fn file(&self, chat: &str) -> PathBuf {
         let hash = Sha256::digest(chat.as_bytes());
-        let name = hash.iter().take(16).fold(String::new(), |mut s, b| {
-            use std::fmt::Write as _;
-            let _ = write!(s, "{b:02x}");
-            s
-        });
+        let name = hex(&hash[..16]);
         self.dir.join(format!("{name}.nqm"))
     }
 }
@@ -208,8 +204,17 @@ fn is_picture_url(url: &str) -> bool {
     !host.contains(['@', ':']) && (host == "whatsapp.net" || host.ends_with(".whatsapp.net"))
 }
 
+/// Lowercase hex.
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
+}
+
 /// Owner-only file, replaced atomically.
-fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
+pub(crate) fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
     let tmp = path.with_extension("tmp");
     let mut f = std::fs::OpenOptions::new()
         .write(true)

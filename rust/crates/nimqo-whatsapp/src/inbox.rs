@@ -99,6 +99,9 @@ pub struct MessageRow {
     /// Every reaction's emoji, concatenated.
     #[diesel(sql_type = Nullable<Text>)]
     pub reactions: Option<String>,
+    /// Media that can be downloaded is stored for this message.
+    #[diesel(sql_type = Bool)]
+    pub has_media: bool,
 }
 
 impl Inbox {
@@ -202,7 +205,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
-                 rowid AS seq,
+                 rowid AS seq, media IS NOT NULL AS has_media,
                  (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = messages.chat AND x.target = messages.id) AS reactions
@@ -280,6 +283,25 @@ impl Inbox {
     }
 
     #[cfg(test)]
+    pub(crate) fn insert_media_for_test(&self, chat: &str, id: &str, media: Vec<u8>) {
+        let row = Row {
+            chat: chat.into(),
+            sender: chat.into(),
+            id: id.into(),
+            ts: 1,
+            body: None,
+            from_me: false,
+            kind: "image".into(),
+            sender_name: String::new(),
+            status: "",
+            read: true,
+            expires_at: None,
+            media: Some(media),
+        };
+        self.commit(vec![row], &[]).unwrap();
+    }
+
+    #[cfg(test)]
     pub(crate) fn insert_for_test(&self, chat: &str, sender: &str, id: &str) {
         let row = Row {
             chat: chat.into(),
@@ -293,6 +315,7 @@ impl Inbox {
             status: "",
             read: false,
             expires_at: None,
+            media: None,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -396,8 +419,8 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
                (chat, sender, id, ts, body, from_me, kind, sender_name, status, read,
-                expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expires_at, media)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -410,6 +433,7 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Text, _>(r.status)
         .bind::<Bool, _>(r.read)
         .bind::<Nullable<BigInt>, _>(r.expires_at)
+        .bind::<Nullable<diesel::sql_types::Binary>, _>(r.media)
         .execute(c)?;
     }
     Ok(())
@@ -472,6 +496,8 @@ const LATER: &[(i64, &[&str])] = &[
         10,
         &["CREATE TABLE avatars (jid TEXT PRIMARY KEY, picture_id TEXT, checked_at INTEGER)"],
     ),
+    // What is needed to download a message's media later.
+    (11, &["ALTER TABLE messages ADD COLUMN media BLOB"]),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
@@ -586,6 +612,8 @@ pub(crate) struct Row {
     pub read: bool,
     /// Disappearing messages: when to delete it (unix seconds).
     pub expires_at: Option<i64>,
+    /// The encoded media message (keys, URL, thumbnail), for downloading.
+    pub media: Option<Vec<u8>>,
 }
 
 impl Row {
@@ -611,6 +639,7 @@ impl Row {
                 .message
                 .get_ephemeral_expiration()
                 .map(|s| m.info.timestamp.timestamp() + i64::from(s)),
+            media: media_of(&m.message),
         })
     }
 }
@@ -646,6 +675,14 @@ pub(crate) fn chat_key(src: &MessageSource) -> String {
     alt.filter(|j| j.is_pn())
         .unwrap_or(&src.chat)
         .to_non_ad_string()
+}
+
+/// The encoded image message, kept so the picture can be downloaded when
+/// it is shown. ponytail: images only; other media keep a placeholder.
+pub(crate) fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
+    use whatsapp_rust::buffa::Message as _;
+    let image = message.get_base_message().image_message.as_option()?;
+    Some(image.encode_to_vec())
 }
 
 /// What the timeline shows, or `None` for messages that only change other
@@ -728,6 +765,7 @@ mod tests {
             status: "",
             read: from_me,
             expires_at: None,
+            media: None,
         }
     }
 

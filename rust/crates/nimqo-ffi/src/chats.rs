@@ -105,6 +105,8 @@ pub struct ChatMessage {
     /// The sender's name in the phone's address book.
     pub contact_name: Option<String>,
     pub edited: bool,
+    /// A picture (thumbnail or full) can be shown for this message.
+    pub has_media: bool,
     /// Every reaction's emoji, concatenated (e.g. "👍❤️").
     pub reactions: Option<String>,
     pub from_me: bool,
@@ -120,6 +122,7 @@ impl From<MessageRow> for ChatMessage {
         Self {
             id: r.id,
             seq: r.seq,
+            has_media: r.has_media,
             sender: r.sender,
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,

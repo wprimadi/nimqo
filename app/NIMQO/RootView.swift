@@ -52,6 +52,7 @@ struct MainView: View {
                         chat: chat,
                         messages: model.messages,
                         hasOlder: model.hasOlderMessages,
+                        pictures: model.pictures,
                         loadOlder: { await model.loadOlderMessages() },
                         send: chat.id == model.sendableChatId ? model.send : nil
                     )

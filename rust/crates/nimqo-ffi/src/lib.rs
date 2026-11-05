@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use nimqo_whatsapp::attachments::Attachments;
 use nimqo_whatsapp::avatars::Avatars;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
@@ -131,6 +132,7 @@ pub struct Core {
     inbox: Inbox,
     sender: Arc<outbox::Sender>,
     avatars: Arc<Avatars>,
+    attachments: Arc<Attachments>,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -174,6 +176,7 @@ impl Core {
             inbox: session.inbox,
             sender: session.sender,
             avatars: session.avatars,
+            attachments: session.attachments,
             lock: Mutex::new(Some(session.lock)),
         }))
     }
@@ -230,6 +233,33 @@ impl Core {
     #[must_use]
     pub fn sendable_chat_id(&self) -> String {
         self.sender.peer_chat()
+    }
+
+    /// The picture of message `seq`: the full image once downloaded, else
+    /// the thumbnail that came with the message.
+    ///
+    /// # Errors
+    /// `Storage` if it cannot be read.
+    pub fn picture(&self, chat_id: &str, seq: i64) -> Result<Option<MessagePicture>, CoreError> {
+        Ok(self
+            .attachments
+            .picture(chat_id, seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .map(|p| MessagePicture {
+                bytes: p.bytes,
+                full: p.full,
+            }))
+    }
+
+    /// Downloads message `seq`'s full image in the background;
+    /// `on_chats_changed` reports it stored. Call it for messages on screen.
+    pub fn download_picture(&self, chat_id: String, seq: i64) {
+        let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
+        self.runtime.spawn(async move {
+            if let Err(e) = store.download(&client, &chat_id, seq).await {
+                log::info!("picture not downloaded: {e:#}");
+            }
+        });
     }
 
     /// The stored profile picture of a chat (JPEG), if any.
@@ -453,6 +483,13 @@ async fn purge_expired(inbox: Inbox) {
     }
 }
 
+#[derive(uniffi::Record)]
+pub struct MessagePicture {
+    pub bytes: Vec<u8>,
+    /// False while only the thumbnail is stored.
+    pub full: bool,
+}
+
 /// Position of a message in a chat's timeline.
 #[derive(uniffi::Record)]
 pub struct Cursor {
@@ -468,6 +505,19 @@ struct Session {
     inbox: Inbox,
     sender: Arc<outbox::Sender>,
     avatars: Arc<Avatars>,
+    attachments: Arc<Attachments>,
+}
+
+async fn open_stores() -> Result<stores::Stores, CoreError> {
+    stores::open(Fault::None).await.map_err(|e| {
+        if e.downcast_ref::<AlreadyRunning>().is_some() {
+            CoreError::AlreadyRunning
+        } else {
+            CoreError::Storage {
+                detail: format!("{e:#}"),
+            }
+        }
+    })
 }
 
 async fn connect(
@@ -476,15 +526,7 @@ async fn connect(
     pair_phone: Arc<Mutex<Option<String>>>,
 ) -> Result<Session, CoreError> {
     let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
-    let mut stores = stores::open(Fault::None).await.map_err(|e| {
-        if e.downcast_ref::<AlreadyRunning>().is_some() {
-            CoreError::AlreadyRunning
-        } else {
-            CoreError::Storage {
-                detail: format!("{e:#}"),
-            }
-        }
-    })?;
+    let mut stores = open_stores().await?;
     let listener = Arc::clone(&machine.listener);
     stores
         .inbox
@@ -503,6 +545,11 @@ async fn connect(
     let avatars = Arc::new(Avatars::new(
         stores.inbox.clone(),
         stores.avatar_dir.clone(),
+        stores.media_key.clone(),
+    ));
+    let attachments = Arc::new(Attachments::new(
+        stores.inbox.clone(),
+        stores.media_dir.clone(),
         stores.media_key.clone(),
     ));
     let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell, &avatars)
@@ -573,6 +620,7 @@ async fn connect(
         inbox,
         sender,
         avatars,
+        attachments,
     })
 }
 
