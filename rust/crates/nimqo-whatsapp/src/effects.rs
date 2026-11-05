@@ -57,16 +57,19 @@ impl Effect {
             });
         }
         let p = base.protocol_message.as_option()?;
+        // Timer changes carry no key: they change the chat, not a message.
+        if p.r#type? == Type::EPHEMERAL_SETTING {
+            return Some(Self::Timer {
+                chat,
+                seconds: p.ephemeral_expiration.unwrap_or(0),
+            });
+        }
         let target = p.key.as_option()?.id.clone()?;
         match p.r#type? {
             Type::REVOKE => Some(Self::Revoke {
                 chat,
                 sender,
                 target,
-            }),
-            Type::EPHEMERAL_SETTING => Some(Self::Timer {
-                chat,
-                seconds: p.ephemeral_expiration.unwrap_or(0),
             }),
             Type::MESSAGE_EDIT => {
                 let (kind, body) = classify(p.edited_message.as_option()?)?;
@@ -209,6 +212,20 @@ mod tests {
         let mut m = wa::Message::default();
         m.reaction_message = MessageField::some(r);
         m
+    }
+
+    #[test]
+    fn a_timer_change_without_a_key_is_read() {
+        let mut p = wa::message::ProtocolMessage::default();
+        p.r#type = Some(wa::message::protocol_message::Type::EPHEMERAL_SETTING);
+        p.ephemeral_expiration = Some(0);
+        let mut m = wa::Message::default();
+        m.protocol_message = MessageField::some(p);
+        let chat = "62811@s.whatsapp.net".to_owned();
+        assert_eq!(
+            Effect::parse(&m, chat.clone(), "me".into()),
+            Some(Effect::Timer { chat, seconds: 0 })
+        );
     }
 
     #[test]
