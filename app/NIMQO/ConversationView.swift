@@ -25,40 +25,52 @@ struct ConversationView: View {
         .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
-    /// The message kept in place while a page is prepended above it.
-    @State private var position: Int64?
+    /// Whether the top of the timeline (the spinner) is on screen.
+    @State private var atTop = false
+    @State private var isLoading = false
 
     private var timeline: some View {
-        ScrollView {
-            LazyVStack(spacing: Theme.Spacing.small) {
-                if hasOlder {
-                    ProgressView().controlSize(.small)
-                }
-                // seq, not id: ids repeat across senders in groups.
-                ForEach(messages, id: \.seq) { message in
-                    MessageBubble(message: message, showsSender: chat.isGroup)
-                        .onAppear {
-                            // Reaching the oldest message loads the page
-                            // before it; each new oldest one does it again.
-                            if message.seq == messages.first?.seq, hasOlder {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: Theme.Spacing.small) {
+                    if hasOlder {
+                        ProgressView().controlSize(.small)
+                            .onAppear {
+                                atTop = true
                                 showOlder()
                             }
-                        }
+                            .onDisappear { atTop = false }
+                    }
+                    // seq, not id: ids repeat across senders in groups.
+                    ForEach(messages, id: \.seq) { message in
+                        MessageBubble(message: message, showsSender: chat.isGroup)
+                    }
+                }
+                .padding(Theme.Spacing.medium)
+            }
+            .defaultScrollAnchor(.bottom)
+            .onChange(of: messages.first?.seq) { old, _ in
+                // Older messages went in above (a page, or the phone's
+                // answer): stay on the one that was first, so reading goes on
+                // from there instead of jumping to the oldest.
+                if let old {
+                    proxy.scrollTo(old, anchor: .top)
                 }
             }
-            .scrollTargetLayout()
-            .padding(Theme.Spacing.medium)
         }
-        .scrollPosition(id: $position, anchor: .top)
-        .defaultScrollAnchor(.bottom)
     }
 
+    /// Loads one page if the top is still in view once a scroll settles, so
+    /// a page coming in can never trigger the next one by itself.
     private func showOlder() {
-        let anchor = messages.first?.seq
+        guard !isLoading else { return }
+        isLoading = true
         Task {
-            await loadOlder()
-            // Without this the view jumps to the new top.
-            position = anchor
+            try? await Task.sleep(for: .milliseconds(300))
+            if atTop {
+                await loadOlder()
+            }
+            isLoading = false
         }
     }
 }
