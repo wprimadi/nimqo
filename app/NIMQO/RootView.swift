@@ -44,7 +44,11 @@ struct MainView: View {
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 280)
         } detail: {
             if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
-                ConversationView(chat: chat, messages: model.messages)
+                ConversationView(
+                    chat: chat,
+                    messages: model.messages,
+                    send: chat.id == model.sendableChatId ? model.send : nil
+                )
             } else {
                 ContentUnavailableView("Select a chat", systemImage: "text.bubble")
             }

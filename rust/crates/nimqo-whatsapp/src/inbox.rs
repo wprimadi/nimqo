@@ -76,6 +76,9 @@ pub struct MessageRow {
     pub body: Option<String>,
     #[diesel(sql_type = Bool)]
     pub from_me: bool,
+    /// Delivery state of own messages; empty for received ones.
+    #[diesel(sql_type = Text)]
+    pub status: String,
 }
 
 impl Inbox {
@@ -133,7 +136,7 @@ impl Inbox {
         // ponytail: newest page only; scrollback paging comes with the timeline.
         Ok(diesel::sql_query(
             "SELECT * FROM (
-               SELECT id, sender, sender_name, ts, kind, body, from_me, rowid AS r
+               SELECT id, sender, sender_name, ts, kind, body, from_me, status, rowid AS r
                FROM messages WHERE chat = ? ORDER BY ts DESC, rowid DESC LIMIT ?)
              ORDER BY ts, r",
         )
@@ -169,7 +172,7 @@ impl Inbox {
         Ok(())
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, SqliteConnection>> {
+    pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, SqliteConnection>> {
         self.conn.lock().map_err(|_| anyhow!("inbox lock poisoned"))
     }
 
@@ -317,6 +320,17 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
                 "ALTER TABLE messages3 RENAME TO messages",
                 "CREATE INDEX messages_chat_ts ON messages (chat, ts)",
                 "PRAGMA user_version = 3",
+            ] {
+                diesel::sql_query(sql).execute(c)?;
+            }
+        }
+        if version < 4 {
+            // Outbox: own messages carry a delivery state and send attempts.
+            for sql in [
+                "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE messages ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+                "CREATE INDEX messages_outbox ON messages (status) WHERE status = 'pending'",
+                "PRAGMA user_version = 4",
             ] {
                 diesel::sql_query(sql).execute(c)?;
             }

@@ -23,6 +23,8 @@ final class CoreModel {
     private(set) var chats: [ChatSummary] = []
     /// Timeline of `selectedChat`, oldest first.
     private(set) var messages: [ChatMessage] = []
+    /// The only chat with a composer during development.
+    private(set) var sendableChatId: String?
     var selectedChat: ChatSummary.ID? {
         didSet { loadMessages() }
     }
@@ -186,6 +188,18 @@ final class CoreModel {
         }
     }
 
+    /// Queues `text` for the selected chat. Returns the reason it was not
+    /// queued, or nil. Storing can wait on a history import, so it runs off
+    /// the main thread.
+    func send(_ text: String) async -> String? {
+        guard let core, let chat = selectedChat else { return "Not connected." }
+        let result = await Task.detached { Result { try core.sendText(chatId: chat, text: text) } }.value
+        if case let .failure(error) = result {
+            return Self.message(for: error)
+        }
+        return nil
+    }
+
     func update(qrPayload payload: String) {
         qrPayload = payload
     }
@@ -233,6 +247,8 @@ final class CoreModel {
             "Encrypted storage could not be opened. NIMQO will not continue without it."
         case .Startup:
             "NIMQO could not start the WhatsApp connection."
+        case let .SendRefused(reason):
+            reason
         case nil:
             "Unexpected error: \(error.localizedDescription)"
         }
@@ -273,6 +289,7 @@ final class CoreModel {
 
     private func attach(_ core: Core) {
         self.core = core
+        sendableChatId = core.sendableChatId()
         reloadChats()
         observers.start(
             networkChanged: { [weak self] available in self?.networkReported(available) },

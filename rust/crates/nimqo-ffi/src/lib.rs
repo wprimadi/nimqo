@@ -1,12 +1,11 @@
 //! UniFFI surface for the Swift app (plan section 8, ADR 0001).
 //!
-//! The app pairs and reports connection state. It sends no messages yet; the
-//! durability hook still stores the allowlisted peer's messages, so nothing
-//! is acknowledged without being kept.
+//! The app pairs, reports connection state, shows every chat read-only, and
+//! sends only to the allowlisted test number.
 
 use std::fs::File;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use nimqo_whatsapp::history;
@@ -22,9 +21,10 @@ use whatsapp_rust::types::events::{Event, EventKind};
 uniffi::setup_scaffolding!();
 
 mod chats;
+mod outbox;
 mod state;
 
-pub use chats::{Chat, ChatMessage, MessageKind};
+pub use chats::{Chat, ChatMessage, Delivery, MessageKind};
 
 pub use state::ConnectionState;
 use state::Input;
@@ -58,6 +58,8 @@ pub enum CoreError {
     Storage { detail: String },
     /// The client could not be built or started.
     Startup { detail: String },
+    /// The message was not queued; `reason` is shown to the user.
+    SendRefused { reason: String },
 }
 
 impl std::fmt::Display for CoreError {
@@ -74,6 +76,7 @@ impl std::fmt::Display for CoreError {
             ),
             Self::Storage { detail } => ("encrypted storage unavailable", detail.as_str()),
             Self::Startup { detail } => ("cannot start", detail.as_str()),
+            Self::SendRefused { reason } => ("not sent", reason.as_str()),
         };
         write!(f, "{kind}: {detail}")
     }
@@ -125,6 +128,7 @@ pub struct Core {
     pair_phone: Arc<Mutex<Option<String>>>,
     dir: PathBuf,
     inbox: Inbox,
+    sender: Arc<outbox::Sender>,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -152,20 +156,21 @@ impl Core {
             listener,
         });
         let pair_phone = Arc::new(Mutex::new(None));
-        let (handle, client, (lock, dir, inbox)) = runtime.block_on(connect(
+        let session = runtime.block_on(connect(
             test_peer,
             Arc::clone(&machine),
             Arc::clone(&pair_phone),
         ))?;
         Ok(Arc::new(Self {
             runtime,
-            handle: Mutex::new(Some(handle)),
-            client,
+            handle: Mutex::new(Some(session.handle)),
+            client: session.client,
             machine,
             pair_phone,
-            dir,
-            inbox,
-            lock: Mutex::new(Some(lock)),
+            dir: session.dir,
+            inbox: session.inbox,
+            sender: session.sender,
+            lock: Mutex::new(Some(session.lock)),
         }))
     }
 
@@ -197,6 +202,25 @@ impl Core {
             .into_iter()
             .map(ChatMessage::from)
             .collect())
+    }
+
+    /// The one chat the app may send to during development.
+    #[must_use]
+    pub fn sendable_chat_id(&self) -> String {
+        self.sender.peer_chat()
+    }
+
+    /// Queues a text message and starts sending it. Returns once it is
+    /// stored; delivery state arrives through `on_chats_changed`.
+    ///
+    /// # Errors
+    /// `SendRefused` for anything but the test chat, an empty or too long
+    /// message, or a burst; `Storage` if it cannot be queued.
+    pub fn send_text(&self, chat_id: &str, text: &str) -> Result<(), CoreError> {
+        self.sender.enqueue(chat_id, text)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush().await });
+        Ok(())
     }
 
     #[must_use]
@@ -298,13 +322,21 @@ impl Drop for Core {
     }
 }
 
+struct Session {
+    handle: BotHandle,
+    client: Arc<Client>,
+    lock: File,
+    dir: PathBuf,
+    inbox: Inbox,
+    sender: Arc<outbox::Sender>,
+}
+
 async fn connect(
     test_peer: &str,
     machine: Arc<Machine>,
     pair_phone: Arc<Mutex<Option<String>>>,
-) -> Result<(BotHandle, Arc<Client>, (File, PathBuf, Inbox)), CoreError> {
-    // Validated now; sending to it comes with the composer.
-    Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
+) -> Result<Session, CoreError> {
+    let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
     let mut stores = stores::open(Fault::None).await.map_err(|e| {
         if e.downcast_ref::<AlreadyRunning>().is_some() {
             CoreError::AlreadyRunning
@@ -320,12 +352,15 @@ async fn connect(
         .set_on_commit(Arc::new(move |chats| listener.on_chats_changed(chats)));
     let inbox = stores.inbox.clone();
     let history_inbox = stores.inbox.clone();
+    // Handlers are built before the client exists; they find the sender here.
+    let sender_cell: Arc<OnceLock<Arc<outbox::Sender>>> = Arc::default();
+    let sender_listener = Arc::clone(&machine.listener);
     let (on_qr, on_code, on_code_err) = (
         Arc::clone(&machine),
         Arc::clone(&machine),
         Arc::clone(&machine),
     );
-    let bot = Bot::builder()
+    let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell)
         .with_backend(stores.protocol)
         .with_inbound_durability_hook(stores.inbox)
         .on_qr_code(move |code, timeout| {
@@ -354,22 +389,6 @@ async fn connect(
                 }
             }
         })
-        .on_event_for(&[EventKind::HistorySync], move |event, _| {
-            let inbox = history_inbox.clone();
-            async move {
-                let Event::HistorySync(sync) = &*event else {
-                    return;
-                };
-                let sync = (**sync).clone(); // shares the compressed bytes
-                // Inflating and storing a chunk takes a while; keep it off
-                // the protocol runtime.
-                match tokio::task::spawn_blocking(move || history::import(&inbox, &sync)).await {
-                    Ok(Ok(n)) => log::info!("history chunk stored: {n} message(s)"),
-                    Ok(Err(e)) => log::warn!("history chunk not stored: {e:#}"),
-                    Err(e) => log::warn!("history import panicked: {e}"),
-                }
-            }
-        })
         .on_event_for(
             &[
                 EventKind::Connected,
@@ -393,7 +412,62 @@ async fn connect(
         .await
         .map_err(err(|detail| CoreError::Startup { detail }))?;
     let client = bot.client();
-    Ok((bot.spawn(), client, (stores.lock, stores.dir, inbox)))
+    let sender = Arc::new(outbox::Sender::new(
+        inbox.clone(),
+        Arc::clone(&client),
+        peer.jid(),
+        sender_listener,
+    ));
+    let _ = sender_cell.set(Arc::clone(&sender));
+    Ok(Session {
+        handle: bot.spawn(),
+        client,
+        lock: stores.lock,
+        dir: stores.dir,
+        inbox,
+        sender,
+    })
+}
+
+/// History import, delivery receipts, and outbox flushes on connect.
+fn message_handlers<B, T, H, R>(
+    builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
+    history_inbox: Inbox,
+    sender_cell: &Arc<OnceLock<Arc<outbox::Sender>>>,
+) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
+    let (on_up, on_receipt) = (Arc::clone(sender_cell), Arc::clone(sender_cell));
+    builder
+        .on_event_for(&[EventKind::HistorySync], move |event, _| {
+            let inbox = history_inbox.clone();
+            async move {
+                let Event::HistorySync(sync) = &*event else {
+                    return;
+                };
+                let sync = (**sync).clone(); // shares the compressed bytes
+                // Inflating and storing a chunk takes a while; keep it off
+                // the protocol runtime.
+                match tokio::task::spawn_blocking(move || history::import(&inbox, &sync)).await {
+                    Ok(Ok(n)) => log::info!("history chunk stored: {n} message(s)"),
+                    Ok(Err(e)) => log::warn!("history chunk not stored: {e:#}"),
+                    Err(e) => log::warn!("history import panicked: {e}"),
+                }
+            }
+        })
+        .on_event_for(&[EventKind::Receipt], move |event, _| {
+            if let (Event::Receipt(receipt), Some(sender)) = (&*event, on_receipt.get()) {
+                sender.on_receipt(receipt);
+            }
+            async {}
+        })
+        .on_connected(move |_| {
+            // Messages queued while offline go out now.
+            let sender = on_up.get().cloned();
+            async move {
+                if let Some(sender) = sender {
+                    sender.flush().await;
+                }
+            }
+        })
 }
 
 /// Failures are reported through the `PairingCodeError` event, so the

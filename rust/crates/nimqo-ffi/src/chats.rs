@@ -27,6 +27,30 @@ impl MessageKind {
     }
 }
 
+/// Delivery state of own messages; `None` for received ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum Delivery {
+    None,
+    Pending,
+    Sent,
+    Delivered,
+    Read,
+    Failed,
+}
+
+impl Delivery {
+    fn parse(status: &str) -> Self {
+        match status {
+            "pending" => Self::Pending,
+            "sent" => Self::Sent,
+            "delivered" => Self::Delivered,
+            "read" => Self::Read,
+            "failed" => Self::Failed,
+            _ => Self::None,
+        }
+    }
+}
+
 /// One row of the chat list: the chat and its latest message.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Chat {
@@ -68,6 +92,7 @@ pub struct ChatMessage {
     pub kind: MessageKind,
     /// Text, or a media caption or file name.
     pub body: Option<String>,
+    pub delivery: Delivery,
 }
 
 impl From<MessageRow> for ChatMessage {
@@ -80,6 +105,7 @@ impl From<MessageRow> for ChatMessage {
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),
             body: r.body,
+            delivery: Delivery::parse(&r.status),
         }
     }
 }

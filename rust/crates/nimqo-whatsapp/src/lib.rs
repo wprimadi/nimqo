@@ -5,6 +5,7 @@ pub mod db;
 pub mod history;
 pub mod inbox;
 pub mod media;
+pub mod outbox;
 pub mod peer;
 pub mod stores;
 pub mod vault;

@@ -1,13 +1,27 @@
 import NimqoCore
 import SwiftUI
 
-/// Read-only timeline. ponytail: newest 200 messages, no scrollback paging
-/// yet; plain SwiftUI until the rendering spike says otherwise.
+/// Timeline, plus a composer where sending is allowed. ponytail: newest
+/// 200 messages, no scrollback paging yet; plain SwiftUI until the
+/// rendering spike says otherwise.
 struct ConversationView: View {
     let chat: ChatSummary
     let messages: [ChatMessage]
+    /// Nil makes the chat read-only. Returns why a message was refused.
+    let send: (@MainActor (String) async -> String?)?
 
     var body: some View {
+        VStack(spacing: 0) {
+            timeline
+            if let send {
+                Divider()
+                Composer(send: send)
+            }
+        }
+        .navigationTitle(chat.title)
+    }
+
+    private var timeline: some View {
         ScrollView {
             LazyVStack(spacing: Theme.Spacing.small) {
                 ForEach(messages, id: \.id) { message in
@@ -17,7 +31,49 @@ struct ConversationView: View {
             .padding(Theme.Spacing.medium)
         }
         .defaultScrollAnchor(.bottom)
-        .navigationTitle(chat.title)
+    }
+}
+
+struct Composer: View {
+    let send: @MainActor (String) async -> String?
+    @State private var text = ""
+    @State private var refusal: String?
+    @State private var isSending = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.small) {
+            if let refusal {
+                Text(refusal).font(.caption).foregroundStyle(.red)
+            }
+            HStack(alignment: .bottom) {
+                TextField("Message", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1 ... 6)
+                    .focused($focused)
+                    .onSubmit(submit)
+                Button("Send", systemImage: "paperplane.fill", action: submit)
+                    .labelStyle(.iconOnly)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+            }
+        }
+        .padding(Theme.Spacing.medium)
+        .onAppear { focused = true }
+    }
+
+    private func submit() {
+        guard !isSending else { return }
+        isSending = true
+        let draft = text
+        Task {
+            refusal = await send(draft)
+            // Keep the draft when it was refused, so nothing typed is lost.
+            if refusal == nil, text == draft {
+                text = ""
+            }
+            isSending = false
+        }
     }
 }
 
@@ -33,6 +89,23 @@ struct MessageBubble: View {
         // ponytail: push names only until contacts are mapped; "~" marks them
         // as self-chosen.
         message.fromMe ? "You" : message.senderName.map { "~\($0)" } ?? "Unknown"
+    }
+
+    private struct Badge {
+        let name: String
+        let tint: Color
+        let label: String
+    }
+
+    private var deliverySymbol: Badge? {
+        switch message.delivery {
+        case .none: nil
+        case .pending: Badge(name: "clock", tint: .secondary, label: "Sending")
+        case .sent: Badge(name: "checkmark", tint: .secondary, label: "Sent")
+        case .delivered: Badge(name: "checkmark.circle", tint: .secondary, label: "Delivered")
+        case .read: Badge(name: "checkmark.circle.fill", tint: .blue, label: "Read")
+        case .failed: Badge(name: "exclamationmark.circle.fill", tint: .red, label: "Not sent")
+        }
     }
 
     private var time: Date {
@@ -51,9 +124,16 @@ struct MessageBubble: View {
                 Text(text)
                     .italic(message.kind != .text)
                     .textSelection(.enabled)
-                Text(time, format: .dateTime.hour().minute())
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Text(time, format: .dateTime.hour().minute())
+                    if let symbol = deliverySymbol {
+                        Image(systemName: symbol.name)
+                            .foregroundStyle(symbol.tint)
+                            .accessibilityLabel(symbol.label)
+                    }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, Theme.Spacing.medium)
             .padding(.vertical, Theme.Spacing.small)
@@ -66,6 +146,9 @@ struct MessageBubble: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))")
+        .accessibilityLabel(
+            "\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))"
+                + (deliverySymbol.map { ", \($0.label)" } ?? "")
+        )
     }
 }
