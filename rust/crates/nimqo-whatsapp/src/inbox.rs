@@ -20,6 +20,7 @@ use whatsapp_rust::types::durability_hook::InboundMessage;
 use whatsapp_rust::wacore::types::message::MessageSource;
 use whatsapp_rust::{Client, InboundDurabilityHook, Server};
 
+use crate::effects::Effect;
 use crate::vault::Key;
 
 /// Called after a commit with the chats that gained messages.
@@ -87,6 +88,11 @@ pub struct MessageRow {
     pub status: String,
     #[diesel(sql_type = Nullable<Text>)]
     pub contact_name: Option<String>,
+    #[diesel(sql_type = Bool)]
+    pub edited: bool,
+    /// Every reaction's emoji, concatenated.
+    #[diesel(sql_type = Nullable<Text>)]
+    pub reactions: Option<String>,
 }
 
 impl Inbox {
@@ -147,8 +153,11 @@ impl Inbox {
         // ponytail: newest page only; scrollback paging comes with the timeline.
         Ok(diesel::sql_query(
             "SELECT * FROM (
-               SELECT id, sender, sender_name, ts, kind, body, from_me, status, rowid AS r,
-                 (SELECT name FROM contacts WHERE jid = sender) AS contact_name
+               SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
+                 rowid AS r,
+                 (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
+                 (SELECT group_concat(emoji, '') FROM reactions x
+                  WHERE x.chat = messages.chat AND x.target = messages.id) AS reactions
                FROM messages WHERE chat = ? ORDER BY ts DESC, rowid DESC LIMIT ?)
              ORDER BY ts, r",
         )
@@ -178,10 +187,24 @@ impl Inbox {
         Ok(())
     }
 
-    fn store(&self, rows: Vec<Row>) -> Result<()> {
+    /// New messages first, then what changes them, in one transaction.
+    fn commit(&self, rows: Vec<Row>, effects: &[Effect]) -> Result<()> {
         let mut conn = self.lock()?;
-        conn.transaction(|c| insert(c, rows))?;
+        conn.transaction(|c| {
+            insert(c, rows)?;
+            effects.iter().try_for_each(|e| e.apply(c))
+        })?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn store(&self, rows: Vec<Row>) -> Result<()> {
+        self.commit(rows, &[])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_for_test(&self, effects: &[Effect]) {
+        self.commit(Vec::new(), effects).unwrap();
     }
 
     #[cfg(test)]
@@ -198,7 +221,7 @@ impl Inbox {
             status: "",
             read: false,
         };
-        self.store(vec![row]).unwrap();
+        self.commit(vec![row], &[]).unwrap();
     }
 
     pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, SqliteConnection>> {
@@ -225,8 +248,19 @@ impl Inbox {
 #[async_trait::async_trait]
 impl InboundDurabilityHook for Inbox {
     async fn on_messages(&self, client: Arc<Client>, batch: &[InboundMessage]) -> Result<()> {
-        let rows: Vec<Row> = batch.iter().filter_map(Row::from_inbound).collect();
-        if rows.is_empty() {
+        let mut rows = Vec::new();
+        let mut effects = Vec::new();
+        for m in batch {
+            if m.info.source.chat.server == Server::Broadcast {
+                continue; // status updates, not chats
+            }
+            if let Some(e) = Effect::from_inbound(m) {
+                effects.push(e);
+            } else if let Some(r) = Row::from_inbound(m) {
+                rows.push(r);
+            }
+        }
+        if rows.is_empty() && effects.is_empty() {
             return Ok(());
         }
         match self.fault {
@@ -242,7 +276,8 @@ impl InboundDurabilityHook for Inbox {
             .iter()
             .any(|r| r.chat.ends_with("@lid") || r.sender.ends_with("@lid"));
         let mut chats: Vec<String> = rows.iter().map(|r| r.chat.clone()).collect();
-        tokio::task::spawn_blocking(move || inbox.store(rows)).await??;
+        chats.extend(effects.iter().map(|e| e.chat().to_owned()));
+        tokio::task::spawn_blocking(move || inbox.commit(rows, &effects)).await??;
         chats.sort_unstable();
         chats.dedup();
         self.notify(chats);
@@ -309,6 +344,16 @@ const LATER: &[(i64, &[&str])] = &[
     (
         7,
         &["CREATE TABLE contacts (jid TEXT PRIMARY KEY, name TEXT NOT NULL)"],
+    ),
+    // Edits and reactions.
+    (
+        8,
+        &[
+            "ALTER TABLE messages ADD COLUMN edited INTEGER NOT NULL DEFAULT 0",
+            "CREATE TABLE reactions (chat TEXT NOT NULL, target TEXT NOT NULL,
+               reactor TEXT NOT NULL, emoji TEXT NOT NULL,
+               PRIMARY KEY (chat, target, reactor))",
+        ],
     ),
 ];
 
@@ -449,7 +494,7 @@ impl Row {
 
 /// Own messages are "me"; others use the phone number when the message
 /// carries it, so live and history copies of a message share one key.
-fn sender_key(src: &MessageSource) -> String {
+pub(crate) fn sender_key(src: &MessageSource) -> String {
     if src.is_from_me {
         return ME.to_owned();
     }
@@ -586,7 +631,7 @@ mod tests {
             sender: sender.into(),
             ..row(group, id, 10, false, "Ana")
         };
-        inbox.store(vec![sent(ana, "m1")]).unwrap();
+        inbox.commit(vec![sent(ana, "m1")], &[]).unwrap();
         // The same message again, plus another member reusing its id.
         let again = vec![sent(ana, "m1"), sent("62999@s.whatsapp.net", "m1")];
         inbox.import(group, Some("Family".into()), again).unwrap();

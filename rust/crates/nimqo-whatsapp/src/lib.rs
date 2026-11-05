@@ -3,6 +3,7 @@
 
 pub mod contacts;
 pub mod db;
+mod effects;
 pub mod history;
 pub mod inbox;
 pub mod lids;

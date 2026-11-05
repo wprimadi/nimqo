@@ -128,6 +128,9 @@ struct MessageBubble: View {
                     .textSelection(.enabled)
                 HStack(spacing: 4) {
                     Text(time, format: .dateTime.hour().minute())
+                    if message.edited {
+                        Text("Edited")
+                    }
                     if let symbol = deliverySymbol {
                         Image(systemName: symbol.name)
                             .foregroundStyle(symbol.tint)
@@ -143,6 +146,16 @@ struct MessageBubble: View {
                 message.fromMe ? AnyShapeStyle(.tint.opacity(0.2)) : AnyShapeStyle(.quaternary),
                 in: .rect(cornerRadius: 12)
             )
+            .overlay(alignment: message.fromMe ? .bottomLeading : .bottomTrailing) {
+                if let reactions = message.reactions {
+                    Text(reactions)
+                        .font(.caption)
+                        .padding(.horizontal, 4)
+                        .background(.background, in: .capsule)
+                        .offset(y: 10)
+                }
+            }
+            .padding(.bottom, message.reactions == nil ? 0 : 10)
             if !message.fromMe {
                 Spacer(minLength: Theme.Spacing.large)
             }
@@ -150,6 +163,8 @@ struct MessageBubble: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))"
+                + (message.edited ? ", edited" : "")
+                + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
         )
     }

@@ -48,6 +48,7 @@ extension ChatMessage {
         case .audio: "Audio"
         case .document: "Document"
         case .sticker: "Sticker"
+        case .deleted: "This message was deleted"
         case .unsupported: "Message not supported yet"
         }
         guard let body, !body.isEmpty else { return label }

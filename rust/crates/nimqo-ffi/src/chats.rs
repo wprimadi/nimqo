@@ -10,6 +10,8 @@ pub enum MessageKind {
     Audio,
     Document,
     Sticker,
+    /// Deleted for everyone by its sender.
+    Deleted,
     Unsupported,
 }
 
@@ -22,6 +24,7 @@ impl MessageKind {
             "audio" => Self::Audio,
             "document" => Self::Document,
             "sticker" => Self::Sticker,
+            "deleted" => Self::Deleted,
             _ => Self::Unsupported,
         }
     }
@@ -95,6 +98,9 @@ pub struct ChatMessage {
     pub sender_name: Option<String>,
     /// The sender's name in the phone's address book.
     pub contact_name: Option<String>,
+    pub edited: bool,
+    /// Every reaction's emoji, concatenated (e.g. "👍❤️").
+    pub reactions: Option<String>,
     pub from_me: bool,
     pub timestamp_secs: i64,
     pub kind: MessageKind,
@@ -110,6 +116,8 @@ impl From<MessageRow> for ChatMessage {
             sender: r.sender,
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,
+            edited: r.edited,
+            reactions: r.reactions,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),
