@@ -608,6 +608,7 @@ async fn connect(
                 EventKind::ConnectFailure,
                 EventKind::StreamError,
                 EventKind::PairingQrCodesExhausted,
+                EventKind::PairSuccess,
             ],
             move |event, _| {
                 if let Some(input) = input_from(&event) {
@@ -759,7 +760,10 @@ async fn request_code(client: &Arc<Client>, phone_number: String) {
 /// Maps the upstream events plan 10.1 names onto state machine inputs.
 fn input_from(event: &Event) -> Option<Input> {
     Some(match event {
-        Event::Connected(_) => Input::Connected,
+        // Linked. Upstream announces Connected only once the first history
+        // sync is through, which after a fresh pairing can take minutes;
+        // the session is live already and history fills in as it comes.
+        Event::Connected(_) | Event::PairSuccess(_) => Input::Connected,
         Event::Disconnected(_) => Input::Disconnected,
         Event::LoggedOut(_) => Input::LoggedOut,
         Event::StreamReplaced(_) => Input::StreamReplaced,

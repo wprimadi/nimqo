@@ -60,6 +60,7 @@ struct MessagePictureView: View {
     let chat: String
     let message: ChatMessage
     let store: PictureStore
+    @State private var enlarged = false
 
     var body: some View {
         Group {
@@ -84,6 +85,51 @@ struct MessagePictureView: View {
         .frame(maxWidth: 280, maxHeight: 320)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityLabel("Photo")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Opens the photo at full size.")
+        .onTapGesture { enlarged = true }
         .onAppear { store.request(chat: chat, message: message) }
+        .sheet(isPresented: $enlarged) {
+            PictureViewer(chat: chat, message: message, store: store)
+        }
+    }
+}
+
+/// The photo at full size in a sheet; Escape or Done closes it.
+struct PictureViewer: View {
+    let chat: String
+    let message: ChatMessage
+    let store: PictureStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.medium) {
+            if let picture = store.image(chat: chat, message: message) {
+                Image(nsImage: picture.image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(
+                        idealWidth: picture.image.size.width,
+                        maxWidth: .infinity,
+                        idealHeight: picture.image.size.height,
+                        maxHeight: .infinity
+                    )
+                    .accessibilityLabel(message.body ?? "Photo")
+                if !picture.full {
+                    Label("Downloading the full photo…", systemImage: "arrow.down.circle")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let caption = message.body {
+                Text(caption).textSelection(.enabled)
+            }
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(Theme.Spacing.medium)
+        .frame(minWidth: 400, maxWidth: 1200, minHeight: 300, maxHeight: 900)
     }
 }

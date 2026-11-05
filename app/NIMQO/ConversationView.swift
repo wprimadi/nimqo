@@ -8,6 +8,8 @@ struct ConversationView: View {
     let chat: ChatSummary
     let messages: [ChatMessage]
     let hasOlder: Bool
+    /// Shows the spinner; a chat that merely might have more shows none.
+    let isFetchingOlder: Bool
     let pictures: PictureStore
     let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
@@ -38,7 +40,7 @@ struct ConversationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: Theme.Spacing.small) {
-                    if hasOlder {
+                    if hasOlder, isFetchingOlder {
                         ProgressView().controlSize(.small)
                     }
                     // seq, not id: ids repeat across senders in groups.

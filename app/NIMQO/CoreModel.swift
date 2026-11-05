@@ -32,6 +32,11 @@ final class CoreModel {
     /// The chat `messages` belongs to; the view waits for it to match.
     private(set) var messagesChat: String?
     private var isLoadingOlder = false
+    /// Older messages are being read or awaited from the phone right now.
+    var isFetchingOlder: Bool {
+        isLoadingOlder || askedPhoneBefore != nil
+    }
+
     nonisolated static let pageSize: UInt32 = 200
     /// The only chat with a composer during development.
     private(set) var sendableChatId: String?
@@ -362,7 +367,7 @@ extension CoreModel {
     }
 
     /// How long the phone gets to answer a history request.
-    static let phoneHistoryWait = Duration.seconds(30)
+    static let phoneHistoryWait = Duration.seconds(10)
 }
 
 /// Receives callbacks on Rust worker threads and hops to the main actor.
