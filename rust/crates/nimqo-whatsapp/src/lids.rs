@@ -84,6 +84,18 @@ impl Inbox {
                     .bind::<Text, _>(lid)
                     .execute(c)?;
             }
+            // Per-chat state stored under the LID follows; the number wins.
+            for table in ["chat_timers", "reactions"] {
+                diesel::sql_query(format!(
+                    "UPDATE OR IGNORE {table} SET chat = ? WHERE chat = ?"
+                ))
+                .bind::<Text, _>(pn)
+                .bind::<Text, _>(lid)
+                .execute(c)?;
+                diesel::sql_query(format!("DELETE FROM {table} WHERE chat = ?"))
+                    .bind::<Text, _>(lid)
+                    .execute(c)?;
+            }
             Ok::<_, diesel::result::Error>(())
         })?;
         Ok(vec![lid.to_owned(), pn.to_owned()])
@@ -166,6 +178,10 @@ mod tests {
         inbox.record_lids(&[(lid.into(), pn.into())]).unwrap();
         assert_eq!(inbox.known_pn(lid).unwrap().as_deref(), Some(pn));
 
+        inbox.apply_for_test(&[crate::effects::Effect::Timer {
+            chat: lid.into(),
+            seconds: 0,
+        }]);
         inbox.merge_lid(lid, pn).unwrap();
         let chats: Vec<_> = inbox
             .chats(10)
@@ -174,6 +190,11 @@ mod tests {
             .map(|c| c.chat)
             .collect();
         assert_eq!(chats, [pn]);
+        assert_eq!(
+            inbox.chats(10).unwrap()[0].timer,
+            0,
+            "timer moved, no LID row left"
+        );
         assert_eq!(inbox.count().unwrap(), 2);
         assert_eq!(inbox.lid_users().unwrap(), Vec::<String>::new());
         drop(inbox);

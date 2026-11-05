@@ -307,6 +307,19 @@ impl InboundDurabilityHook for Inbox {
         let has_lid = rows
             .iter()
             .any(|r| r.chat.ends_with("@lid") || r.sender.ends_with("@lid"));
+        // Effects can name a 1:1 chat by LID (e.g. a timer turned off on the
+        // phone) while its messages are stored by phone number.
+        for e in &mut effects {
+            if let Effect::Timer { seconds, .. } = e {
+                log::info!("chat timer {}", if *seconds == 0 { "off" } else { "on" });
+            }
+            let chat = e.chat_mut();
+            if let Ok(jid) = chat.parse::<whatsapp_rust::Jid>()
+                && jid.is_lid()
+            {
+                *chat = crate::lids::phone_chat(self, &client, &jid).await;
+            }
+        }
         let mut chats: Vec<String> = rows.iter().map(|r| r.chat.clone()).collect();
         chats.extend(effects.iter().map(|e| e.chat().to_owned()));
         tokio::task::spawn_blocking(move || inbox.commit(rows, &effects)).await??;

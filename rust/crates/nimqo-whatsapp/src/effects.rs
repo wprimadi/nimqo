@@ -82,6 +82,15 @@ impl Effect {
         }
     }
 
+    pub(crate) fn chat_mut(&mut self) -> &mut String {
+        match self {
+            Self::Edit { chat, .. }
+            | Self::Revoke { chat, .. }
+            | Self::React { chat, .. }
+            | Self::Timer { chat, .. } => chat,
+        }
+    }
+
     pub(crate) fn chat(&self) -> &str {
         match self {
             Self::Edit { chat, .. }
