@@ -23,8 +23,12 @@ final class CoreModel {
     private(set) var chats: [ChatSummary] = []
     /// Timeline of `selectedChat`, oldest first; grows backwards by pages.
     private(set) var messages: [ChatMessage] = []
-    /// False once the start of the chat is loaded.
+    /// False once neither the store nor the phone has anything older.
     private(set) var hasOlderMessages = false
+    /// The oldest message (seq) the phone was asked to send history before.
+    private var askedPhoneBefore: Int64?
+    /// Chats whose phone history ran out this session; not asked again.
+    private var historyExhausted: Set<String> = []
     /// The chat `messages` belongs to; the view waits for it to match.
     private(set) var messagesChat: String?
     private var isLoadingOlder = false
@@ -138,6 +142,10 @@ final class CoreModel {
         reloadChats()
         if let selectedChat, ids.contains(selectedChat) {
             loadMessages()
+            // A history answer from the phone lands before the oldest shown.
+            if askedPhoneBefore != nil {
+                Task { await loadOlderMessages(phoneAnswered: true) }
+            }
         }
     }
 
@@ -183,12 +191,14 @@ final class CoreModel {
                         ? Self.olderThan(latest.first, in: self.messages)
                         : []
                     if kept.isEmpty {
-                        self.hasOlderMessages = latest.count >= Int(limit)
+                        // Even a short chat may have more on the phone.
+                        self.hasOlderMessages = !latest.isEmpty && !self.historyExhausted.contains(id)
+                        self.askedPhoneBefore = nil
                     }
                     self.messages = kept + latest
                     self.messagesChat = id
                     let (count, older) = (self.messages.count, self.hasOlderMessages)
-                    self.log.notice("chat loaded: \(count, privacy: .public) message(s), older: \(older, privacy: .public)")
+                    self.log.notice("chat loaded: \(count, privacy: .public), older: \(older, privacy: .public)")
                 case let .failure(error): self.log.error("messages: \(String(describing: error), privacy: .private)")
                 }
             }
@@ -200,28 +210,6 @@ final class CoreModel {
     nonisolated static func olderThan(_ first: ChatMessage?, in loaded: [ChatMessage]) -> [ChatMessage] {
         guard let first else { return [] }
         return Array(loaded.prefix { ($0.timestampSecs, $0.seq) < (first.timestampSecs, first.seq) })
-    }
-
-    /// Prepends the page before the oldest loaded message.
-    func loadOlderMessages() async {
-        guard let core, let id = messagesChat, let first = messages.first,
-              hasOlderMessages, !isLoadingOlder else { return }
-        isLoadingOlder = true
-        defer { isLoadingOlder = false }
-        let cursor = Cursor(timestampSecs: first.timestampSecs, seq: first.seq)
-        log.notice("loading an older page")
-        let result = await Task.detached {
-            Result { try core.olderMessages(chatId: id, before: cursor, limit: Self.pageSize) }
-        }.value
-        guard messagesChat == id, messages.first?.seq == first.seq else { return }
-        switch result {
-        case let .success(page):
-            log.notice("older page: \(page.count, privacy: .public) message(s)")
-            messages.insert(contentsOf: page, at: 0)
-            hasOlderMessages = page.count >= Int(Self.pageSize)
-        case let .failure(error):
-            log.error("older messages: \(String(describing: error), privacy: .private)")
-        }
     }
 
     /// Queues `text` for the selected chat. Returns the reason it was not
@@ -308,60 +296,61 @@ final class CoreModel {
     }
 }
 
-/// Status and error text, derived only.
+/// Paging back through a chat: the store first, then the phone.
 extension CoreModel {
-    var statusText: String {
-        switch state {
-        case nil, .connecting: "Connecting…"
-        case .pairing: "Waiting for QR code scan"
-        case .notPaired: "The QR codes expired. Quit and reopen NIMQO to try again."
-        case .connected: "Connected"
-        case .reconnecting: "Reconnecting…"
-        case .offline: "Offline. NIMQO reconnects when the network returns."
-        case .loggedOut: "Logged out. This device was unlinked."
-        case .streamReplaced: "This session was opened elsewhere. Quit the other copy, then reopen NIMQO."
-        case let .temporaryBan(seconds):
-            "WhatsApp temporarily banned this account. Try again in \(Self.duration(seconds))."
-        case .clientOutdated: "WhatsApp no longer accepts this version. Update NIMQO."
-        case let .failed(reason): "Connection failed (\(reason))."
+    /// Prepends the page before the oldest loaded message; when the store
+    /// has none, asks the phone, unless this is the phone's answer already.
+    func loadOlderMessages(phoneAnswered: Bool = false) async {
+        guard let core, let id = messagesChat, let first = messages.first,
+              hasOlderMessages, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+        let cursor = Cursor(timestampSecs: first.timestampSecs, seq: first.seq)
+        log.notice("loading an older page")
+        let result = await Task.detached {
+            Result { try core.olderMessages(chatId: id, before: cursor, limit: Self.pageSize) }
+        }.value
+        guard messagesChat == id, messages.first?.seq == first.seq else { return }
+        switch result {
+        case let .success(page) where page.isEmpty:
+            if !phoneAnswered {
+                askPhone(core: core, chat: id, before: first.seq)
+            }
+        case let .success(page):
+            log.notice("older page: \(page.count, privacy: .public) message(s)")
+            messages.insert(contentsOf: page, at: 0)
+            askedPhoneBefore = nil
+        case let .failure(error):
+            log.error("older messages: \(String(describing: error), privacy: .private)")
         }
     }
 
-    var statusSymbol: String {
-        switch state {
-        case .connected: "checkmark.circle"
-        case .pairing, .notPaired: "qrcode"
-        case .offline: "wifi.slash"
-        case nil, .connecting, .reconnecting: "arrow.triangle.2.circlepath"
-        case .loggedOut, .streamReplaced, .temporaryBan, .clientOutdated, .failed: "exclamationmark.triangle"
+    /// The store has nothing older: ask the phone once per oldest message,
+    /// and stop if it has not answered in time (nothing older, or offline).
+    private func askPhone(core: Core, chat: String, before seq: Int64) {
+        guard askedPhoneBefore != seq else { return }
+        askedPhoneBefore = seq
+        let asked = (try? core.requestOlderHistory(chatId: chat)) ?? false
+        log.notice("asked the phone for older history: \(asked, privacy: .public)")
+        guard asked else { return stopPaging(chat) }
+        Task {
+            try? await Task.sleep(for: Self.phoneHistoryWait)
+            if askedPhoneBefore == seq, messagesChat == chat {
+                stopPaging(chat)
+            }
         }
     }
 
-    static func message(for error: Error) -> String {
-        switch error as? CoreError {
-        case .InvalidPeer:
-            "NIMQO_TEST_PEER is not an international phone number."
-        case .InvalidPhoneNumber:
-            "Enter the number in international format, for example +62 812 3456 7890."
-        case .AlreadyRunning:
-            "NIMQO is already running. Use the open copy, or quit it first."
-        case .Storage:
-            "Encrypted storage could not be opened. NIMQO will not continue without it."
-        case .Startup:
-            "NIMQO could not start the WhatsApp connection."
-        case let .SendRefused(reason):
-            reason
-        case nil:
-            "Unexpected error: \(error.localizedDescription)"
+    private func stopPaging(_ chat: String) {
+        historyExhausted.insert(chat)
+        askedPhoneBefore = nil
+        if messagesChat == chat {
+            hasOlderMessages = false
         }
     }
 
-    nonisolated static func duration(_ seconds: UInt64) -> String {
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .full
-        formatter.maximumUnitCount = 2
-        return formatter.string(from: TimeInterval(seconds)) ?? "\(seconds) seconds"
-    }
+    /// How long the phone gets to answer a history request.
+    static let phoneHistoryWait = Duration.seconds(30)
 }
 
 /// Receives callbacks on Rust worker threads and hops to the main actor.

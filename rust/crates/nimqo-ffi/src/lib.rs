@@ -229,6 +229,40 @@ impl Core {
         self.sender.peer_chat()
     }
 
+    /// Asks the linked phone (never a contact) for messages before the oldest
+    /// one stored for `chat_id`; they arrive later as history. False when
+    /// nothing is stored to anchor the request.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read or the chat id is malformed.
+    pub fn request_older_history(&self, chat_id: &str) -> Result<bool, CoreError> {
+        // WhatsApp Web asks for 50 at a time.
+        const COUNT: i32 = 50;
+        let Some((id, from_me, ts)) = self
+            .inbox
+            .oldest(chat_id)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+        else {
+            return Ok(false);
+        };
+        let jid: Jid = chat_id.parse().map_err(|_| CoreError::Storage {
+            detail: "not a chat id".into(),
+        })?;
+        let client = Arc::clone(&self.client);
+        self.runtime.spawn(async move {
+            // The phone answers later with a history chunk, imported like any
+            // other; a phone that is offline simply never answers.
+            match client
+                .fetch_message_history(&jid, &id, from_me, ts * 1000, COUNT)
+                .await
+            {
+                Ok(_) => log::info!("asked the phone for older history"),
+                Err(e) => log::warn!("older history not requested: {e:#}"),
+            }
+        });
+        Ok(true)
+    }
+
     /// Marks the chat read here. Only the test chat also tells the sender
     /// (read receipts); every other chat stays read-only toward WhatsApp.
     ///

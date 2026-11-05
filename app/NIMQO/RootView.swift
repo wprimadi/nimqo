@@ -52,7 +52,7 @@ struct MainView: View {
                         chat: chat,
                         messages: model.messages,
                         hasOlder: model.hasOlderMessages,
-                        loadOlder: model.loadOlderMessages,
+                        loadOlder: { await model.loadOlderMessages() },
                         send: chat.id == model.sendableChatId ? model.send : nil
                     )
                     // A new view per chat: it opens at the latest message.

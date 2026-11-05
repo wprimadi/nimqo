@@ -151,6 +151,33 @@ impl Inbox {
         .load(&mut *conn)?)
     }
 
+    /// The oldest stored message of `chat` as (id, from me, timestamp), the
+    /// anchor for asking the phone for history before it.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn oldest(&self, chat: &str) -> Result<Option<(String, bool, i64)>> {
+        #[derive(diesel::QueryableByName)]
+        struct Oldest {
+            #[diesel(sql_type = Text)]
+            id: String,
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            from_me: bool,
+            #[diesel(sql_type = BigInt)]
+            ts: i64,
+        }
+        let mut conn = self.lock()?;
+        let row: Option<Oldest> = diesel::OptionalExtension::optional(
+            diesel::sql_query(
+                "SELECT id, from_me, ts FROM messages WHERE chat = ? AND status <> 'pending'
+             ORDER BY ts, rowid LIMIT 1",
+            )
+            .bind::<Text, _>(chat)
+            .get_result(&mut *conn),
+        )?;
+        Ok(row.map(|r| (r.id, r.from_me, r.ts)))
+    }
+
     /// The latest `limit` messages of `chat`, oldest first.
     ///
     /// # Errors
@@ -672,6 +699,8 @@ mod tests {
             seen.splice(0..0, page.into_iter().map(|m| m.id));
         }
         assert_eq!(seen, ["a", "b", "c", "d", "e"]);
+        assert_eq!(inbox.oldest(c).unwrap().map(|o| o.0), Some("a".into()));
+        assert_eq!(inbox.oldest("none@g.us").unwrap(), None);
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }
