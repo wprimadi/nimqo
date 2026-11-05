@@ -39,7 +39,11 @@ final class CoreModel {
         didSet { loadMessages() }
     }
 
-    private var core: Core?
+    private var core: Core? {
+        didSet { avatars.core = core }
+    }
+
+    let avatars = AvatarStore()
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
     private let log = Logger(subsystem: "app.nimqo", category: "core-model")
@@ -139,6 +143,7 @@ final class CoreModel {
     }
 
     func chatsChanged(_ ids: [String]) {
+        avatars.invalidate(ids)
         reloadChats()
         if let selectedChat, ids.contains(selectedChat) {
             loadMessages()

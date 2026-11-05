@@ -23,6 +23,7 @@ pub struct Stores {
     pub inbox: Inbox,
     pub media_key: Key,
     pub media_dir: PathBuf,
+    pub avatar_dir: PathBuf,
 }
 
 /// Loads the Keychain master key and opens both databases with derived keys.
@@ -42,12 +43,14 @@ pub async fn open(fault: Fault) -> Result<Stores> {
     let protocol = SqliteDatabase::open(url, config).await?.store(1);
     let inbox = Inbox::open(&dir.join("app.db"), &master.derive(vault::APP_DB), fault)?;
     let media_dir = private_dir(&dir.join("media"))?;
+    let avatar_dir = private_dir(&dir.join("avatars"))?;
     Ok(Stores {
         lock,
         protocol,
         inbox,
         media_key: master.derive(vault::MEDIA),
         media_dir,
+        avatar_dir,
         dir,
     })
 }

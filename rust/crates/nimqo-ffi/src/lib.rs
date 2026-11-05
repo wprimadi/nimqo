@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use nimqo_whatsapp::avatars::Avatars;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
@@ -129,6 +130,7 @@ pub struct Core {
     dir: PathBuf,
     inbox: Inbox,
     sender: Arc<outbox::Sender>,
+    avatars: Arc<Avatars>,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -171,6 +173,7 @@ impl Core {
             dir: session.dir,
             inbox: session.inbox,
             sender: session.sender,
+            avatars: session.avatars,
             lock: Mutex::new(Some(session.lock)),
         }))
     }
@@ -227,6 +230,28 @@ impl Core {
     #[must_use]
     pub fn sendable_chat_id(&self) -> String {
         self.sender.peer_chat()
+    }
+
+    /// The stored profile picture of a chat (JPEG), if any.
+    ///
+    /// # Errors
+    /// `Storage` if the stored picture cannot be read.
+    pub fn avatar(&self, chat_id: &str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.avatars
+            .get(chat_id)
+            .map_err(err(|detail| CoreError::Storage { detail }))
+    }
+
+    /// Fetches a chat's profile picture in the background unless it was
+    /// checked in the last day; `on_chats_changed` reports a new one. Call it
+    /// for chats on screen only.
+    pub fn request_avatar(&self, chat_id: String) {
+        let (avatars, client) = (Arc::clone(&self.avatars), Arc::clone(&self.client));
+        self.runtime.spawn(async move {
+            if let Err(e) = avatars.refresh(&client, &chat_id, unix_now()).await {
+                log::info!("avatar not fetched: {e:#}");
+            }
+        });
     }
 
     /// Asks the linked phone (never a contact) for messages before the oldest
@@ -402,15 +427,19 @@ impl Drop for Core {
     }
 }
 
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
 /// Deletes disappearing messages when due, now and then every minute. Ends
 /// with the runtime.
 async fn purge_expired(inbox: Inbox) {
     let mut tick = tokio::time::interval(Duration::from_secs(60));
     loop {
         tick.tick().await;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        let now = unix_now();
         let batch = inbox.clone();
         match tokio::task::spawn_blocking(move || batch.purge_expired(now)).await {
             Ok(Ok(chats)) if !chats.is_empty() => {
@@ -438,6 +467,7 @@ struct Session {
     dir: PathBuf,
     inbox: Inbox,
     sender: Arc<outbox::Sender>,
+    avatars: Arc<Avatars>,
 }
 
 async fn connect(
@@ -470,7 +500,12 @@ async fn connect(
         Arc::clone(&machine),
         Arc::clone(&machine),
     );
-    let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell)
+    let avatars = Arc::new(Avatars::new(
+        stores.inbox.clone(),
+        stores.avatar_dir.clone(),
+        stores.media_key.clone(),
+    ));
+    let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell, &avatars)
         .with_backend(stores.protocol)
         .with_inbound_durability_hook(stores.inbox)
         .on_qr_code(move |code, timeout| {
@@ -537,6 +572,7 @@ async fn connect(
         dir: stores.dir,
         inbox,
         sender,
+        avatars,
     })
 }
 
@@ -545,9 +581,25 @@ fn message_handlers<B, T, H, R>(
     builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
     history_inbox: Inbox,
     sender_cell: &Arc<OnceLock<Arc<outbox::Sender>>>,
+    avatars: &Arc<Avatars>,
 ) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
     let (on_up, on_receipt) = (Arc::clone(sender_cell), Arc::clone(sender_cell));
+    let (pictures, picture_inbox) = (Arc::clone(avatars), history_inbox.clone());
     builder
+        .on_event_for(&[EventKind::PictureUpdate], move |event, client| {
+            let (avatars, inbox) = (Arc::clone(&pictures), picture_inbox.clone());
+            async move {
+                let Event::PictureUpdate(update) = &*event else {
+                    return;
+                };
+                let chat = lids::phone_chat(&inbox, &client, &update.jid).await;
+                // Fetched again next time the chat is on screen.
+                if let Err(e) = avatars.invalidate(&chat) {
+                    log::warn!("avatar not invalidated: {e:#}");
+                }
+                inbox.notify_changed(vec![chat]);
+            }
+        })
         .on_event_for(&[EventKind::HistorySync], move |event, client| {
             let inbox = history_inbox.clone();
             async move {

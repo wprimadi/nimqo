@@ -30,7 +30,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(model.chats, selection: Bindable(model).selectedChat) { chat in
-                ChatRow(chat: chat)
+                ChatRow(chat: chat, avatars: model.avatars)
             }
             .overlay {
                 if model.chats.isEmpty {
@@ -67,8 +67,17 @@ struct MainView: View {
 
 struct ChatRow: View {
     let chat: ChatSummary
+    let avatars: AvatarStore
 
     var body: some View {
+        HStack {
+            Avatar(chat: chat, store: avatars)
+            details
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var details: some View {
         VStack(alignment: .leading) {
             HStack {
                 // The icon keeps a group subject from passing as a person.
@@ -101,6 +110,5 @@ struct ChatRow: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
     }
 }

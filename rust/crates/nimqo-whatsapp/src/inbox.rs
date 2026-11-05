@@ -467,6 +467,11 @@ const LATER: &[(i64, &[&str])] = &[
             "CREATE TABLE chat_timers (chat TEXT PRIMARY KEY, seconds INTEGER NOT NULL)",
         ],
     ),
+    // Profile pictures: which one is stored and when it was last checked.
+    (
+        10,
+        &["CREATE TABLE avatars (jid TEXT PRIMARY KEY, picture_id TEXT, checked_at INTEGER)"],
+    ),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
