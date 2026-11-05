@@ -55,7 +55,8 @@ impl Inbox {
         let mut conn = self.lock()?;
         let rows: Vec<U> = diesel::sql_query(
             "SELECT chat AS jid FROM messages WHERE chat LIKE '%@lid'
-             UNION SELECT sender AS jid FROM messages WHERE sender LIKE '%@lid'",
+             UNION SELECT sender AS jid FROM messages WHERE sender LIKE '%@lid'
+             UNION SELECT jid FROM contacts WHERE jid LIKE '%@lid'",
         )
         .load(&mut *conn)?;
         Ok(rows
@@ -96,6 +97,14 @@ impl Inbox {
                     .bind::<Text, _>(lid)
                     .execute(c)?;
             }
+            // A name synced before the number was known.
+            diesel::sql_query("UPDATE OR IGNORE contacts SET jid = ? WHERE jid = ?")
+                .bind::<Text, _>(pn)
+                .bind::<Text, _>(lid)
+                .execute(c)?;
+            diesel::sql_query("DELETE FROM contacts WHERE jid = ?")
+                .bind::<Text, _>(lid)
+                .execute(c)?;
             Ok::<_, diesel::result::Error>(())
         })?;
         Ok(vec![lid.to_owned(), pn.to_owned()])
@@ -174,6 +183,8 @@ mod tests {
         inbox.insert_for_test(lid, lid, "m1");
         inbox.insert_for_test(lid, lid, "m2");
         inbox.insert_for_test(pn, pn, "m1");
+        // The address book synced before the number was known.
+        inbox.save_contact(lid, "Ana").unwrap();
         assert_eq!(inbox.lid_users().unwrap(), ["77"]);
         inbox.record_lids(&[(lid.into(), pn.into())]).unwrap();
         assert_eq!(inbox.known_pn(lid).unwrap().as_deref(), Some(pn));
@@ -190,6 +201,11 @@ mod tests {
             .map(|c| c.chat)
             .collect();
         assert_eq!(chats, [pn]);
+        assert_eq!(
+            inbox.chats(10).unwrap()[0].contact_name.as_deref(),
+            Some("Ana"),
+            "the saved name follows the number"
+        );
         assert_eq!(
             inbox.chats(10).unwrap()[0].timer,
             0,
