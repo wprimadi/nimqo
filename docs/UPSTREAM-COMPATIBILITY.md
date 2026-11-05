@@ -7,12 +7,16 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 
 | Item | Value |
 | --- | --- |
-| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58` |
+| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58`, used through the fork `wprimadi/whatsapp-rust` branch `nimqo-lid-contacts` @ `ea798c73cc4aaf136ab24b61decdde7eb27da52f` (patches below) |
 | Features | defaults off; `sqlite-storage`, `tokio-transport`, `tokio-runtime`, `tokio-native`, `ureq-client` |
 | Storage | upstream SQLite store on SQLCipher (`libsqlite3-sys` 0.38 `bundled-sqlcipher`, CommonCrypto) |
 | Rust | 1.99.1 |
 | macOS | 27.0.1, Apple Silicon; binary minimum macOS 14.0 |
 | Tools | `rust/crates/nimqo-whatsapp` binary `nimqo-poc`; SwiftPM app in `app/` via `nimqo-ffi` |
+
+## Patches on the fork
+
+- `lid_contact` app-state mutations (address-book entries keyed by LID) are reported as `ContactUpdate` / `ContactRemoved`; upstream knows the verb but drops it, so most saved names never arrived.
 
 ## Results
 

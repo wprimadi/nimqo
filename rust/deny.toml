@@ -22,4 +22,5 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/oxidezap/whatsapp-rust"]
+# A fork of oxidezap/whatsapp-rust carrying docs/UPSTREAM-COMPATIBILITY.md patches.
+allow-git = ["https://github.com/wprimadi/whatsapp-rust"]

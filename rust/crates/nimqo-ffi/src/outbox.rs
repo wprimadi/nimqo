@@ -343,8 +343,8 @@ impl Sender {
         }
     }
 
-    /// Contacts synced before this version were never stored: fetch the
-    /// address book once when none is known. A read, nothing is sent.
+    /// Fetch the address book once when none is known (never stored, or
+    /// emptied by a migration). A read, nothing is sent.
     pub async fn load_contacts_once(&self) {
         static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if let Ok((total, by_lid, matched, by_pn, direct, pushed)) = self.inbox.contact_stats() {

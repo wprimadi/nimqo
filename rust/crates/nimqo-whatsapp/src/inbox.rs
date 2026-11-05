@@ -549,6 +549,9 @@ const LATER: &[(i64, &[&str])] = &[
         13,
         &["CREATE TABLE push_names (jid TEXT PRIMARY KEY, name TEXT NOT NULL)"],
     ),
+    // Names saved by LID used to be dropped: empty the address book so the
+    // next connection loads it again, complete (load_contacts_once).
+    (14, &["DELETE FROM contacts"]),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
