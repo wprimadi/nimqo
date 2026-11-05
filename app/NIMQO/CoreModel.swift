@@ -48,11 +48,13 @@ final class CoreModel {
         didSet {
             avatars.core = core
             pictures.core = core
+            notifier.reset()
         }
     }
 
     let avatars = AvatarStore()
     let pictures = PictureStore()
+    let notifier = Notifier()
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
     private let log = Logger(subsystem: "app.nimqo", category: "core-model")
@@ -75,6 +77,7 @@ final class CoreModel {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         hasAcceptedDisclosure = defaults.bool(forKey: Self.disclosureKey)
+        notifier.open = { [weak self] chat in self?.selectedChat = chat }
         // Quit is the only path that ends the session (plan 7.6); closing the
         // window does not. Disconnect cleanly before the process exits.
         NotificationCenter.default.addObserver(
@@ -173,7 +176,9 @@ final class CoreModel {
             let result = Result { try core.chats() }
             await MainActor.run {
                 switch result {
-                case let .success(chats): self.chats = chats.map(ChatSummary.init)
+                case let .success(chats):
+                    self.chats = chats.map(ChatSummary.init)
+                    self.notifier.update(self.chats, viewing: self.selectedChat)
                 case let .failure(error): self.log.error("chats: \(String(describing: error), privacy: .private)")
                 }
             }
