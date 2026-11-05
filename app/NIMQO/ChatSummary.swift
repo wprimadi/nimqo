@@ -16,11 +16,15 @@ extension ChatSummary {
         // A push name is whatever the sender typed, so it never replaces the
         // number; it is marked with "~" the way WhatsApp marks unsaved contacts.
         let pushName = chat.name.map { "~\($0)" }
-        title = switch (chat.phone, pushName) {
-        case let (phone?, name?): "\(phone) \(name)"
-        case let (phone?, nil): phone
-        case let (nil, name?): name
-        case (nil, nil): chat.isGroup ? "Group" : "Unknown contact"
+        title = if chat.isGroup {
+            chat.name ?? "Group"
+        } else {
+            switch (chat.phone, pushName) {
+            case let (phone?, name?): "\(phone) \(name)"
+            case let (phone?, nil): phone
+            case let (nil, name?): name
+            case (nil, nil): "Unknown contact"
+            }
         }
         isGroup = chat.isGroup
         let text = ChatMessage.describe(kind: chat.lastKind, body: chat.lastBody)

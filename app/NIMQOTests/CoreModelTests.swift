@@ -73,6 +73,7 @@ struct CoreModelTests {
         #expect(chat(name: "Ana", phone: nil, group: false, kind: .text, body: "hi").title == "~Ana")
         #expect(chat(name: nil, phone: "+62", group: false, kind: .text, body: "hi").title == "+62")
         #expect(chat(name: nil, phone: nil, group: true, kind: .text, body: nil).title == "Group")
+        #expect(chat(name: "Family", phone: nil, group: true, kind: .text, body: nil).title == "Family")
         #expect(chat(name: nil, phone: nil, group: false, kind: .image, body: "beach").preview == "Photo: beach")
         #expect(chat(name: nil, phone: nil, group: false, kind: .document, body: "a.pdf").preview == "a.pdf")
         #expect(chat(name: nil, phone: nil, group: false, kind: .sticker, body: nil).preview == "Sticker")

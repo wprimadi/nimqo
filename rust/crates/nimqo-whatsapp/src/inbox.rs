@@ -47,8 +47,7 @@ pub struct Inbox {
 pub struct ChatRow {
     #[diesel(sql_type = Text)]
     pub chat: String,
-    /// Push name of the other person; `None` for groups (subjects come with
-    /// group metadata).
+    /// Group subject, or the other person's push name.
     #[diesel(sql_type = Nullable<Text>)]
     pub name: Option<String>,
     #[diesel(sql_type = BigInt)]
@@ -111,7 +110,8 @@ impl Inbox {
         // chats table if large accounts make this slow.
         Ok(diesel::sql_query(
             "SELECT m.chat, m.ts, m.kind, m.body, m.from_me,
-               CASE WHEN m.chat LIKE '%@g.us' THEN NULL ELSE
+               CASE WHEN m.chat LIKE '%@g.us'
+                 THEN (SELECT name FROM chat_names WHERE chat = m.chat) ELSE
                  (SELECT n.sender_name FROM messages n
                   WHERE n.chat = m.chat AND n.from_me = 0 AND n.sender_name <> ''
                   ORDER BY n.ts DESC LIMIT 1) END AS name
@@ -142,28 +142,30 @@ impl Inbox {
         .load(&mut *conn)?)
     }
 
-    fn store(&self, rows: Vec<Row>) -> Result<()> {
+    pub(crate) fn notify(&self, chats: Vec<String>) {
+        if let (Some(notify), false) = (&self.on_commit, chats.is_empty()) {
+            notify(chats);
+        }
+    }
+
+    /// One history conversation: its messages and, for groups, the subject.
+    pub(crate) fn import(&self, chat: &str, name: Option<String>, rows: Vec<Row>) -> Result<()> {
         let mut conn = self.lock()?;
         conn.transaction(|c| {
-            for r in rows {
-                // Redelivery is expected; the primary key makes it idempotent.
-                diesel::sql_query(
-                    "INSERT OR IGNORE INTO messages
-                       (chat, sender, id, ts, body, from_me, kind, sender_name)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                )
-                .bind::<Text, _>(r.chat)
-                .bind::<Text, _>(r.sender)
-                .bind::<Text, _>(r.id)
-                .bind::<BigInt, _>(r.ts)
-                .bind::<Nullable<Text>, _>(r.body)
-                .bind::<Bool, _>(r.from_me)
-                .bind::<Text, _>(r.kind)
-                .bind::<Text, _>(r.sender_name)
-                .execute(c)?;
+            if let Some(name) = name {
+                diesel::sql_query("INSERT OR REPLACE INTO chat_names (chat, name) VALUES (?, ?)")
+                    .bind::<Text, _>(chat)
+                    .bind::<Text, _>(name)
+                    .execute(c)?;
             }
-            Ok::<_, diesel::result::Error>(())
+            insert(c, rows)
         })?;
+        Ok(())
+    }
+
+    fn store(&self, rows: Vec<Row>) -> Result<()> {
+        let mut conn = self.lock()?;
+        conn.transaction(|c| insert(c, rows))?;
         Ok(())
     }
 
@@ -206,13 +208,33 @@ impl InboundDurabilityHook for Inbox {
         let inbox = self.clone();
         let mut chats: Vec<String> = rows.iter().map(|r| r.chat.clone()).collect();
         tokio::task::spawn_blocking(move || inbox.store(rows)).await??;
-        if let Some(notify) = &self.on_commit {
-            chats.sort_unstable();
-            chats.dedup();
-            notify(chats);
-        }
+        chats.sort_unstable();
+        chats.dedup();
+        self.notify(chats);
         Ok(())
     }
+}
+
+/// Redelivery and history overlap are expected; the primary key makes
+/// inserts idempotent.
+fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
+    for r in rows {
+        diesel::sql_query(
+            "INSERT OR IGNORE INTO messages
+               (chat, sender, id, ts, body, from_me, kind, sender_name)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind::<Text, _>(r.chat)
+        .bind::<Text, _>(r.sender)
+        .bind::<Text, _>(r.id)
+        .bind::<BigInt, _>(r.ts)
+        .bind::<Nullable<Text>, _>(r.body)
+        .bind::<Bool, _>(r.from_me)
+        .bind::<Text, _>(r.kind)
+        .bind::<Text, _>(r.sender_name)
+        .execute(c)?;
+    }
+    Ok(())
 }
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
@@ -249,20 +271,47 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
                 diesel::sql_query(sql).execute(c)?;
             }
         }
+        if version < 2 {
+            // A message id is unique within its chat; keying on the sender as
+            // well let a live copy (LID sender) and a history copy (phone
+            // sender) of the same message both be stored.
+            for sql in [
+                "CREATE TABLE messages2 (
+                    chat TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    ts INTEGER NOT NULL,
+                    body TEXT,
+                    from_me INTEGER NOT NULL DEFAULT 0,
+                    kind TEXT NOT NULL DEFAULT 'text',
+                    sender_name TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (chat, id)
+                )",
+                "INSERT OR IGNORE INTO messages2
+                   SELECT chat, sender, id, ts, body, from_me, kind, sender_name FROM messages",
+                "DROP TABLE messages",
+                "ALTER TABLE messages2 RENAME TO messages",
+                "CREATE INDEX messages_chat_ts ON messages (chat, ts)",
+                "CREATE TABLE chat_names (chat TEXT PRIMARY KEY, name TEXT NOT NULL)",
+                "PRAGMA user_version = 2",
+            ] {
+                diesel::sql_query(sql).execute(c)?;
+            }
+        }
         Ok::<_, diesel::result::Error>(())
     })?;
     Ok(())
 }
 
-struct Row {
-    chat: String,
-    sender: String,
-    id: String,
-    ts: i64,
-    body: Option<String>,
-    from_me: bool,
-    kind: String,
-    sender_name: String,
+pub(crate) struct Row {
+    pub chat: String,
+    pub sender: String,
+    pub id: String,
+    pub ts: i64,
+    pub body: Option<String>,
+    pub from_me: bool,
+    pub kind: String,
+    pub sender_name: String,
 }
 
 impl Row {
@@ -304,7 +353,7 @@ fn chat_key(src: &MessageSource) -> String {
 
 /// What the timeline shows, or `None` for messages that only change other
 /// messages or carry keys (handled in later steps, not displayed).
-fn classify(message: &wa::Message) -> Option<(&'static str, Option<String>)> {
+pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<String>)> {
     if let Some(text) = message.text_content() {
         return Some(("text", Some(text.to_owned())));
     }
@@ -386,6 +435,30 @@ mod tests {
             .collect();
         assert_eq!(ids, ["a1", "a2"]);
         assert_eq!(inbox.count().unwrap(), 3);
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn history_overlapping_live_messages_is_stored_once_and_names_groups() {
+        let path = std::env::temp_dir().join(format!("nimqo-history-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([9; 32]), Fault::None).unwrap();
+        let group = "1-2@g.us";
+        let mut live = row(group, "m1", 10, false, "Ana");
+        live.sender = "77@lid".into();
+        inbox.store(vec![live]).unwrap();
+        let mut history = row(group, "m1", 10, false, "Ana");
+        history.sender = "62811@s.whatsapp.net".into();
+        inbox
+            .import(
+                group,
+                Some("Family".into()),
+                vec![history, row(group, "m0", 5, false, "Ana")],
+            )
+            .unwrap();
+        assert_eq!(inbox.count().unwrap(), 2);
+        assert_eq!(inbox.chats(10).unwrap()[0].name.as_deref(), Some("Family"));
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

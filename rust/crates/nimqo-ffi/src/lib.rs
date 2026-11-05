@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use nimqo_whatsapp::history;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
@@ -318,6 +319,7 @@ async fn connect(
         .inbox
         .set_on_commit(Arc::new(move |chats| listener.on_chats_changed(chats)));
     let inbox = stores.inbox.clone();
+    let history_inbox = stores.inbox.clone();
     let (on_qr, on_code, on_code_err) = (
         Arc::clone(&machine),
         Arc::clone(&machine),
@@ -349,6 +351,22 @@ async fn connect(
             async move {
                 if let Some(phone) = phone {
                     request_code(&client, phone).await;
+                }
+            }
+        })
+        .on_event_for(&[EventKind::HistorySync], move |event, _| {
+            let inbox = history_inbox.clone();
+            async move {
+                let Event::HistorySync(sync) = &*event else {
+                    return;
+                };
+                let sync = (**sync).clone(); // shares the compressed bytes
+                // Inflating and storing a chunk takes a while; keep it off
+                // the protocol runtime.
+                match tokio::task::spawn_blocking(move || history::import(&inbox, &sync)).await {
+                    Ok(Ok(n)) => log::info!("history chunk stored: {n} message(s)"),
+                    Ok(Err(e)) => log::warn!("history chunk not stored: {e:#}"),
+                    Err(e) => log::warn!("history import panicked: {e}"),
                 }
             }
         })
