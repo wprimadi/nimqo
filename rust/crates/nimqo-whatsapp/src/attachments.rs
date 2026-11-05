@@ -127,11 +127,49 @@ impl Attachments {
         Ok(true)
     }
 
+    /// Deletes stored images whose message is gone (expired, deleted by
+    /// its sender, or removed). Returns how many were deleted.
+    ///
+    /// # Errors
+    /// The store or the media folder cannot be read.
+    pub fn sweep(&self) -> Result<usize> {
+        #[derive(QueryableByName)]
+        struct MessageKey {
+            #[diesel(sql_type = Text)]
+            chat: String,
+            #[diesel(sql_type = Text)]
+            sender: String,
+            #[diesel(sql_type = Text)]
+            id: String,
+        }
+        let keep: HashSet<std::ffi::OsString> = {
+            let mut conn = self.inbox.lock()?;
+            let rows: Vec<MessageKey> =
+                diesel::sql_query("SELECT chat, sender, id FROM messages WHERE media IS NOT NULL")
+                    .load(&mut *conn)?;
+            rows.iter()
+                .map(|k| file_name(&k.chat, &k.sender, &k.id).into())
+                .collect()
+        };
+        let mut removed = 0;
+        for entry in std::fs::read_dir(&self.dir)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let ours = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|e| e == "nqm");
+            if ours && !keep.contains(&name) && std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
     fn stored(&self, chat: &str, seq: i64) -> Result<Option<Stored>> {
         let mut conn = self.inbox.lock()?;
         Ok(diesel::sql_query(
             "SELECT chat, sender, id, media FROM messages
-             WHERE rowid = ? AND chat = ? AND media IS NOT NULL",
+             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind <> 'deleted'",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)
@@ -141,10 +179,14 @@ impl Attachments {
 
     /// Named by a hash of the message key, so names reveal nothing.
     fn file(&self, stored: &Stored) -> PathBuf {
-        let hash = Sha256::digest(format!("{}\n{}\n{}", stored.chat, stored.sender, stored.id));
         self.dir
-            .join(format!("{}.nqm", crate::avatars::hex(&hash[..16])))
+            .join(file_name(&stored.chat, &stored.sender, &stored.id))
     }
+}
+
+fn file_name(chat: &str, sender: &str, id: &str) -> String {
+    let hash = Sha256::digest(format!("{chat}\n{sender}\n{id}"));
+    format!("{}.nqm", crate::avatars::hex(&hash[..16]))
 }
 
 #[cfg(test)]
@@ -184,6 +226,17 @@ mod tests {
         crate::avatars::write_private(&store.file(&stored), &sealed).unwrap();
         let p = store.picture(chat, seq).unwrap().unwrap();
         assert_eq!((p.bytes.as_slice(), p.full), (&b"full"[..], true));
+        // Deleted by its sender: nothing shown, and the file goes on sweep.
+        store
+            .inbox
+            .apply_for_test(&[crate::effects::Effect::Revoke {
+                chat: chat.into(),
+                sender: chat.into(),
+                target: "m1".into(),
+            }]);
+        assert!(store.picture(chat, seq).unwrap().is_none());
+        assert_eq!(store.sweep().unwrap(), 1);
+        assert!(!store.file(&stored).exists());
         std::fs::remove_dir_all(&base).unwrap();
     }
 }

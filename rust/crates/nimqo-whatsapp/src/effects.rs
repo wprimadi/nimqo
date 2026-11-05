@@ -128,7 +128,7 @@ impl Effect {
                 sender,
                 target,
             } => diesel::sql_query(
-                "UPDATE messages SET kind = 'deleted', body = NULL
+                "UPDATE messages SET kind = 'deleted', body = NULL, media = NULL
                  WHERE chat = ? AND sender = ? AND id = ?",
             )
             .bind::<Text, _>(chat)

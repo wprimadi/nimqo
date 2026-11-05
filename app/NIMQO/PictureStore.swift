@@ -20,25 +20,33 @@ final class PictureStore {
     /// Bumped when pictures may have changed; the cache itself is not
     /// observed, so filling it during a view update changes nothing.
     private var generation = 0
-    @ObservationIgnored private var images: [Int64: (image: NSImage, full: Bool)] = [:]
-    @ObservationIgnored private var requested: Set<Int64> = []
+    /// Keyed by the message itself (chat, sender, id): storage order can be
+    /// reused once a message is gone.
+    @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)] = [:]
+    @ObservationIgnored private var requested: Set<String> = []
 
-    func image(chat: String, seq: Int64) -> (image: NSImage, full: Bool)? {
+    private static func key(_ chat: String, _ message: ChatMessage) -> String {
+        "\(chat)\n\(message.sender)\n\(message.id)"
+    }
+
+    func image(chat: String, message: ChatMessage) -> (image: NSImage, full: Bool)? {
         _ = generation
-        if let cached = images[seq] {
+        let key = Self.key(chat, message)
+        if let cached = images[key] {
             return cached
         }
-        guard let picture = (try? core?.picture(chatId: chat, seq: seq)) ?? nil,
+        guard let picture = (try? core?.picture(chatId: chat, seq: message.seq)) ?? nil,
               let image = NSImage(data: picture.bytes) else { return nil }
-        images[seq] = (image, picture.full)
+        images[key] = (image, picture.full)
         return (image, picture.full)
     }
 
     /// The picture is on screen: fetch the full image if only the thumbnail
     /// is here.
-    func request(chat: String, seq: Int64) {
-        guard let core, images[seq]?.full != true, requested.insert(seq).inserted else { return }
-        core.downloadPicture(chatId: chat, seq: seq)
+    func request(chat: String, message: ChatMessage) {
+        let key = Self.key(chat, message)
+        guard let core, images[key]?.full != true, requested.insert(key).inserted else { return }
+        core.downloadPicture(chatId: chat, seq: message.seq)
     }
 
     /// A chat changed: a full image may have arrived for its thumbnails.
@@ -55,7 +63,7 @@ struct MessagePictureView: View {
 
     var body: some View {
         Group {
-            if let picture = store.image(chat: chat, seq: message.seq) {
+            if let picture = store.image(chat: chat, message: message) {
                 Image(nsImage: picture.image)
                     .resizable()
                     .scaledToFit()
@@ -76,6 +84,6 @@ struct MessagePictureView: View {
         .frame(maxWidth: 280, maxHeight: 320)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .accessibilityLabel("Photo")
-        .onAppear { store.request(chat: chat, seq: message.seq) }
+        .onAppear { store.request(chat: chat, message: message) }
     }
 }

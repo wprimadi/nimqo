@@ -165,7 +165,10 @@ impl Core {
             Arc::clone(&machine),
             Arc::clone(&pair_phone),
         ))?;
-        runtime.spawn(purge_expired(session.inbox.clone()));
+        runtime.spawn(purge_expired(
+            session.inbox.clone(),
+            Arc::clone(&session.attachments),
+        ));
         Ok(Arc::new(Self {
             runtime,
             handle: Mutex::new(Some(session.handle)),
@@ -465,10 +468,23 @@ fn unix_now() -> i64 {
 
 /// Deletes disappearing messages when due, now and then every minute. Ends
 /// with the runtime.
-async fn purge_expired(inbox: Inbox) {
+async fn purge_expired(inbox: Inbox, attachments: Arc<Attachments>) {
     let mut tick = tokio::time::interval(Duration::from_secs(60));
+    let mut round = 0_u64;
     loop {
         tick.tick().await;
+        round = round.wrapping_add(1);
+        // Images of messages that are gone: at start, then every 15 minutes
+        // (deleted-by-sender messages are caught here too).
+        if round % 15 == 1 {
+            let store = Arc::clone(&attachments);
+            match tokio::task::spawn_blocking(move || store.sweep()).await {
+                Ok(Ok(0)) => {}
+                Ok(Ok(n)) => log::info!("removed {n} image(s) of messages that are gone"),
+                Ok(Err(e)) => log::warn!("images not swept: {e:#}"),
+                Err(e) => log::warn!("sweep task failed: {e}"),
+            }
+        }
         let now = unix_now();
         let batch = inbox.clone();
         match tokio::task::spawn_blocking(move || batch.purge_expired(now)).await {
