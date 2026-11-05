@@ -478,6 +478,8 @@ fn message_handlers<B, T, H, R>(
                 if let Some(sender) = sender {
                     sender.connection_restarted();
                     sender.flush(true).await;
+                    // Also cleans up chats stored by LID in earlier runs.
+                    lids::resolve(&sender.inbox, &sender.client).await;
                 }
             }
         })

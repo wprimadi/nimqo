@@ -11,6 +11,37 @@ use whatsapp_rust::{Client, Jid};
 use crate::inbox::Inbox;
 
 impl Inbox {
+    /// Remembers LID -> phone number pairs (from history).
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn record_lids(&self, pairs: &[(String, String)]) -> Result<()> {
+        let mut conn = self.lock()?;
+        conn.transaction(|c| {
+            for (lid, pn) in pairs {
+                diesel::sql_query("INSERT OR REPLACE INTO lid_map (lid, pn) VALUES (?, ?)")
+                    .bind::<Text, _>(lid)
+                    .bind::<Text, _>(pn)
+                    .execute(c)?;
+            }
+            Ok::<_, diesel::result::Error>(())
+        })?;
+        Ok(())
+    }
+
+    fn known_pn(&self, lid: &str) -> Result<Option<String>> {
+        #[derive(diesel::QueryableByName)]
+        struct P {
+            #[diesel(sql_type = Text)]
+            pn: String,
+        }
+        let mut conn = self.lock()?;
+        let rows: Vec<P> = diesel::sql_query("SELECT pn FROM lid_map WHERE lid = ?")
+            .bind::<Text, _>(lid)
+            .load(&mut *conn)?;
+        Ok(rows.into_iter().next().map(|p| p.pn))
+    }
+
     /// Distinct LID users still stored as a chat or a sender.
     ///
     /// # Errors
@@ -66,19 +97,27 @@ pub async fn resolve(inbox: &Inbox, client: &Client) {
         Ok(u) => u,
         Err(e) => return log::warn!("LID lookup failed: {e:#}"),
     };
-    let mut changed = Vec::new();
+    let (mut changed, mut unknown) = (Vec::new(), 0);
     for user in users {
-        let Ok(Some(entry)) = client.get_lid_pn_entry(&Jid::lid(user.as_str())).await else {
-            continue;
+        let lid = Jid::lid(user.as_str()).to_string();
+        let pn = match inbox.known_pn(&lid) {
+            Ok(Some(pn)) => pn,
+            _ => {
+                if let Ok(Some(entry)) = client.get_lid_pn_entry(&Jid::lid(user.as_str())).await {
+                    Jid::pn(&*entry.phone_number).to_string()
+                } else {
+                    unknown += 1;
+                    continue;
+                }
+            }
         };
-        let (lid, pn) = (
-            Jid::lid(user.as_str()).to_string(),
-            Jid::pn(&*entry.phone_number).to_string(),
-        );
         match inbox.merge_lid(&lid, &pn) {
             Ok(chats) => changed.extend(chats),
             Err(e) => log::warn!("LID merge failed: {e:#}"),
         }
+    }
+    if unknown > 0 {
+        log::info!("{unknown} LID address(es) without a known phone number yet");
     }
     if !changed.is_empty() {
         log::info!(
@@ -108,6 +147,8 @@ mod tests {
         inbox.insert_for_test(lid, lid, "m2");
         inbox.insert_for_test(pn, pn, "m1");
         assert_eq!(inbox.lid_users().unwrap(), ["77"]);
+        inbox.record_lids(&[(lid.into(), pn.into())]).unwrap();
+        assert_eq!(inbox.known_pn(lid).unwrap().as_deref(), Some(pn));
 
         inbox.merge_lid(lid, pn).unwrap();
         let chats: Vec<_> = inbox

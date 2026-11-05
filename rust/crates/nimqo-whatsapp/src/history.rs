@@ -18,8 +18,15 @@ use crate::inbox::{Inbox, ME, Row, classify};
 /// The chunk cannot be inflated or the store cannot be written.
 pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
     let mut stream = sync.stream();
-    let (mut total, mut chats) = (0, Vec::new());
+    let (mut total, mut chats, mut pairs) = (0, Vec::new(), Vec::new());
     while let Some(conv) = stream.next_conversation()? {
+        pairs.extend(lid_pair(conv.lid_jid.as_deref(), conv.pn_jid.as_deref()));
+        if conv.id.ends_with("@s.whatsapp.net") {
+            pairs.extend(lid_pair(conv.lid_jid.as_deref(), Some(&conv.id)));
+        }
+        if conv.id.ends_with("@lid") {
+            pairs.extend(lid_pair(Some(&conv.id), conv.pn_jid.as_deref()));
+        }
         let Some(chat) = chat_id(&conv) else { continue };
         let rows: Vec<Row> = conv
             .messages
@@ -32,8 +39,17 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         inbox.import(&chat, name, rows)?;
         chats.push(chat);
     }
+    for m in stream.remainder()?.phone_number_to_lid_mappings {
+        pairs.extend(lid_pair(m.lid_jid.as_deref(), m.pn_jid.as_deref()));
+    }
+    inbox.record_lids(&pairs)?;
     inbox.notify(chats);
     Ok(total)
+}
+
+fn lid_pair(lid: Option<&str>, pn: Option<&str>) -> Option<(String, String)> {
+    let (lid, pn) = (strip_device(lid?), strip_device(pn?));
+    (lid.ends_with("@lid") && pn.ends_with("@s.whatsapp.net")).then_some((lid, pn))
 }
 
 /// Same filing rule as live messages: LID chats under the phone number.
@@ -85,7 +101,23 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
         from_me,
         kind: kind.to_owned(),
         sender_name: m.push_name.clone().unwrap_or_default(),
+        status: if from_me {
+            history_status(m.status)
+        } else {
+            ""
+        },
     })
+}
+
+/// Never "pending": that would put the phone's message in our outbox.
+fn history_status(status: Option<wa::web_message_info::Status>) -> &'static str {
+    use wa::web_message_info::Status;
+    match status {
+        Some(Status::ERROR) => "failed",
+        Some(Status::DELIVERY_ACK) => "delivered",
+        Some(Status::READ | Status::PLAYED) => "read",
+        _ => "sent",
+    }
 }
 
 #[cfg(test)]

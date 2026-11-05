@@ -183,6 +183,7 @@ impl Inbox {
             from_me: false,
             kind: "text".into(),
             sender_name: String::new(),
+            status: "",
         };
         self.store(vec![row]).unwrap();
     }
@@ -245,8 +246,8 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
     for r in rows {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
-               (chat, sender, id, ts, body, from_me, kind, sender_name)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+               (chat, sender, id, ts, body, from_me, kind, sender_name, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -256,6 +257,7 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Bool, _>(r.from_me)
         .bind::<Text, _>(r.kind)
         .bind::<Text, _>(r.sender_name)
+        .bind::<Text, _>(r.status)
         .execute(c)?;
     }
     Ok(())
@@ -356,6 +358,17 @@ fn migrate(conn: &mut SqliteConnection) -> Result<()> {
                 diesel::sql_query(sql).execute(c)?;
             }
         }
+        if version < 5 {
+            for sql in [
+                // Own messages sent from the phone had no state to show.
+                "UPDATE messages SET status = 'sent' WHERE from_me = 1 AND status = ''",
+                // LID -> phone number pairs learned from history.
+                "CREATE TABLE lid_map (lid TEXT PRIMARY KEY, pn TEXT NOT NULL)",
+                "PRAGMA user_version = 5",
+            ] {
+                diesel::sql_query(sql).execute(c)?;
+            }
+        }
         Ok::<_, diesel::result::Error>(())
     })?;
     Ok(())
@@ -370,6 +383,9 @@ pub(crate) struct Row {
     pub from_me: bool,
     pub kind: String,
     pub sender_name: String,
+    /// Delivery state of own messages; never "pending", which belongs to
+    /// the outbox and would make it send the message again.
+    pub status: &'static str,
 }
 
 impl Row {
@@ -388,6 +404,8 @@ impl Row {
             from_me: src.is_from_me,
             kind: kind.to_owned(),
             sender_name: m.info.push_name.to_string(),
+            // Sent from the phone: the server has it, receipts move it on.
+            status: if src.is_from_me { "sent" } else { "" },
         })
     }
 }
@@ -470,6 +488,7 @@ mod tests {
             from_me,
             kind: "text".into(),
             sender_name: name.into(),
+            status: "",
         }
     }
 
