@@ -65,6 +65,9 @@ pub struct ChatRow {
     /// Name from the phone's address book, for 1:1 chats.
     #[diesel(sql_type = Nullable<Text>)]
     pub contact_name: Option<String>,
+    /// Disappearing-message timer in seconds; 0 when off.
+    #[diesel(sql_type = BigInt)]
+    pub timer: i64,
 }
 
 #[derive(Debug, diesel::QueryableByName)]
@@ -90,9 +93,6 @@ pub struct MessageRow {
     pub contact_name: Option<String>,
     #[diesel(sql_type = Bool)]
     pub edited: bool,
-    /// A disappearing message.
-    #[diesel(sql_type = Bool)]
-    pub timed: bool,
     /// Every reaction's emoji, concatenated.
     #[diesel(sql_type = Nullable<Text>)]
     pub reactions: Option<String>,
@@ -137,7 +137,8 @@ impl Inbox {
                   ORDER BY n.ts DESC LIMIT 1) END AS name,
                (SELECT COUNT(*) FROM messages u
                 WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread,
-               (SELECT name FROM contacts WHERE jid = m.chat) AS contact_name
+               (SELECT name FROM contacts WHERE jid = m.chat) AS contact_name,
+               COALESCE((SELECT seconds FROM chat_timers WHERE chat = m.chat), 0) AS timer
              FROM messages m
              WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
@@ -157,7 +158,6 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
-                 expires_at IS NOT NULL AS timed,
                  rowid AS r,
                  (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x

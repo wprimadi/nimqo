@@ -19,6 +19,8 @@ struct ConversationView: View {
             }
         }
         .navigationTitle(chat.title)
+        // Like WhatsApp, the timer belongs to the chat, not to each message.
+        .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
     private var timeline: some View {
@@ -131,9 +133,6 @@ struct MessageBubble: View {
                     if message.edited {
                         Text("Edited")
                     }
-                    if message.timed {
-                        Image(systemName: "timer").accessibilityLabel("Disappearing message")
-                    }
                     if let symbol = deliverySymbol {
                         Image(systemName: symbol.name)
                             .foregroundStyle(symbol.tint)
@@ -167,7 +166,6 @@ struct MessageBubble: View {
         .accessibilityLabel(
             "\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))"
                 + (message.edited ? ", edited" : "")
-                + (message.timed ? ", disappearing" : "")
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
         )

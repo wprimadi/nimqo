@@ -68,7 +68,7 @@ struct CoreModelTests {
         ) -> ChatSummary {
             ChatSummary(Chat(
                 id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
-                lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved
+                lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved, timerSecs: 86400
             ))
         }
         #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: nil, saved: "Mom").title == "Mom")
@@ -83,6 +83,7 @@ struct CoreModelTests {
         #expect(chat(name: nil, phone: nil, group: false, kind: .sticker, body: nil).preview == "Sticker")
         let deleted = chat(name: nil, phone: nil, group: false, kind: .deleted, body: nil)
         #expect(deleted.preview == "This message was deleted")
+        #expect(deleted.timer == "1 day")
         #expect(chat(name: nil, phone: nil, group: false, kind: .text, body: nil).unread == 3)
     }
 

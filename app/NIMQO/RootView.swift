@@ -69,6 +69,11 @@ struct ChatRow: View {
                         .accessibilityLabel("Group")
                 }
                 Text(chat.title).font(.headline).lineLimit(1)
+                if chat.timer != nil {
+                    Image(systemName: "timer")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Disappearing messages")
+                }
                 Spacer()
                 Text(chat.lastActivity, format: .relative(presentation: .numeric))
                     .font(.caption)

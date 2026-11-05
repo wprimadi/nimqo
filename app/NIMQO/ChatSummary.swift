@@ -9,6 +9,8 @@ struct ChatSummary: Identifiable, Hashable {
     let preview: String
     let lastActivity: Date
     let unread: Int
+    /// Disappearing-message duration, e.g. "1 day"; nil when off.
+    let timer: String?
 }
 
 extension ChatSummary {
@@ -35,6 +37,7 @@ extension ChatSummary {
         preview = chat.lastFromMe ? "You: \(text)" : text
         lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
         unread = Int(chat.unread)
+        timer = chat.timerSecs == 0 ? nil : CoreModel.duration(UInt64(chat.timerSecs))
     }
 }
 

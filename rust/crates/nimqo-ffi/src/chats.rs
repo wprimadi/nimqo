@@ -71,6 +71,8 @@ pub struct Chat {
     pub unread: u32,
     /// Name saved in the phone's address book.
     pub contact_name: Option<String>,
+    /// Disappearing-message timer in seconds; 0 when off.
+    pub timer_secs: u32,
 }
 
 impl From<ChatRow> for Chat {
@@ -86,6 +88,7 @@ impl From<ChatRow> for Chat {
             last_from_me: r.from_me,
             unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
             contact_name: r.contact_name,
+            timer_secs: u32::try_from(r.timer).unwrap_or(0),
             id: r.chat,
         }
     }
@@ -99,8 +102,6 @@ pub struct ChatMessage {
     /// The sender's name in the phone's address book.
     pub contact_name: Option<String>,
     pub edited: bool,
-    /// Disappearing message.
-    pub timed: bool,
     /// Every reaction's emoji, concatenated (e.g. "👍❤️").
     pub reactions: Option<String>,
     pub from_me: bool,
@@ -119,7 +120,6 @@ impl From<MessageRow> for ChatMessage {
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,
             edited: r.edited,
-            timed: r.timed,
             reactions: r.reactions,
             from_me: r.from_me,
             timestamp_secs: r.ts,

@@ -267,7 +267,7 @@ final class CoreModel {
         }
     }
 
-    static func duration(_ seconds: UInt64) -> String {
+    nonisolated static func duration(_ seconds: UInt64) -> String {
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .full
         formatter.maximumUnitCount = 2
