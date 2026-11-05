@@ -26,6 +26,8 @@ pub(crate) enum Effect {
         sender: String,
         target: String,
     },
+    /// The chat's disappearing-message timer; 0 turns it off.
+    Timer { chat: String, seconds: u32 },
     /// `emoji` None removes the reaction.
     React {
         chat: String,
@@ -62,6 +64,10 @@ impl Effect {
                 sender,
                 target,
             }),
+            Type::EPHEMERAL_SETTING => Some(Self::Timer {
+                chat,
+                seconds: p.ephemeral_expiration.unwrap_or(0),
+            }),
             Type::MESSAGE_EDIT => {
                 let (kind, body) = classify(p.edited_message.as_option()?)?;
                 Some(Self::Edit {
@@ -78,7 +84,10 @@ impl Effect {
 
     pub(crate) fn chat(&self) -> &str {
         match self {
-            Self::Edit { chat, .. } | Self::Revoke { chat, .. } | Self::React { chat, .. } => chat,
+            Self::Edit { chat, .. }
+            | Self::Revoke { chat, .. }
+            | Self::React { chat, .. }
+            | Self::Timer { chat, .. } => chat,
         }
     }
 
@@ -114,6 +123,12 @@ impl Effect {
             .bind::<Text, _>(sender)
             .bind::<Text, _>(target)
             .execute(c),
+            Self::Timer { chat, seconds } => {
+                diesel::sql_query("INSERT OR REPLACE INTO chat_timers (chat, seconds) VALUES (?, ?)")
+                    .bind::<Text, _>(chat)
+                    .bind::<diesel::sql_types::BigInt, _>(i64::from(*seconds))
+                    .execute(c)
+            }
             Self::React {
                 chat,
                 reactor,

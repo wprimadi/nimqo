@@ -161,6 +161,7 @@ impl Core {
             Arc::clone(&machine),
             Arc::clone(&pair_phone),
         ))?;
+        runtime.spawn(purge_expired(session.inbox.clone()));
         Ok(Arc::new(Self {
             runtime,
             handle: Mutex::new(Some(session.handle)),
@@ -346,6 +347,28 @@ impl Core {
 impl Drop for Core {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// Deletes disappearing messages when due, now and then every minute. Ends
+/// with the runtime.
+async fn purge_expired(inbox: Inbox) {
+    let mut tick = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        tick.tick().await;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+        let batch = inbox.clone();
+        match tokio::task::spawn_blocking(move || batch.purge_expired(now)).await {
+            Ok(Ok(chats)) if !chats.is_empty() => {
+                log::info!("removed disappearing messages from {} chat(s)", chats.len());
+                inbox.notify_changed(chats);
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => log::warn!("expired messages not removed: {e:#}"),
+            Err(e) => log::warn!("expiry task failed: {e}"),
+        }
     }
 }
 

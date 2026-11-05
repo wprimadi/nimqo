@@ -37,6 +37,13 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         total += rows.len();
         let name = chat.ends_with("@g.us").then_some(conv.name).flatten();
         inbox.import(&chat, name, rows)?;
+        if let Some(seconds) = conv.ephemeral_expiration {
+            let timer = crate::effects::Effect::Timer {
+                chat: chat.clone(),
+                seconds,
+            };
+            inbox.commit(Vec::new(), &[timer])?;
+        }
         chats.push(chat);
     }
     for m in stream.remainder()?.phone_number_to_lid_mappings {
@@ -109,6 +116,10 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
         // ponytail: history counts as read; the conversation's unread
         // count could mark its newest messages unread instead.
         read: true,
+        expires_at: m
+            .ephemeral_duration
+            .filter(|d| *d > 0)
+            .and_then(|d| Some(i64::try_from(m.message_timestamp?).ok()? + i64::from(d))),
     })
 }
 

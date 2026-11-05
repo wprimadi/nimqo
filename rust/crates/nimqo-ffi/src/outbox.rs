@@ -149,7 +149,7 @@ impl Sender {
             }
             let outcome = if p.chat == peer_chat {
                 self.pace().await;
-                self.send(&p.id, p.body).await
+                self.send(&p.id, p.body, p.timer).await
             } else {
                 // Defense in depth: never send to anyone else, whatever is stored.
                 Err("not the test chat".to_owned())
@@ -175,10 +175,14 @@ impl Sender {
         }
     }
 
-    async fn send(&self, id: &str, body: String) -> Result<(), String> {
+    async fn send(&self, id: &str, body: String, timer: Option<i64>) -> Result<(), String> {
         let id = MessageId::try_from(id.to_owned()).map_err(|e| format!("{e:?}"))?;
-        let request = SendRequest::new(&self.peer, wa::Message::text(body))
-            .with_options(SendOptions::default().with_message_id(id));
+        let mut options = SendOptions::default().with_message_id(id);
+        // A chat with disappearing messages on: ours disappear too.
+        if let Some(seconds) = timer.and_then(|t| u32::try_from(t).ok()) {
+            options = options.with_ephemeral_expiration(seconds);
+        }
+        let request = SendRequest::new(&self.peer, wa::Message::text(body)).with_options(options);
         // Only the error kind is logged; it can carry the recipient.
         self.client
             .send(request)

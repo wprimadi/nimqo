@@ -43,6 +43,9 @@ pub struct Pending {
     pub id: String,
     #[diesel(sql_type = Text)]
     pub body: String,
+    /// The chat's timer when it was queued, sent with it.
+    #[diesel(sql_type = diesel::sql_types::Nullable<BigInt>)]
+    pub timer: Option<i64>,
 }
 
 impl Inbox {
@@ -53,14 +56,17 @@ impl Inbox {
     pub fn enqueue(&self, chat: &str, id: &str, ts: i64, body: &str) -> Result<()> {
         let mut conn = self.lock()?;
         diesel::sql_query(
-            "INSERT INTO messages (chat, sender, id, ts, body, from_me, kind, status)
-             VALUES (?, ?, ?, ?, ?, 1, 'text', 'pending')",
+            "INSERT INTO messages (chat, sender, id, ts, body, from_me, kind, status, expires_at)
+             VALUES (?, ?, ?, ?, ?, 1, 'text', 'pending',
+               ? + (SELECT NULLIF(seconds, 0) FROM chat_timers WHERE chat = ?))",
         )
         .bind::<Text, _>(chat)
         .bind::<Text, _>(ME)
         .bind::<Text, _>(id)
         .bind::<BigInt, _>(ts)
         .bind::<Text, _>(body)
+        .bind::<BigInt, _>(ts)
+        .bind::<Text, _>(chat)
         .execute(&mut *conn)?;
         Ok(())
     }
@@ -72,7 +78,7 @@ impl Inbox {
     pub fn pending(&self) -> Result<Vec<Pending>> {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, id, body FROM messages
+            "SELECT chat, id, body, expires_at - ts AS timer FROM messages
              WHERE status = 'pending' AND sender = ? ORDER BY ts, rowid",
         )
         .bind::<Text, _>(ME)

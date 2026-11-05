@@ -90,6 +90,9 @@ pub struct MessageRow {
     pub contact_name: Option<String>,
     #[diesel(sql_type = Bool)]
     pub edited: bool,
+    /// A disappearing message.
+    #[diesel(sql_type = Bool)]
+    pub timed: bool,
     /// Every reaction's emoji, concatenated.
     #[diesel(sql_type = Nullable<Text>)]
     pub reactions: Option<String>,
@@ -154,6 +157,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
+                 expires_at IS NOT NULL AS timed,
                  rowid AS r,
                  (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
@@ -164,6 +168,11 @@ impl Inbox {
         .bind::<Text, _>(chat)
         .bind::<BigInt, _>(limit)
         .load(&mut *conn)?)
+    }
+
+    /// Tells the app which chats changed outside a commit.
+    pub fn notify_changed(&self, chats: Vec<String>) {
+        self.notify(chats);
     }
 
     pub(crate) fn notify(&self, chats: Vec<String>) {
@@ -188,7 +197,7 @@ impl Inbox {
     }
 
     /// New messages first, then what changes them, in one transaction.
-    fn commit(&self, rows: Vec<Row>, effects: &[Effect]) -> Result<()> {
+    pub(crate) fn commit(&self, rows: Vec<Row>, effects: &[Effect]) -> Result<()> {
         let mut conn = self.lock()?;
         conn.transaction(|c| {
             insert(c, rows)?;
@@ -208,6 +217,18 @@ impl Inbox {
     }
 
     #[cfg(test)]
+    pub(crate) fn insert_timed_for_test(&self, chat: &str, id: &str, expires_at: Option<i64>) {
+        self.insert_for_test(chat, chat, id);
+        let mut conn = self.lock().unwrap();
+        diesel::sql_query("UPDATE messages SET expires_at = ? WHERE chat = ? AND id = ?")
+            .bind::<Nullable<BigInt>, _>(expires_at)
+            .bind::<Text, _>(chat)
+            .bind::<Text, _>(id)
+            .execute(&mut *conn)
+            .unwrap();
+    }
+
+    #[cfg(test)]
     pub(crate) fn insert_for_test(&self, chat: &str, sender: &str, id: &str) {
         let row = Row {
             chat: chat.into(),
@@ -220,6 +241,7 @@ impl Inbox {
             sender_name: String::new(),
             status: "",
             read: false,
+            expires_at: None,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -257,6 +279,13 @@ impl InboundDurabilityHook for Inbox {
             if let Some(e) = Effect::from_inbound(m) {
                 effects.push(e);
             } else if let Some(r) = Row::from_inbound(m) {
+                // A timed message tells us the chat's current timer.
+                if let Some(s) = m.message.get_ephemeral_expiration() {
+                    effects.push(Effect::Timer {
+                        chat: r.chat.clone(),
+                        seconds: s,
+                    });
+                }
                 rows.push(r);
             }
         }
@@ -294,8 +323,9 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
     for r in rows {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
-               (chat, sender, id, ts, body, from_me, kind, sender_name, status, read)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               (chat, sender, id, ts, body, from_me, kind, sender_name, status, read,
+                expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -307,6 +337,7 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Text, _>(r.sender_name)
         .bind::<Text, _>(r.status)
         .bind::<Bool, _>(r.read)
+        .bind::<Nullable<BigInt>, _>(r.expires_at)
         .execute(c)?;
     }
     Ok(())
@@ -353,6 +384,15 @@ const LATER: &[(i64, &[&str])] = &[
             "CREATE TABLE reactions (chat TEXT NOT NULL, target TEXT NOT NULL,
                reactor TEXT NOT NULL, emoji TEXT NOT NULL,
                PRIMARY KEY (chat, target, reactor))",
+        ],
+    ),
+    // Disappearing messages and per-chat timers.
+    (
+        9,
+        &[
+            "ALTER TABLE messages ADD COLUMN expires_at INTEGER",
+            "CREATE INDEX messages_expiry ON messages (expires_at) WHERE expires_at IS NOT NULL",
+            "CREATE TABLE chat_timers (chat TEXT PRIMARY KEY, seconds INTEGER NOT NULL)",
         ],
     ),
 ];
@@ -467,6 +507,8 @@ pub(crate) struct Row {
     /// the outbox and would make it send the message again.
     pub status: &'static str,
     pub read: bool,
+    /// Disappearing messages: when to delete it (unix seconds).
+    pub expires_at: Option<i64>,
 }
 
 impl Row {
@@ -488,6 +530,10 @@ impl Row {
             // Sent from the phone: the server has it, receipts move it on.
             status: if src.is_from_me { "sent" } else { "" },
             read: src.is_from_me,
+            expires_at: m
+                .message
+                .get_ephemeral_expiration()
+                .map(|s| m.info.timestamp.timestamp() + i64::from(s)),
         })
     }
 }
@@ -577,6 +623,7 @@ mod tests {
             sender_name: name.into(),
             status: "",
             read: from_me,
+            expires_at: None,
         }
     }
 

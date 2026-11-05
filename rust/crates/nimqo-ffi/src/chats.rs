@@ -99,6 +99,8 @@ pub struct ChatMessage {
     /// The sender's name in the phone's address book.
     pub contact_name: Option<String>,
     pub edited: bool,
+    /// Disappearing message.
+    pub timed: bool,
     /// Every reaction's emoji, concatenated (e.g. "👍❤️").
     pub reactions: Option<String>,
     pub from_me: bool,
@@ -117,6 +119,7 @@ impl From<MessageRow> for ChatMessage {
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,
             edited: r.edited,
+            timed: r.timed,
             reactions: r.reactions,
             from_me: r.from_me,
             timestamp_secs: r.ts,

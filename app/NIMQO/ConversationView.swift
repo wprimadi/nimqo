@@ -131,6 +131,9 @@ struct MessageBubble: View {
                     if message.edited {
                         Text("Edited")
                     }
+                    if message.timed {
+                        Image(systemName: "timer").accessibilityLabel("Disappearing message")
+                    }
                     if let symbol = deliverySymbol {
                         Image(systemName: symbol.name)
                             .foregroundStyle(symbol.tint)
@@ -164,6 +167,7 @@ struct MessageBubble: View {
         .accessibilityLabel(
             "\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))"
                 + (message.edited ? ", edited" : "")
+                + (message.timed ? ", disappearing" : "")
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
         )
