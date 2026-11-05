@@ -216,22 +216,27 @@ impl Inbox {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
             "SELECT * FROM (
-               SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
-                 rowid AS seq, media IS NOT NULL AND kind = 'image' AS has_media,
-                 reply_to, quote_kind, quote_body,
-                 (SELECT q.from_me FROM messages q
-                  WHERE q.chat = messages.chat AND q.id = messages.reply_to LIMIT 1)
-                   AS quote_from_me,
-                 (SELECT coalesce((SELECT name FROM contacts WHERE jid = q.sender),
-                                  nullif(q.sender_name, ''))
-                  FROM messages q
-                  WHERE q.chat = messages.chat AND q.id = messages.reply_to LIMIT 1)
-                   AS quote_name,
-                 (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
+               SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
+                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind = 'image' AS has_media,
+                 m.reply_to,
+                 -- A quote's copy is the replier's claim: when the original is
+                 -- stored, show it instead, so author and content always match.
+                 CASE WHEN q.rowid IS NULL THEN m.quote_kind ELSE q.kind END AS quote_kind,
+                 CASE WHEN q.rowid IS NULL THEN m.quote_body ELSE q.body END AS quote_body,
+                 q.from_me AS quote_from_me,
+                 coalesce((SELECT name FROM contacts WHERE jid = q.sender),
+                          nullif(q.sender_name, '')) AS quote_name,
+                 (SELECT name FROM contacts WHERE jid = m.sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
-                  WHERE x.chat = messages.chat AND x.target = messages.id) AS reactions
-               FROM messages WHERE chat = ? AND (ts < ? OR (ts = ? AND rowid < ?))
-               ORDER BY ts DESC, rowid DESC LIMIT ?)
+                  WHERE x.chat = m.chat AND x.target = m.id) AS reactions
+               FROM messages m
+               -- The first stored message with that id; a later one reusing
+               -- it cannot take its place.
+               LEFT JOIN messages q ON q.rowid = (
+                 SELECT rowid FROM messages
+                 WHERE chat = m.chat AND id = m.reply_to ORDER BY rowid LIMIT 1)
+               WHERE m.chat = ? AND (m.ts < ? OR (m.ts = ? AND m.rowid < ?))
+               ORDER BY m.ts DESC, m.rowid DESC LIMIT ?)
              ORDER BY ts, seq",
         )
         .bind::<Text, _>(chat)

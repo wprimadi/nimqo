@@ -131,3 +131,36 @@ mod tests {
         assert!(quote_of(&wa::Message::text("plain")).is_none());
     }
 }
+
+#[cfg(test)]
+mod spoofing {
+    use crate::inbox::{Fault, Inbox};
+    use crate::vault::Key;
+
+    #[test]
+    fn a_stored_original_overrides_the_quoted_copy() {
+        let path = std::env::temp_dir().join(format!("nimqo-replies-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([3; 32]), Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        inbox.enqueue(chat, "mine", 1, "the real text").unwrap();
+        // A reply naming that message but carrying a forged copy.
+        let forged = super::Quoted {
+            id: "mine".into(),
+            sender: chat.into(),
+            from_me: false,
+            kind: "text".into(),
+            body: Some("forged".into()),
+            media: None,
+        };
+        inbox
+            .enqueue_reply(chat, "r1", 2, "reply", Some(&forged))
+            .unwrap();
+        let rows = inbox.messages(chat, 10).unwrap();
+        let reply = rows.iter().find(|r| r.id == "r1").unwrap();
+        assert_eq!(reply.quote_body.as_deref(), Some("the real text"));
+        assert_eq!(reply.quote_from_me, Some(true));
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
+}
