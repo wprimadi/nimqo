@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use nimqo_whatsapp::inbox::Inbox;
+use nimqo_whatsapp::lids;
 use nimqo_whatsapp::outbox::Status;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::{Receipt, ServerAck};
@@ -237,6 +238,24 @@ impl Sender {
         }
     }
 
+    /// The phone marked a chat read (app-state sync), which is how reads on
+    /// the phone usually reach linked devices.
+    pub async fn on_chat_marked_read(&self, jid: &Jid, read: bool, through: Option<i64>) {
+        log::info!(
+            "chat marked {} on another device",
+            if read { "read" } else { "unread" }
+        );
+        if !read {
+            return; // ponytail: "mark as unread" is not shown yet
+        }
+        let chat = lids::phone_chat(&self.inbox, &self.client, jid).await;
+        match self.inbox.read_through(&chat, through) {
+            Ok(true) => self.listener.on_chats_changed(vec![chat]),
+            Ok(false) => {}
+            Err(e) => log::warn!("read state not stored: {e:#}"),
+        }
+    }
+
     /// Read receipts to the test chat only (the caller checks the chat).
     /// ponytail: lost when offline; queue them like messages if that matters.
     pub async fn send_read_receipts(&self, ids: Vec<String>) {
@@ -248,7 +267,7 @@ impl Sender {
 
     /// Delivered and read receipts for own messages, and reads of received
     /// messages on the account's other devices.
-    pub fn on_receipt(&self, receipt: &Receipt) {
+    pub async fn on_receipt(&self, receipt: &Receipt) {
         // Diagnostics only: the type and count, never ids or addresses.
         log::info!(
             "receipt {:?} for {} message(s)",
@@ -261,9 +280,11 @@ impl Sender {
                 .iter()
                 .map(whatsapp_rust::CompactString::as_str)
                 .collect();
-            match self.inbox.read_elsewhere(&receipt.source, &ids) {
-                Ok(Some(chat)) => self.listener.on_chats_changed(vec![chat]),
-                Ok(None) => {}
+            // The chat can arrive by LID; messages are stored by number.
+            let chat = lids::phone_chat(&self.inbox, &self.client, &receipt.source.chat).await;
+            match self.inbox.read_elsewhere(&chat, &ids) {
+                Ok(true) => self.listener.on_chats_changed(vec![chat]),
+                Ok(false) => {}
                 Err(e) => log::warn!("read state not stored: {e:#}"),
             }
             return;

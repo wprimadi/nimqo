@@ -486,16 +486,31 @@ fn message_handlers<B, T, H, R>(
             }
         })
         .on_event_for(
-            &[EventKind::Receipt, EventKind::ServerAck],
+            &[
+                EventKind::Receipt,
+                EventKind::ServerAck,
+                EventKind::MarkChatAsReadUpdate,
+            ],
             move |event, _| {
-                if let Some(sender) = on_receipt.get() {
+                let sender = on_receipt.get().cloned();
+                async move {
+                    let Some(sender) = sender else { return };
                     match &*event {
-                        Event::Receipt(receipt) => sender.on_receipt(receipt),
+                        Event::Receipt(receipt) => sender.on_receipt(receipt).await,
                         Event::ServerAck(ack) => sender.on_server_ack(ack),
+                        Event::MarkChatAsReadUpdate(update) => {
+                            let range = update.action.message_range.as_option();
+                            sender
+                                .on_chat_marked_read(
+                                    &update.jid,
+                                    update.action.read.unwrap_or(false),
+                                    range.and_then(|r| r.last_message_timestamp),
+                                )
+                                .await;
+                        }
                         _ => {}
                     }
                 }
-                async {}
             },
         )
         .on_connected(move |_| {

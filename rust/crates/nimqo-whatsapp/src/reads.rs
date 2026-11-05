@@ -1,12 +1,10 @@
 //! Read state of received messages. Local only: sending read receipts is
 //! the caller's decision (during development, only for the test chat).
 
+use crate::inbox::Inbox;
 use anyhow::Result;
 use diesel::sql_types::Text;
 use diesel::{Connection, RunQueryDsl};
-use whatsapp_rust::types::message::MessageSource;
-
-use crate::inbox::{Inbox, chat_key};
 
 #[derive(diesel::QueryableByName)]
 pub struct Unread {
@@ -32,13 +30,29 @@ impl Inbox {
         .load(&mut *conn)?)
     }
 
-    /// Messages read on another of the account's devices. Returns the chat
-    /// when anything changed.
+    /// The phone marked `chat` read up to `through` (a timestamp), or all
+    /// of it. Returns whether anything changed.
     ///
     /// # Errors
     /// The store cannot be written.
-    pub fn read_elsewhere(&self, src: &MessageSource, ids: &[&str]) -> Result<Option<String>> {
-        let chat = chat_key(src);
+    pub fn read_through(&self, chat: &str, through: Option<i64>) -> Result<bool> {
+        let mut conn = self.lock()?;
+        let n = diesel::sql_query(
+            "UPDATE messages SET read = 1
+             WHERE chat = ? AND from_me = 0 AND read = 0 AND ts <= ?",
+        )
+        .bind::<Text, _>(chat)
+        .bind::<diesel::sql_types::BigInt, _>(through.unwrap_or(i64::MAX))
+        .execute(&mut *conn)?;
+        Ok(n > 0)
+    }
+
+    /// Messages read on another of the account's devices (read-self
+    /// receipts). Returns whether anything changed.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn read_elsewhere(&self, chat: &str, ids: &[&str]) -> Result<bool> {
         let mut conn = self.lock()?;
         let changed = conn.transaction(|c| {
             let mut n = 0;
@@ -46,13 +60,13 @@ impl Inbox {
                 n += diesel::sql_query(
                     "UPDATE messages SET read = 1 WHERE chat = ? AND id = ? AND from_me = 0",
                 )
-                .bind::<Text, _>(&chat)
+                .bind::<Text, _>(chat)
                 .bind::<Text, _>(*id)
                 .execute(c)?;
             }
             Ok::<_, diesel::result::Error>(n)
         })?;
-        Ok((changed > 0).then_some(chat))
+        Ok(changed > 0)
     }
 }
 
@@ -88,6 +102,14 @@ mod tests {
             "no second receipt"
         );
         assert_eq!((unread(a), unread(b)), (0, 1));
+
+        // Read on the phone: by receipt ids, or the whole chat up to a time.
+        inbox.insert_for_test(b, b, "m4");
+        assert!(inbox.read_elsewhere(b, &["m3"]).unwrap());
+        assert_eq!(unread(b), 1);
+        assert!(inbox.read_through(b, None).unwrap());
+        assert!(!inbox.read_through(b, None).unwrap());
+        assert_eq!(unread(b), 0);
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

@@ -90,6 +90,22 @@ impl Inbox {
     }
 }
 
+/// The chat id messages are stored under: a LID 1:1 chat becomes its phone
+/// number when known (see `merge_lid`); anything else loses its device.
+pub async fn phone_chat(inbox: &Inbox, client: &Client, jid: &Jid) -> String {
+    let plain = jid.to_non_ad_string();
+    if !jid.is_lid() {
+        return plain;
+    }
+    if let Ok(Some(pn)) = inbox.known_pn(&plain) {
+        return pn;
+    }
+    match client.get_lid_pn_entry(jid).await {
+        Ok(Some(entry)) => Jid::pn(&*entry.phone_number).to_string(),
+        _ => plain,
+    }
+}
+
 /// Merges every stored LID whose phone number upstream now knows, then tells
 /// the app which chats changed.
 pub async fn resolve(inbox: &Inbox, client: &Client) {
