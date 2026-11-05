@@ -25,8 +25,9 @@ struct ConversationView: View {
         .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
-    /// Whether the top of the timeline (the spinner) is on screen.
-    @State private var atTop = false
+    /// The topmost message on screen, reported by the scroll view as the
+    /// user scrolls; paging keys off it rather than off views appearing.
+    @State private var topSeq: Int64?
     @State private var isLoading = false
 
     private var timeline: some View {
@@ -35,20 +36,23 @@ struct ConversationView: View {
                 LazyVStack(spacing: Theme.Spacing.small) {
                     if hasOlder {
                         ProgressView().controlSize(.small)
-                            .onAppear {
-                                atTop = true
-                                showOlder()
-                            }
-                            .onDisappear { atTop = false }
                     }
                     // seq, not id: ids repeat across senders in groups.
                     ForEach(messages, id: \.seq) { message in
                         MessageBubble(message: message, showsSender: chat.isGroup)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(Theme.Spacing.medium)
             }
+            .scrollPosition(id: $topSeq, anchor: .top)
             .defaultScrollAnchor(.bottom)
+            .onChange(of: topSeq) { _, top in
+                // Near the oldest loaded message: load the page before it.
+                if hasOlder, let top, messages.prefix(5).contains(where: { $0.seq == top }) {
+                    showOlder()
+                }
+            }
             .onChange(of: messages.first?.seq) { old, _ in
                 // Older messages went in above (a page, or the phone's
                 // answer): stay on the one that was first, so reading goes on
@@ -60,16 +64,13 @@ struct ConversationView: View {
         }
     }
 
-    /// Loads one page if the top is still in view once a scroll settles, so
-    /// a page coming in can never trigger the next one by itself.
+    /// One page at a time; the scroll restore above keeps a page coming in
+    /// from triggering the next one by itself.
     private func showOlder() {
         guard !isLoading else { return }
         isLoading = true
         Task {
-            try? await Task.sleep(for: .milliseconds(300))
-            if atTop {
-                await loadOlder()
-            }
+            await loadOlder()
             isLoading = false
         }
     }
