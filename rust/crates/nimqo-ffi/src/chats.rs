@@ -97,6 +97,9 @@ impl From<ChatRow> for Chat {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ChatMessage {
     pub id: String,
+    /// Unique within the chat (ids are not, in groups); with
+    /// `timestamp_secs` it is the cursor for older pages.
+    pub seq: i64,
     pub sender: String,
     pub sender_name: Option<String>,
     /// The sender's name in the phone's address book.
@@ -116,6 +119,7 @@ impl From<MessageRow> for ChatMessage {
     fn from(r: MessageRow) -> Self {
         Self {
             id: r.id,
+            seq: r.seq,
             sender: r.sender,
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,

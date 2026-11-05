@@ -72,6 +72,9 @@ pub struct ChatRow {
 
 #[derive(Debug, diesel::QueryableByName)]
 pub struct MessageRow {
+    /// Storage order within a timestamp; the paging cursor with `ts`.
+    #[diesel(sql_type = BigInt)]
+    pub seq: i64,
     #[diesel(sql_type = Text)]
     pub id: String,
     #[diesel(sql_type = Text)]
@@ -153,19 +156,37 @@ impl Inbox {
     /// # Errors
     /// The query fails.
     pub fn messages(&self, chat: &str, limit: i64) -> Result<Vec<MessageRow>> {
+        self.messages_before(chat, None, limit)
+    }
+
+    /// Up to `limit` messages older than `before` (a message's `(ts, seq)`),
+    /// or the latest ones when `None`; oldest first.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn messages_before(
+        &self,
+        chat: &str,
+        before: Option<(i64, i64)>,
+        limit: i64,
+    ) -> Result<Vec<MessageRow>> {
+        let (ts, seq) = before.unwrap_or((i64::MAX, i64::MAX));
         let mut conn = self.lock()?;
-        // ponytail: newest page only; scrollback paging comes with the timeline.
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT id, sender, sender_name, ts, kind, body, from_me, status, edited,
-                 rowid AS r,
+                 rowid AS seq,
                  (SELECT name FROM contacts WHERE jid = sender) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = messages.chat AND x.target = messages.id) AS reactions
-               FROM messages WHERE chat = ? ORDER BY ts DESC, rowid DESC LIMIT ?)
-             ORDER BY ts, r",
+               FROM messages WHERE chat = ? AND (ts < ? OR (ts = ? AND rowid < ?))
+               ORDER BY ts DESC, rowid DESC LIMIT ?)
+             ORDER BY ts, seq",
         )
         .bind::<Text, _>(chat)
+        .bind::<BigInt, _>(ts)
+        .bind::<BigInt, _>(ts)
+        .bind::<BigInt, _>(seq)
         .bind::<BigInt, _>(limit)
         .load(&mut *conn)?)
     }
@@ -629,6 +650,31 @@ mod tests {
     use whatsapp_rust::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn pages_walk_back_without_gaps_or_repeats() {
+        let path = std::env::temp_dir().join(format!("nimqo-pages-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([4; 32]), Fault::None).unwrap();
+        let c = "62811@s.whatsapp.net";
+        // Five messages, three sharing a timestamp.
+        let rows = [(1, "a"), (2, "b"), (2, "c"), (2, "d"), (3, "e")]
+            .map(|(ts, id)| row(c, id, ts, false, ""));
+        inbox.store(rows.into()).unwrap();
+        let mut seen = Vec::new();
+        let mut before = None;
+        loop {
+            let page = inbox.messages_before(c, before, 2).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            before = Some((page[0].ts, page[0].seq));
+            seen.splice(0..0, page.into_iter().map(|m| m.id));
+        }
+        assert_eq!(seen, ["a", "b", "c", "d", "e"]);
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn later_migrations_run_in_version_order() {

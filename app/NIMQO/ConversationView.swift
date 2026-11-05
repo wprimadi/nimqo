@@ -1,12 +1,14 @@
 import NimqoCore
 import SwiftUI
 
-/// Timeline, plus a composer where sending is allowed. ponytail: newest
-/// 200 messages, no scrollback paging yet; plain SwiftUI until the
+/// Timeline, plus a composer where sending is allowed. Older messages load
+/// a page at a time when the top is reached; plain SwiftUI until the
 /// rendering spike says otherwise.
 struct ConversationView: View {
     let chat: ChatSummary
     let messages: [ChatMessage]
+    let hasOlder: Bool
+    let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
     let send: (@MainActor (String) async -> String?)?
 
@@ -23,16 +25,36 @@ struct ConversationView: View {
         .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
+    /// The message kept in place while a page is prepended above it.
+    @State private var position: Int64?
+
     private var timeline: some View {
         ScrollView {
             LazyVStack(spacing: Theme.Spacing.small) {
-                ForEach(messages, id: \.id) { message in
+                if hasOlder {
+                    ProgressView()
+                        .controlSize(.small)
+                        .onAppear(perform: showOlder)
+                }
+                // seq, not id: ids repeat across senders in groups.
+                ForEach(messages, id: \.seq) { message in
                     MessageBubble(message: message, showsSender: chat.isGroup)
                 }
             }
+            .scrollTargetLayout()
             .padding(Theme.Spacing.medium)
         }
+        .scrollPosition(id: $position, anchor: .top)
         .defaultScrollAnchor(.bottom)
+    }
+
+    private func showOlder() {
+        let anchor = messages.first?.seq
+        Task {
+            await loadOlder()
+            // Without this the view jumps to the new top.
+            position = anchor
+        }
     }
 }
 

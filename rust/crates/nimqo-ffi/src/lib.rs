@@ -194,11 +194,29 @@ impl Core {
     ///
     /// # Errors
     /// The encrypted store cannot be read.
-    pub fn messages(&self, chat_id: &str) -> Result<Vec<ChatMessage>, CoreError> {
-        const LIMIT: i64 = 200;
+    pub fn messages(&self, chat_id: &str, limit: u32) -> Result<Vec<ChatMessage>, CoreError> {
+        self.older_messages(chat_id, None, limit)
+    }
+
+    /// Up to `limit` messages before the one at `(timestamp_secs, seq)`, or
+    /// the latest when `None`; oldest first. Fewer than `limit` means the
+    /// start of the chat.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read.
+    pub fn older_messages(
+        &self,
+        chat_id: &str,
+        before: Option<Cursor>,
+        limit: u32,
+    ) -> Result<Vec<ChatMessage>, CoreError> {
         Ok(self
             .inbox
-            .messages(chat_id, LIMIT)
+            .messages_before(
+                chat_id,
+                before.map(|c| (c.timestamp_secs, c.seq)),
+                i64::from(limit),
+            )
             .map_err(err(|detail| CoreError::Storage { detail }))?
             .into_iter()
             .map(ChatMessage::from)
@@ -370,6 +388,13 @@ async fn purge_expired(inbox: Inbox) {
             Err(e) => log::warn!("expiry task failed: {e}"),
         }
     }
+}
+
+/// Position of a message in a chat's timeline.
+#[derive(uniffi::Record)]
+pub struct Cursor {
+    pub timestamp_secs: i64,
+    pub seq: i64,
 }
 
 struct Session {

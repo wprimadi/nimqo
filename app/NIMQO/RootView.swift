@@ -47,6 +47,8 @@ struct MainView: View {
                 ConversationView(
                     chat: chat,
                     messages: model.messages,
+                    hasOlder: model.hasOlderMessages,
+                    loadOlder: model.loadOlderMessages,
                     send: chat.id == model.sendableChatId ? model.send : nil
                 )
             } else {
