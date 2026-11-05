@@ -87,6 +87,18 @@ struct CoreModelTests {
         #expect(chat(name: nil, phone: nil, group: false, kind: .text, body: nil).unread == 3)
     }
 
+    @Test func reloadKeepsOlderPagesOnly() {
+        func msg(_ time: Int64, _ seq: Int64) -> ChatMessage {
+            ChatMessage(
+                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false,
+                reactions: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil, delivery: .none
+            )
+        }
+        let loaded = [msg(1, 1), msg(2, 5), msg(2, 6), msg(3, 2)]
+        #expect(CoreModel.olderThan(msg(2, 6), in: loaded).map(\.seq) == [1, 5])
+        #expect(CoreModel.olderThan(nil, in: loaded).isEmpty)
+    }
+
     @Test func startDoesNothingUnderTests() {
         let model = CoreModel()
         model.start()

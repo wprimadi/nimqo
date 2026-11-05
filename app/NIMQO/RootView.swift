@@ -44,13 +44,20 @@ struct MainView: View {
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 280)
         } detail: {
             if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
-                ConversationView(
-                    chat: chat,
-                    messages: model.messages,
-                    hasOlder: model.hasOlderMessages,
-                    loadOlder: model.loadOlderMessages,
-                    send: chat.id == model.sendableChatId ? model.send : nil
-                )
+                if model.messagesChat != chat.id {
+                    // Never show another chat's messages while this one loads.
+                    ProgressView()
+                } else {
+                    ConversationView(
+                        chat: chat,
+                        messages: model.messages,
+                        hasOlder: model.hasOlderMessages,
+                        loadOlder: model.loadOlderMessages,
+                        send: chat.id == model.sendableChatId ? model.send : nil
+                    )
+                    // A new view per chat: it opens at the latest message.
+                    .id(chat.id)
+                }
             } else {
                 ContentUnavailableView("Select a chat", systemImage: "text.bubble")
             }

@@ -32,13 +32,18 @@ struct ConversationView: View {
         ScrollView {
             LazyVStack(spacing: Theme.Spacing.small) {
                 if hasOlder {
-                    ProgressView()
-                        .controlSize(.small)
-                        .onAppear(perform: showOlder)
+                    ProgressView().controlSize(.small)
                 }
                 // seq, not id: ids repeat across senders in groups.
                 ForEach(messages, id: \.seq) { message in
                     MessageBubble(message: message, showsSender: chat.isGroup)
+                        .onAppear {
+                            // Reaching the oldest message loads the page
+                            // before it; each new oldest one does it again.
+                            if message.seq == messages.first?.seq, hasOlder {
+                                showOlder()
+                            }
+                        }
                 }
             }
             .scrollTargetLayout()

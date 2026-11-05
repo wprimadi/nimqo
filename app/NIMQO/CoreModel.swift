@@ -25,8 +25,8 @@ final class CoreModel {
     private(set) var messages: [ChatMessage] = []
     /// False once the start of the chat is loaded.
     private(set) var hasOlderMessages = false
-    /// The chat `messages` belongs to, so a reload keeps loaded pages.
-    private var messagesChat: String?
+    /// The chat `messages` belongs to; the view waits for it to match.
+    private(set) var messagesChat: String?
     private var isLoadingOlder = false
     nonisolated static let pageSize: UInt32 = 200
     /// The only chat with a composer during development.
@@ -176,14 +176,28 @@ final class CoreModel {
                 // A newer selection may have won the race.
                 guard self.selectedChat == id else { return }
                 switch result {
-                case let .success(messages):
-                    self.messages = messages
+                case let .success(latest):
+                    // Older pages loaded meanwhile stay: keep everything
+                    // before the first message of this reload.
+                    let kept = self.messagesChat == id
+                        ? Self.olderThan(latest.first, in: self.messages)
+                        : []
+                    if kept.isEmpty {
+                        self.hasOlderMessages = latest.count >= Int(limit)
+                    }
+                    self.messages = kept + latest
                     self.messagesChat = id
-                    self.hasOlderMessages = messages.count >= Int(limit)
                 case let .failure(error): self.log.error("messages: \(String(describing: error), privacy: .private)")
                 }
             }
         }
+    }
+
+    /// The loaded messages that come before `first` in timeline order
+    /// (timestamp, then storage order); none when `first` is nil.
+    nonisolated static func olderThan(_ first: ChatMessage?, in loaded: [ChatMessage]) -> [ChatMessage] {
+        guard let first else { return [] }
+        return Array(loaded.prefix { ($0.timestampSecs, $0.seq) < (first.timestampSecs, first.seq) })
     }
 
     /// Prepends the page before the oldest loaded message.
@@ -193,12 +207,14 @@ final class CoreModel {
         isLoadingOlder = true
         defer { isLoadingOlder = false }
         let cursor = Cursor(timestampSecs: first.timestampSecs, seq: first.seq)
+        log.info("loading an older page")
         let result = await Task.detached {
             Result { try core.olderMessages(chatId: id, before: cursor, limit: Self.pageSize) }
         }.value
         guard messagesChat == id, messages.first?.seq == first.seq else { return }
         switch result {
         case let .success(page):
+            log.info("older page: \(page.count, privacy: .public) message(s)")
             messages.insert(contentsOf: page, at: 0)
             hasOlderMessages = page.count >= Int(Self.pageSize)
         case let .failure(error):
