@@ -18,6 +18,10 @@ const MAX_SECONDS: f64 = 10.0;
 const MAX_ASSETS: usize = 100;
 /// Layers drawn per frame, counting each use of a precomposition.
 const MAX_DRAWN_LAYERS: u64 = 500;
+/// Shapes, groups and other typed items anywhere in the animation.
+const MAX_ITEMS: usize = 5000;
+/// Copies one repeater may make.
+const MAX_REPEATS: f64 = 20.0;
 
 /// The main animation's JSON, or `None` if this is not a sticker archive.
 #[must_use]
@@ -64,7 +68,13 @@ fn sane(json: &[u8]) -> bool {
         .get("assets")
         .and_then(Value::as_array)
         .map_or(&[][..], Vec::as_slice);
-    if assets.len() > MAX_ASSETS {
+    // Images are refused: a small file can claim a huge size when decoded,
+    // and stickers are drawn from shapes. ponytail: allow embedded ones
+    // with a checked image header if real stickers turn out to use them.
+    if assets.len() > MAX_ASSETS || assets.iter().any(|a| a.get("p").is_some()) {
+        return false;
+    }
+    if !items_ok(&root) {
         return false;
     }
     let by_id: HashMap<&str, &Value> = assets
@@ -73,6 +83,38 @@ fn sane(json: &[u8]) -> bool {
         .collect();
     let mut drawn = HashMap::new();
     layers_drawn(&root, &by_id, &mut drawn, 0).is_some_and(|n| n <= MAX_DRAWN_LAYERS)
+}
+
+/// Counts typed items (layers, shapes, groups) across the whole tree and
+/// refuses repeaters that make many copies, or an animated number of them.
+fn items_ok(root: &Value) -> bool {
+    let mut items = 0;
+    let mut stack = vec![root];
+    while let Some(value) = stack.pop() {
+        match value {
+            Value::Array(list) => stack.extend(list),
+            Value::Object(map) => {
+                if map.contains_key("ty") {
+                    items += 1;
+                    if items > MAX_ITEMS {
+                        return false;
+                    }
+                }
+                if map.get("ty").and_then(Value::as_str) == Some("rp") {
+                    let copies = map
+                        .get("c")
+                        .and_then(|c| c.get("k"))
+                        .and_then(Value::as_f64);
+                    if !copies.is_some_and(|c| c <= MAX_REPEATS) {
+                        return false;
+                    }
+                }
+                stack.extend(map.values());
+            }
+            _ => {}
+        }
+    }
+    true
 }
 
 /// Layers drawn for `node`'s layer list, following precompositions;
@@ -187,5 +229,21 @@ mod tests {
         let shared =
             r#""assets":[{"id":"a","layers":[{},{}]}],"layers":[{"refId":"a"},{"refId":"a"}]"#;
         assert!(sane(&animation(shared)), "a precomp used twice is fine");
+        let image = r#""assets":[{"id":"i","w":10,"h":10,"p":"data:image/png;base64,AA==","e":1}],"layers":[{"refId":"i"}]"#;
+        assert!(!sane(&animation(image)), "images");
+        let repeat = |copies: &str| {
+            animation(&format!(
+                r#""layers":[{{"ty":4,"shapes":[{{"ty":"rp","c":{{"a":0,"k":{copies}}}}}]}}]"#
+            ))
+        };
+        assert!(sane(&repeat("3")), "a few copies");
+        assert!(!sane(&repeat("100000")), "a repeater making many copies");
+        assert!(
+            !sane(&repeat(r#"[{"t":0,"s":[1]}]"#)),
+            "an animated number of copies"
+        );
+        let many = vec![r#"{"ty":"el"}"#; MAX_ITEMS + 1].join(",");
+        let shapes = format!(r#""layers":[{{"ty":4,"shapes":[{many}]}}]"#);
+        assert!(!sane(&animation(&shapes)), "too many shapes");
     }
 }
