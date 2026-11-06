@@ -207,7 +207,7 @@ struct SettingsView: View {
             Section {
                 HStack(spacing: Theme.Spacing.medium) {
                     ForEach(GlassLook.allCases) { option in
-                        LookTile(option: option, selected: option == look) { look = option }
+                        LookTile(option: option, look: $look)
                     }
                 }
                 Text(look.detail).foregroundStyle(.secondary)
@@ -224,34 +224,44 @@ struct SettingsView: View {
 
 private struct LookTile: View {
     let option: GlassLook
-    let selected: Bool
-    let choose: () -> Void
+    /// A binding, not a flag: a Form row kept its first value otherwise.
+    @Binding var look: GlassLook
+
+    private var selected: Bool {
+        look == option
+    }
+
+    private func choose() {
+        look = option
+    }
 
     var body: some View {
-        Button(action: choose) {
-            VStack(spacing: Theme.Spacing.small) {
-                ZStack {
-                    LinearGradient(
-                        colors: [.indigo, .teal, .orange],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    option.tint
-                }
-                .frame(width: 100, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(
-                            selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                            lineWidth: selected ? 3 : 1
-                        )
-                }
-                .environment(\.colorScheme, option.scheme ?? .dark)
-                Text(option.title).font(.callout)
+        VStack(spacing: Theme.Spacing.small) {
+            ZStack {
+                LinearGradient(
+                    colors: [.indigo, .teal, .orange],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                option.tint
             }
+            .frame(width: 100, height: 64)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                        lineWidth: selected ? 3 : 1
+                    )
+            }
+            .environment(\.colorScheme, option.scheme ?? .dark)
+            Text(option.title).font(.callout)
         }
-        .buttonStyle(.plain)
+        .contentShape(.rect)
+        .onTapGesture(perform: choose)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { choose() }
         .accessibilityLabel("\(option.title) glass")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
