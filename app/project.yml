@@ -6,6 +6,12 @@ options:
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
+packages:
+  # Draws WhatsApp's animated (Lottie) stickers. Pinned to the 4.6.1
+  # release commit; the lightweight SPM mirror of airbnb/lottie-ios.
+  Lottie:
+    url: https://github.com/airbnb/lottie-spm
+    revision: 0aff16288f8dc1e3dab35cbf5cf45979673fd3df
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -38,6 +44,7 @@ targets:
     sources: [NIMQO]
     dependencies:
       - target: NimqoCore
+      - package: Lottie
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.nimqo.dev

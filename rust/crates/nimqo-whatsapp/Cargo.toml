@@ -25,6 +25,7 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "signal", "time"] }
 aead-stream = { version = "0.6", features = ["alloc"] }
 chacha20poly1305 = "0.11"
+zip = { version = "9.4.1", default-features = false, features = ["deflate"] }
 
 [lints]
 workspace = true

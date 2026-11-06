@@ -94,17 +94,8 @@ impl Attachments {
         let Some(stored) = self.stored(chat, seq)? else {
             return Ok(None);
         };
-        // Images and stickers show the downloaded file once it is here.
-        if matches!(stored.kind.as_str(), "image" | "sticker")
-            && let Some(bytes) = self.read(&stored)?
-        {
-            return Ok(Some(Picture {
-                bytes: bytes.to_vec(),
-                full: true,
-            }));
-        }
-        // A Lottie sticker cannot be drawn here: its preview is all it shows.
-        // ponytail: still image only; a Lottie renderer would animate it.
+        // A Lottie sticker is not an image: its preview, if any; the app
+        // draws the animation itself (`sticker_animation`).
         if stored.kind == "sticker" {
             let sticker = wa::message::StickerMessage::decode_from_slice(&stored.media)?;
             if is_lottie(&sticker) {
@@ -113,6 +104,15 @@ impl Attachments {
                     .filter(|t| !t.is_empty())
                     .map(|bytes| Picture { bytes, full: true }));
             }
+        }
+        // Images and stickers show the downloaded file once it is here.
+        if matches!(stored.kind.as_str(), "image" | "sticker")
+            && let Some(bytes) = self.read(&stored)?
+        {
+            return Ok(Some(Picture {
+                bytes: bytes.to_vec(),
+                full: true,
+            }));
         }
         let thumbnail = match stored.kind.as_str() {
             "image" => wa::message::ImageMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail,

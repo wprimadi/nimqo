@@ -327,6 +327,19 @@ impl Core {
             .map(|bytes| bytes.to_vec()))
     }
 
+    /// An animated sticker's Lottie JSON, unpacked in memory from its
+    /// downloaded archive; nil until downloaded, or if it is not one.
+    ///
+    /// # Errors
+    /// `Storage` if it cannot be read.
+    pub fn sticker_animation(&self, chat_id: &str, seq: i64) -> Result<Option<Vec<u8>>, CoreError> {
+        Ok(self
+            .attachments
+            .file_of(chat_id, seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .and_then(|archive| nimqo_whatsapp::stickers::lottie_json(&archive)))
+    }
+
     /// The stored profile picture of a chat (JPEG), if any.
     ///
     /// # Errors

@@ -16,6 +16,7 @@ pub mod peer;
 pub mod reads;
 pub mod replies;
 pub mod search;
+pub mod stickers;
 pub mod stores;
 pub mod timers;
 pub mod vault;
