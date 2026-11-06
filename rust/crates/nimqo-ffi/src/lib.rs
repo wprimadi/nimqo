@@ -617,6 +617,7 @@ async fn connect(
     let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell, &avatars)
         .with_backend(stores.protocol)
         .with_inbound_durability_hook(stores.inbox)
+        .with_event_delivery(EVENT_DELIVERY)
         .on_qr_code(move |code, timeout| {
             on_qr.feed(Input::QrShown);
             on_qr.listener.on_qr(code, timeout.as_secs());
@@ -799,6 +800,16 @@ fn message_handlers<B, T, H, R>(
             }
         })
 }
+
+/// The default 256-event mailbox drops the newest event when full, and the
+/// address book arrives as thousands of contact events at once.
+/// ponytail: a large fixed buffer; store contacts in a backend hook if an
+/// address book ever outgrows it.
+const EVENT_DELIVERY: whatsapp_rust::EventDelivery =
+    whatsapp_rust::EventDelivery::BoundedConcurrent {
+        capacity: 50_000,
+        max_concurrency: 16,
+    };
 
 /// Failures are reported through the `PairingCodeError` event, so the
 /// returned error carries nothing new.

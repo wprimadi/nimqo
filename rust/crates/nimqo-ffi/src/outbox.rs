@@ -372,8 +372,9 @@ impl Sender {
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 let n = self.inbox.contact_count().unwrap_or(0);
                 log::info!(
-                    "address book loaded: {n} names; {}",
-                    contact_counts::summary()
+                    "address book loaded: {n} names; {}; {} event(s) dropped",
+                    contact_counts::summary(),
+                    self.client.stats().events_dropped
                 );
             }
             Err(e) => log::warn!("address book not loaded: {e}"),
