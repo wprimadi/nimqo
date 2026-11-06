@@ -143,7 +143,7 @@ struct VideoViewer: View {
     var body: some View {
         VStack(spacing: Theme.Spacing.medium) {
             if let player {
-                VideoPlayer(player: player)
+                PlayerView(player: player)
                     .frame(minWidth: 480, idealWidth: 720, minHeight: 300, idealHeight: 480)
             } else {
                 ProgressView("Downloading the video…")
@@ -171,6 +171,23 @@ struct VideoViewer: View {
             player?.play()
         }
         .onDisappear { player?.pause() }
+    }
+}
+
+/// AppKit's player view. SwiftUI's VideoPlayer crashes on macOS 27 while
+/// its type is first set up (in _AVKit_SwiftUI), so it is not used.
+struct PlayerView: NSViewRepresentable {
+    let player: AVPlayer
+
+    func makeNSView(context _: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .inline
+        return view
+    }
+
+    func updateNSView(_ view: AVPlayerView, context _: Context) {
+        view.player = player
     }
 }
 
