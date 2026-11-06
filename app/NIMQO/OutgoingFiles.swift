@@ -69,11 +69,16 @@ extension CoreModel {
         return nil
     }
 
-    /// Sends a picked file to `chat`. Returns why it was refused.
-    func sendFile(_ url: URL, to chat: String) async -> String? {
+    /// Sends a picked file to `chat`, with `caption` if given. Returns why
+    /// it was refused.
+    func sendFile(_ url: URL, caption: String?, to chat: String) async -> String? {
         guard let core else { return "Not connected." }
         let result = await Task.detached {
-            Result { try core.sendFile(chatId: chat, file: OutgoingFiles.prepare(url)) }
+            Result {
+                var file = try OutgoingFiles.prepare(url)
+                file.caption = caption
+                return try core.sendFile(chatId: chat, file: file)
+            }
         }.value
         if case let .failure(error) = result {
             return Self.message(for: error)

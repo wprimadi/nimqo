@@ -14,7 +14,7 @@ struct ConversationView: View {
     let loadOlder: @MainActor () async -> Void
     /// Nil makes the chat read-only. Returns why a message was refused.
     let send: (@MainActor (String, Int64?) async -> String?)?
-    let sendFile: @MainActor (URL) async -> String?
+    let sendFile: @MainActor (URL, String?) async -> String?
     /// A message to scroll to and mark (from search); `revealed` clears it.
     var reveal: Int64?
     var revealed: @MainActor () -> Void = {}
@@ -134,7 +134,7 @@ struct ConversationView: View {
 
 struct Composer: View {
     let send: @MainActor (String, Int64?) async -> String?
-    let sendFile: @MainActor (URL) async -> String?
+    let sendFile: @MainActor (URL, String?) async -> String?
     @Binding var replyingTo: ChatMessage?
     @Binding var dropped: [URL]
     @State private var text = ""
@@ -168,7 +168,7 @@ struct Composer: View {
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .disabled(isSending)
-                TextField("Message", text: $text, axis: .vertical)
+                TextField("Message, or a caption for a file", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1 ... 6)
                     .focused($focused)
@@ -196,15 +196,21 @@ struct Composer: View {
     }
 
     /// One after another, stopping at the first refusal (the queue limit,
-    /// for one), so its reason stays on screen.
+    /// for one), so its reason stays on screen. Text typed beforehand is
+    /// the first file's caption.
     private func sendFiles(_ urls: [URL]) {
         refusal = nil
         isSending = true
+        let draft = text
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
-            for url in urls {
+            for (index, url) in urls.enumerated() {
                 // A dropped file is readable only while its access is held.
                 let scoped = url.startAccessingSecurityScopedResource()
-                refusal = await sendFile(url)
+                refusal = await sendFile(url, index == 0 && !typed.isEmpty ? typed : nil)
+                if index == 0, refusal == nil, !typed.isEmpty, text == draft {
+                    text = ""
+                }
                 if scoped {
                     url.stopAccessingSecurityScopedResource()
                 }
