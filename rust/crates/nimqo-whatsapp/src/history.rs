@@ -35,14 +35,10 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
             .filter_map(|m| row(&chat, m))
             .collect();
         total += rows.len();
-        // Groups: the subject. People: the name the phone shows for them,
-        // which is how saved names arrive that the address book sync lacks.
-        let name = if chat.ends_with("@g.us") {
-            conv.name
-        } else {
-            conv.name.or(conv.display_name)
-        }
-        .filter(|n| !n.trim().is_empty());
+        // Groups: the subject. People: the name saved on the phone, which
+        // the address book sync can lack. Not display_name: it can be the
+        // person's own profile name, shown unmarked it would pass as saved.
+        let name = conv.name.filter(|n| !n.trim().is_empty());
         saved += usize::from(name.is_some() && !chat.ends_with("@g.us"));
         inbox.import(&chat, name, rows)?;
         if let Some(seconds) = conv.ephemeral_expiration {
