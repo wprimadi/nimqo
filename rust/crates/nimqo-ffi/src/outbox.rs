@@ -343,8 +343,10 @@ impl Sender {
         }
     }
 
-    /// Fetch the address book once when none is known (never stored, or
-    /// emptied by a migration). A read, nothing is sent.
+    /// Fetch the whole address book once per launch: live updates alone miss
+    /// entries (names saved by LID were dropped before). A read, nothing is
+    /// sent. ponytail: one snapshot per launch; track a sync version if it
+    /// gets slow.
     pub async fn load_contacts_once(&self) {
         static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if let Ok((total, by_lid, matched, by_pn, direct, pushed)) = self.inbox.contact_stats() {
@@ -353,9 +355,7 @@ impl Sender {
                  {matched} on chats; {direct} 1:1 chats, {pushed} with a push name"
             );
         }
-        if self.inbox.contact_count().unwrap_or(1) > 0
-            || DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
+        if DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
             return;
         }
         match self
@@ -366,7 +366,10 @@ impl Sender {
             )
             .await
         {
-            Ok(_) => log::info!("address book loaded"),
+            Ok(_) => {
+                let n = self.inbox.contact_count().unwrap_or(0);
+                log::info!("address book loaded: {n} names");
+            }
             Err(e) => log::warn!("address book not loaded: {e}"),
         }
     }
