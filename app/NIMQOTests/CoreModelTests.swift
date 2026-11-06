@@ -100,6 +100,16 @@ struct CoreModelTests {
         #expect(CoreModel.olderThan(nil, in: loaded).isEmpty)
     }
 
+    @Test func nextAndPreviousChatWrapAround() {
+        let ids = ["a", "b", "c"]
+        #expect(CoreModel.chat(after: 1, from: "c", in: ids) == "a")
+        #expect(CoreModel.chat(after: -1, from: "a", in: ids) == "c")
+        #expect(CoreModel.chat(after: 1, from: nil, in: ids) == "a")
+        #expect(CoreModel.chat(after: -1, from: nil, in: ids) == "c")
+        #expect(CoreModel.chat(after: 1, from: "gone", in: ids) == "a")
+        #expect(CoreModel.chat(after: 1, from: nil, in: []) == nil)
+    }
+
     @Test func startDoesNothingUnderTests() {
         let model = CoreModel()
         model.start()

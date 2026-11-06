@@ -16,13 +16,30 @@ struct ConversationView: View {
     let send: (@MainActor (String, Int64?) async -> String?)?
     let sendFile: @MainActor (URL) async -> String?
     @State private var replyingTo: ChatMessage?
+    /// Files dropped anywhere on the chat, handed to the composer to send.
+    @State private var dropped: [URL] = []
+    @State private var isDropTarget = false
 
     var body: some View {
         VStack(spacing: 0) {
             timeline
             if let send {
                 Divider()
-                Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo)
+                Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped)
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard send != nil, !files.isEmpty else { return false }
+            dropped += files
+            return true
+        } isTargeted: { isDropTarget = $0 && send != nil }
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(.tint, lineWidth: 3)
+                    .padding(4)
+                    .allowsHitTesting(false)
             }
         }
         .navigationTitle(chat.title)
@@ -101,6 +118,7 @@ struct Composer: View {
     let send: @MainActor (String, Int64?) async -> String?
     let sendFile: @MainActor (URL) async -> String?
     @Binding var replyingTo: ChatMessage?
+    @Binding var dropped: [URL]
     @State private var text = ""
     @State private var picking = false
     @State private var refusal: String?
@@ -148,11 +166,39 @@ struct Composer: View {
         .onChange(of: replyingTo?.seq) { focused = true }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
             guard case let .success(url) = result else { return }
-            refusal = nil
-            isSending = true
-            Task {
+            sendFiles([url])
+        }
+        .onChange(of: dropped) {
+            guard !dropped.isEmpty, !isSending else { return }
+            let urls = dropped
+            dropped = []
+            sendFiles(urls)
+        }
+        .focusedSceneValue(\.attachFile, $picking)
+    }
+
+    /// One after another, stopping at the first refusal (the queue limit,
+    /// for one), so its reason stays on screen.
+    private func sendFiles(_ urls: [URL]) {
+        refusal = nil
+        isSending = true
+        Task {
+            for url in urls {
+                // A dropped file is readable only while its access is held.
+                let scoped = url.startAccessingSecurityScopedResource()
                 refusal = await sendFile(url)
-                isSending = false
+                if scoped {
+                    url.stopAccessingSecurityScopedResource()
+                }
+                if refusal != nil {
+                    break
+                }
+            }
+            isSending = false
+            if !dropped.isEmpty {
+                let more = dropped
+                dropped = []
+                sendFiles(more)
             }
         }
     }

@@ -27,6 +27,8 @@ struct RootView: View {
 struct MainView: View {
     let model: CoreModel
     @State private var query = ""
+    @FocusState private var searching: Bool
+    @State private var findRequested = false
 
     var body: some View {
         NavigationSplitView {
@@ -38,6 +40,7 @@ struct MainView: View {
                 }
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search messages")
+            .searchFocus($searching)
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 280)
         } detail: {
             if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
@@ -61,6 +64,12 @@ struct MainView: View {
             } else {
                 ContentUnavailableView("Select a chat", systemImage: "text.bubble")
             }
+        }
+        .focusedSceneValue(\.findMessages, $findRequested)
+        .onChange(of: findRequested) {
+            guard findRequested else { return }
+            findRequested = false
+            searching = true
         }
     }
 

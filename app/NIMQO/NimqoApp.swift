@@ -15,6 +15,7 @@ struct NimqoApp: App {
 
         .commands {
             CommandGroup(after: .appInfo) { ResetCommand(model: model) }
+            ChatCommands(model: model)
         }
 
         MenuBarExtra {
