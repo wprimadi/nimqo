@@ -39,12 +39,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         defer { unread = Dictionary(chats.map { ($0.id, $0.unread) }, uniquingKeysWith: max) }
         guard let unread else { return }
         let reading = NSApp?.isActive == true ? viewing : nil
-        let rose = chats.filter { $0.unread > (unread[$0.id] ?? 0) }
-        let fresh = rose.filter { $0.id != reading }
-        // Counts only. ponytail: remove once media notifications are settled.
-        if !rose.isEmpty || total > 0 {
-            log.info("unread \(total) in \(chats.count) chats; rose in \(rose.count), notifying \(fresh.count)")
-        }
+        let fresh = chats.filter { $0.unread > (unread[$0.id] ?? 0) && $0.id != reading }
         guard !fresh.isEmpty else { return }
         authorize()
         for chat in fresh {
