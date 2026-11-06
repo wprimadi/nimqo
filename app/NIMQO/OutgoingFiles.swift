@@ -54,11 +54,12 @@ enum OutgoingFiles {
 }
 
 extension CoreModel {
-    /// Queues `text` for the selected chat. Returns the reason it was not
+    /// Queues `text` for `chat`, named by the caller so a send started in
+    /// one chat never lands in another. Returns the reason it was not
     /// queued, or nil. Storing can wait on a history import, so it runs off
     /// the main thread.
-    func send(_ text: String, replyTo: Int64?) async -> String? {
-        guard let core, let chat = selectedChat else { return "Not connected." }
+    func send(_ text: String, replyTo: Int64?, to chat: String) async -> String? {
+        guard let core else { return "Not connected." }
         let result = await Task.detached {
             Result { try core.sendText(chatId: chat, text: text, replyTo: replyTo) }
         }.value
@@ -68,9 +69,9 @@ extension CoreModel {
         return nil
     }
 
-    /// Sends a picked file to the selected chat. Returns why it was refused.
-    func sendFile(_ url: URL) async -> String? {
-        guard let core, let chat = selectedChat else { return "Not connected." }
+    /// Sends a picked file to `chat`. Returns why it was refused.
+    func sendFile(_ url: URL, to chat: String) async -> String? {
+        guard let core else { return "Not connected." }
         let result = await Task.detached {
             Result { try core.sendFile(chatId: chat, file: OutgoingFiles.prepare(url)) }
         }.value
