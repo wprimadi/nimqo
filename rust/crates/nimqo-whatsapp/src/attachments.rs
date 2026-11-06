@@ -142,6 +142,28 @@ impl Attachments {
         }
     }
 
+    /// An animated sticker's checked Lottie JSON, once downloaded; `None`
+    /// for anything else, so only stickers that say they are Lottie reach
+    /// the renderer.
+    ///
+    /// # Errors
+    /// The store or the file cannot be read, or fails authentication.
+    pub fn sticker_animation(&self, chat: &str, seq: i64) -> Result<Option<Vec<u8>>> {
+        let Some(stored) = self.stored(chat, seq)? else {
+            return Ok(None);
+        };
+        if stored.kind != "sticker"
+            || !is_lottie(&wa::message::StickerMessage::decode_from_slice(
+                &stored.media,
+            )?)
+        {
+            return Ok(None);
+        }
+        Ok(self
+            .read(&stored)?
+            .and_then(|archive| crate::stickers::lottie_json(&archive)))
+    }
+
     fn read(&self, stored: &Stored) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
         match std::fs::read(self.file(stored)) {
             Ok(sealed) => Ok(Some(media::decrypt(&self.key, &sealed)?)),

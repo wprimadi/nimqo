@@ -1382,6 +1382,7 @@ dependencies = [
  "log",
  "qrcode",
  "security-framework",
+ "serde_json",
  "sha2",
  "tokio",
  "whatsapp-rust",
