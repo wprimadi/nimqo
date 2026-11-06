@@ -86,7 +86,6 @@ private struct WindowLook: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .preferredColorScheme(look.scheme)
             .background {
                 ZStack {
                     if solid {
@@ -99,13 +98,15 @@ private struct WindowLook: ViewModifier {
                 .ignoresSafeArea()
                 .animation(.easeInOut(duration: 0.3), value: look)
             }
-            .background(SeeThroughWindow())
+            .background(SeeThroughWindow(look: look))
     }
 }
 
 /// Makes the hosting window see-through, so the blur behind it shows
 /// instead of the window's own opaque background.
 private struct SeeThroughWindow: NSViewRepresentable {
+    let look: GlassLook
+
     func makeNSView(context _: Context) -> NSView {
         NSView()
     }
@@ -117,6 +118,13 @@ private struct SeeThroughWindow: NSViewRepresentable {
             window.isOpaque = false
             window.backgroundColor = .clear
             window.titlebarAppearsTransparent = true
+            // Set on the window, not with preferredColorScheme: going back
+            // to nil there keeps the last forced appearance.
+            window.appearance = switch look.scheme {
+            case .dark: NSAppearance(named: .darkAqua)
+            case .light: NSAppearance(named: .aqua)
+            default: nil
+            }
         }
     }
 }
