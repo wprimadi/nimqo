@@ -16,12 +16,13 @@ const MAX_SIDE: f64 = 1024.0;
 const MAX_FPS: f64 = 120.0;
 const MAX_SECONDS: f64 = 10.0;
 const MAX_ASSETS: usize = 100;
-/// Layers drawn per frame, counting each use of a precomposition.
-const MAX_DRAWN_LAYERS: u64 = 500;
-/// Shapes, groups and other typed items anywhere in the animation.
-const MAX_ITEMS: usize = 5000;
-/// Copies one repeater may make.
-const MAX_REPEATS: f64 = 20.0;
+/// Items drawn per frame (layers, shapes, groups), each counted once per
+/// copy a repeater above it makes and per use of its precomposition.
+const MAX_DRAWN: u64 = 5000;
+/// Copies one repeater may make, a fixed number.
+const MAX_REPEATS: u64 = 20;
+/// Precompositions inside precompositions.
+const MAX_NESTING: usize = 8;
 
 /// The main animation's JSON, or `None` if this is not a sticker archive.
 #[must_use]
@@ -74,89 +75,90 @@ fn sane(json: &[u8]) -> bool {
     if assets.len() > MAX_ASSETS || assets.iter().any(|a| a.get("p").is_some()) {
         return false;
     }
-    if !items_ok(&root) {
-        return false;
-    }
-    let by_id: HashMap<&str, &Value> = assets
-        .iter()
-        .filter_map(|a| Some((a.get("id")?.as_str()?, a)))
-        .collect();
-    let mut drawn = HashMap::new();
-    layers_drawn(&root, &by_id, &mut drawn, 0).is_some_and(|n| n <= MAX_DRAWN_LAYERS)
+    let mut cost = Cost {
+        assets: assets
+            .iter()
+            .filter_map(|a| Some((a.get("id")?.as_str()?, a)))
+            .collect(),
+        memo: HashMap::new(),
+        nesting: 0,
+    };
+    cost.of(&root).is_some()
 }
 
-/// Counts typed items (layers, shapes, groups) across the whole tree and
-/// refuses repeaters that make many copies, or an animated number of them.
-fn items_ok(root: &Value) -> bool {
-    let mut items = 0;
-    let mut stack = vec![root];
-    while let Some(value) = stack.pop() {
-        match value {
-            Value::Array(list) => stack.extend(list),
-            Value::Object(map) => {
-                if map.contains_key("ty") {
-                    items += 1;
-                    if items > MAX_ITEMS {
-                        return false;
+/// What drawing one frame costs, in items. `None` when over the cap, for
+/// precompositions that include each other or nest too deep, and for
+/// repeaters with many or animated copies.
+struct Cost<'a> {
+    assets: HashMap<&'a str, &'a Value>,
+    /// Per precomposition: `None` while it is being walked (a cycle if met
+    /// again), then its cost.
+    memo: HashMap<&'a str, Option<u64>>,
+    nesting: usize,
+}
+
+impl<'a> Cost<'a> {
+    fn of(&mut self, value: &'a Value) -> Option<u64> {
+        let total = match value {
+            // A list of items; a repeater in it repeats the whole list
+            // (over-counts slightly, never under).
+            Value::Array(list) => {
+                let (mut sum, mut copies) = (0_u64, 1_u64);
+                for item in list {
+                    sum = sum.saturating_add(self.of(item)?);
+                    if item.get("ty").and_then(Value::as_str) == Some("rp") {
+                        let n = item.get("c")?.get("k")?.as_u64()?;
+                        if n > MAX_REPEATS {
+                            return None;
+                        }
+                        copies = copies.saturating_mul(n.max(1));
+                    }
+                    if sum > MAX_DRAWN {
+                        return None;
                     }
                 }
-                if map.get("ty").and_then(Value::as_str) == Some("rp") {
-                    let copies = map
-                        .get("c")
-                        .and_then(|c| c.get("k"))
-                        .and_then(Value::as_f64);
-                    if !copies.is_some_and(|c| c <= MAX_REPEATS) {
-                        return false;
-                    }
-                }
-                stack.extend(map.values());
+                sum.saturating_mul(copies)
             }
-            _ => {}
-        }
-    }
-    true
-}
-
-/// Layers drawn for `node`'s layer list, following precompositions;
-/// `None` for a cycle or too many. `drawn` memoizes per asset.
-fn layers_drawn<'a>(
-    node: &'a Value,
-    assets: &HashMap<&'a str, &'a Value>,
-    drawn: &mut HashMap<&'a str, Option<u64>>,
-    depth: usize,
-) -> Option<u64> {
-    if depth > MAX_ASSETS {
-        return None;
-    }
-    let mut total: u64 = 0;
-    for layer in node
-        .get("layers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        total += 1;
-        if let Some(id) = layer.get("refId").and_then(Value::as_str)
-            && let Some(asset) = assets.get(id)
-        {
-            let inner = match drawn.get(id) {
-                // Seen on the current path and not finished: a cycle.
-                Some(None) => return None,
-                Some(Some(n)) => *n,
-                None => {
-                    drawn.insert(id, None);
-                    let n = layers_drawn(asset, assets, drawn, depth + 1)?;
-                    drawn.insert(id, Some(n));
-                    n
+            Value::Object(map) => {
+                let mut sum = u64::from(map.contains_key("ty"));
+                for (key, inner) in map {
+                    // Assets cost where they are used, not where defined.
+                    if key != "assets" {
+                        sum = sum.saturating_add(self.of(inner)?);
+                    }
+                    if sum > MAX_DRAWN {
+                        return None;
+                    }
                 }
-            };
-            total = total.saturating_add(inner);
-        }
-        if total > MAX_DRAWN_LAYERS {
-            return None;
+                if let Some(id) = map.get("refId").and_then(Value::as_str)
+                    && let Some(asset) = self.assets.get(id).copied()
+                {
+                    sum = sum.saturating_add(self.precomp(id, asset)?);
+                }
+                sum
+            }
+            _ => 0,
+        };
+        (total <= MAX_DRAWN).then_some(total)
+    }
+
+    fn precomp(&mut self, id: &'a str, asset: &'a Value) -> Option<u64> {
+        match self.memo.get(id) {
+            Some(None) => None,
+            Some(Some(n)) => Some(*n),
+            None => {
+                if self.nesting >= MAX_NESTING {
+                    return None;
+                }
+                self.memo.insert(id, None);
+                self.nesting += 1;
+                let n = self.of(asset);
+                self.nesting -= 1;
+                self.memo.insert(id, Some(n?));
+                n
+            }
         }
     }
-    Some(total)
 }
 
 #[cfg(test)]
@@ -215,11 +217,11 @@ mod tests {
         let fan = |next: &str| {
             format!(
                 "[{}]",
-                vec![format!(r#"{{"refId":"{next}"}}"#); 10].join(",")
+                vec![format!(r#"{{"ty":0,"refId":"{next}"}}"#); 10].join(",")
             )
         };
         let deep = format!(
-            r#""assets":[{{"id":"a","layers":{}}},{{"id":"b","layers":{}}},{{"id":"c","layers":{}}},{{"id":"d","layers":[{{}}]}}],"layers":{}"#,
+            r#""assets":[{{"id":"a","layers":{}}},{{"id":"b","layers":{}}},{{"id":"c","layers":{}}},{{"id":"d","layers":[{{"ty":4}}]}}],"layers":{}"#,
             fan("b"),
             fan("c"),
             fan("d"),
@@ -242,8 +244,21 @@ mod tests {
             !sane(&repeat(r#"[{"t":0,"s":[1]}]"#)),
             "an animated number of copies"
         );
-        let many = vec![r#"{"ty":"el"}"#; MAX_ITEMS + 1].join(",");
+        let many = vec![r#"{"ty":"el"}"#; usize::try_from(MAX_DRAWN).unwrap() + 1].join(",");
         let shapes = format!(r#""layers":[{{"ty":4,"shapes":[{many}]}}]"#);
         assert!(!sane(&animation(&shapes)), "too many shapes");
+        // Groups inside groups, each repeated 20 times: 8000 drawn.
+        let nested = r#""layers":[{"ty":4,"shapes":[{"ty":"gr","it":[{"ty":"gr","it":[{"ty":"gr","it":[{"ty":"el"},{"ty":"rp","c":{"a":0,"k":20}}]},{"ty":"rp","c":{"a":0,"k":20}}]},{"ty":"rp","c":{"a":0,"k":20}}]}]}]"#;
+        assert!(!sane(&animation(nested)), "repeaters inside repeaters");
+        // One precomposition of 1000 shapes used ten times.
+        let heavy = vec![r#"{"ty":"el"}"#; 1000].join(",");
+        let uses = [r#"{"ty":0,"refId":"p"}"#; 10].join(",");
+        let reused = format!(
+            r#""assets":[{{"id":"p","layers":[{{"ty":4,"shapes":[{heavy}]}}]}}],"layers":[{uses}]"#
+        );
+        assert!(
+            !sane(&animation(&reused)),
+            "a heavy precomp used many times"
+        );
     }
 }
