@@ -27,7 +27,9 @@ struct AudioMessageView: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
                 .font(.title2)
-            if waiting {
+            if store.didFail(chat: chat, message: message) {
+                RetryDownload(chat: chat, message: message, store: store)
+            } else if waiting {
                 ProgressView().controlSize(.small)
             } else if let duration = playback.duration {
                 Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
@@ -145,6 +147,9 @@ struct VideoViewer: View {
             if let player {
                 PlayerView(player: player)
                     .frame(minWidth: 480, idealWidth: 720, minHeight: 300, idealHeight: 480)
+            } else if store.didFail(chat: chat, message: message) {
+                RetryDownload(chat: chat, message: message, store: store)
+                    .frame(minWidth: 480, minHeight: 300)
             } else {
                 ProgressView("Downloading the video…")
                     .frame(minWidth: 480, minHeight: 300)
@@ -240,7 +245,9 @@ struct DocumentMessageView: View {
         HStack(spacing: Theme.Spacing.small) {
             Image(systemName: "doc.fill").font(.title2).foregroundStyle(.secondary)
             Text(name).lineLimit(2).textSelection(.enabled)
-            if waiting {
+            if store.didFail(chat: chat, message: message) {
+                RetryDownload(chat: chat, message: message, store: store)
+            } else if waiting {
                 ProgressView().controlSize(.small)
             } else {
                 Button("Save…", systemImage: "square.and.arrow.down", action: save)

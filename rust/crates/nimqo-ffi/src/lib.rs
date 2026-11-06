@@ -276,15 +276,42 @@ impl Core {
             }))
     }
 
-    /// Downloads message `seq`'s photo, video, or audio in the background;
-    /// `on_chats_changed` reports it stored. Call it for messages on screen.
-    pub fn download_media(&self, chat_id: String, seq: i64) {
+    /// Downloads message `seq`'s photo, video, audio, or document;
+    /// `on_chats_changed` reports it stored. False when it failed (offline,
+    /// or gone from WhatsApp's servers); it may be asked for again.
+    pub async fn download_media(&self, chat_id: String, seq: i64) -> bool {
         let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
-        self.runtime.spawn(async move {
-            if let Err(e) = store.download(&client, &chat_id, seq).await {
+        let done = self
+            .runtime
+            .spawn(async move { store.download(&client, &chat_id, seq).await })
+            .await;
+        match done {
+            Ok(Ok(_)) => true,
+            Ok(Err(e)) => {
                 log::info!("media not downloaded: {e:#}");
+                false
             }
-        });
+            Err(_) => false,
+        }
+    }
+
+    /// Sends a message that failed again, from the start.
+    ///
+    /// # Errors
+    /// `Storage` if it cannot be queued again.
+    pub fn retry_message(&self, chat_id: &str, seq: i64) -> Result<(), CoreError> {
+        let queued = self
+            .inbox
+            .retry_failed(chat_id, seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?;
+        if queued {
+            self.sender
+                .listener
+                .on_chats_changed(vec![chat_id.to_owned()]);
+            let sender = Arc::clone(&self.sender);
+            self.runtime.spawn(async move { sender.flush(false).await });
+        }
+        Ok(())
     }
 
     /// Message `seq`'s downloaded video, audio, or document, in memory; nil

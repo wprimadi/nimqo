@@ -13,6 +13,7 @@ final class PictureStore {
         didSet {
             images = [:]
             requested = []
+            failed = []
             generation += 1
         }
     }
@@ -24,6 +25,8 @@ final class PictureStore {
     /// reused once a message is gone.
     @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)] = [:]
     @ObservationIgnored private var requested: Set<String> = []
+    /// Downloads that failed; shown with a retry button.
+    private var failed: Set<String> = []
 
     private static func key(_ chat: String, _ message: ChatMessage) -> String {
         "\(chat)\n\(message.sender)\n\(message.id)"
@@ -49,10 +52,26 @@ final class PictureStore {
         download(chat: chat, message: message)
     }
 
-    /// Asks the core for the message's file once per session.
+    /// Asks the core for the message's file once per session, unless it
+    /// failed and is asked for again (`retry`).
     func download(chat: String, message: ChatMessage) {
-        guard let core, requested.insert(Self.key(chat, message)).inserted else { return }
-        core.downloadMedia(chatId: chat, seq: message.seq)
+        let key = Self.key(chat, message)
+        guard let core, requested.insert(key).inserted else { return }
+        Task {
+            if await !core.downloadMedia(chatId: chat, seq: message.seq) {
+                requested.remove(key)
+                failed.insert(key)
+            }
+        }
+    }
+
+    func didFail(chat: String, message: ChatMessage) -> Bool {
+        failed.contains(Self.key(chat, message))
+    }
+
+    func retry(chat: String, message: ChatMessage) {
+        failed.remove(Self.key(chat, message))
+        download(chat: chat, message: message)
     }
 
     /// A chat changed: a full image may have arrived for its thumbnails.
@@ -77,7 +96,9 @@ struct MessagePictureView: View {
                     // A thumbnail is tiny; soften it until the image comes.
                     .blur(radius: picture.full ? 0 : 6)
                     .overlay {
-                        if !picture.full {
+                        if store.didFail(chat: chat, message: message) {
+                            RetryDownload(chat: chat, message: message, store: store)
+                        } else if !picture.full {
                             ProgressView().controlSize(.small)
                         }
                     }
@@ -121,7 +142,9 @@ struct PictureViewer: View {
                         maxHeight: .infinity
                     )
                     .accessibilityLabel(message.body ?? "Photo")
-                if !picture.full {
+                if store.didFail(chat: chat, message: message) {
+                    RetryDownload(chat: chat, message: message, store: store)
+                } else if !picture.full {
                     Label("Downloading the full photo…", systemImage: "arrow.down.circle")
                         .foregroundStyle(.secondary)
                 }
@@ -137,5 +160,21 @@ struct PictureViewer: View {
         }
         .padding(Theme.Spacing.medium)
         .frame(minWidth: 400, maxWidth: 1200, minHeight: 300, maxHeight: 900)
+    }
+}
+
+/// A failed download: says so and asks for it again.
+struct RetryDownload: View {
+    let chat: String
+    let message: ChatMessage
+    let store: PictureStore
+
+    var body: some View {
+        Button("Couldn't download. Try Again", systemImage: "arrow.clockwise") {
+            store.retry(chat: chat, message: message)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help("It may no longer be on WhatsApp's servers, or the Mac is offline.")
     }
 }

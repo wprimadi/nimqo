@@ -131,6 +131,14 @@ extension CoreModel {
         return nil
     }
 
+    /// Sends a failed message of `chat` again.
+    func retry(_ seq: Int64, in chat: String) {
+        guard let core else { return }
+        Task.detached {
+            try? core.retryMessage(chatId: chat, seq: seq)
+        }
+    }
+
     /// Sends a picked file to `chat`, with `caption` if given. Returns why
     /// it was refused.
     func sendFile(_ url: URL, caption: String?, to chat: String) async -> String? {

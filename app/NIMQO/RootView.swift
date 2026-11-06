@@ -61,7 +61,8 @@ struct MainView: View {
                             ? { await model.send($0, replyTo: $1, to: chat.id) } : nil,
                         sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
                         reveal: model.revealing,
-                        revealed: { model.revealing = nil }
+                        revealed: { model.revealing = nil },
+                        retry: { model.retry($0, in: chat.id) }
                     )
                     // A new view per chat: it opens at the latest message.
                     .id(chat.id)

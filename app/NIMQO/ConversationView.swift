@@ -18,6 +18,8 @@ struct ConversationView: View {
     /// A message to scroll to and mark (from search); `revealed` clears it.
     var reveal: Int64?
     var revealed: @MainActor () -> Void = {}
+    /// Sends a failed message (seq) again.
+    var retry: @MainActor (Int64) -> Void = { _ in }
     @State private var marked: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
@@ -76,6 +78,9 @@ struct ConversationView: View {
                             .contextMenu {
                                 if send != nil, message.kind != .deleted {
                                     Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
+                                }
+                                if send != nil, message.delivery == .failed {
+                                    Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
                                 }
                             }
                     }

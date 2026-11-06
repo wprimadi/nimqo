@@ -164,6 +164,24 @@ impl Inbox {
         .load(&mut *conn)?)
     }
 
+    /// Queues an own failed message (`seq` in `chat`) again, its attempts
+    /// reset. False when it is not a failed own message.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn retry_failed(&self, chat: &str, seq: i64) -> Result<bool> {
+        let mut conn = self.lock()?;
+        Ok(diesel::sql_query(
+            "UPDATE messages SET status = 'pending', attempts = 0
+             WHERE rowid = ? AND chat = ? AND sender = ? AND status = 'failed'",
+        )
+        .bind::<BigInt, _>(seq)
+        .bind::<Text, _>(chat)
+        .bind::<Text, _>(ME)
+        .execute(&mut *conn)?
+            == 1)
+    }
+
     /// Records a failed send; after [`MAX_ATTEMPTS`] the message is failed.
     ///
     /// # Errors
@@ -258,6 +276,22 @@ mod tests {
         }
         assert_eq!(status("B"), "failed");
         assert!(inbox.pending().unwrap().is_empty());
+        let seq = |id: &str| {
+            let m = inbox.messages(peer, 10).unwrap();
+            m.into_iter().find(|m| m.id == id).unwrap().seq
+        };
+        assert!(
+            !inbox.retry_failed(peer, seq("A")).unwrap(),
+            "only failed ones"
+        );
+        assert!(
+            !inbox.retry_failed("x@s.whatsapp.net", seq("B")).unwrap(),
+            "seq is per chat"
+        );
+        assert!(inbox.retry_failed(peer, seq("B")).unwrap());
+        assert_eq!(status("B"), "pending");
+        inbox.attempt_failed("B").unwrap();
+        assert_eq!(status("B"), "pending", "attempts start again");
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }
