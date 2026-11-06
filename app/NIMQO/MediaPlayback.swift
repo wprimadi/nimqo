@@ -258,9 +258,14 @@ struct DocumentMessageView: View {
         }
     }
 
-    /// The sender's file name, reduced to a plain name.
+    /// The sender's file name, reduced to a plain name: no folders, and no
+    /// invisible characters (a right-to-left mark can show "fdp.exe" as
+    /// "exe.pdf").
     private var name: String {
-        let last = ((message.body ?? "") as NSString).lastPathComponent
+        let visible = (message.body ?? "").unicodeScalars.filter {
+            ![.control, .format].contains($0.properties.generalCategory)
+        }
+        let last = (String(String.UnicodeScalarView(visible)) as NSString).lastPathComponent
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: CharacterSet(charactersIn: ". ").union(.whitespacesAndNewlines))
         return last.isEmpty ? "Document" : last
@@ -287,7 +292,13 @@ struct DocumentMessageView: View {
                 kLSQuarantineAgentNameKey as String: "NIMQO",
             ]
             var marked = url
-            try? marked.setResourceValues(values)
+            do {
+                try marked.setResourceValues(values)
+            } catch {
+                // Unmarked, it could be opened unchecked: keep nothing.
+                try? FileManager.default.removeItem(at: url)
+                throw error
+            }
             NSWorkspace.shared.activateFileViewerSelecting([url])
         } catch {
             NSAlert(error: error).runModal()
