@@ -29,30 +29,43 @@ struct ConversationView: View {
     @State private var isDropTarget = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            timeline
-            if let send {
-                Divider()
-                Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped)
+        // The timeline runs under the floating controls.
+        timeline
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(alignment: .trailing, spacing: Theme.Spacing.small) {
+                    if !atBottom {
+                        Button("Jump to the latest message", systemImage: "chevron.down") { scrollToEnd += 1 }
+                            .labelStyle(.iconOnly)
+                            .buttonBorderShape(.circle)
+                            .glassButton()
+                            .controlSize(.large)
+                            .keyboardShortcut(.downArrow, modifiers: .command)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    if let send {
+                        Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped)
+                    }
+                }
+                .padding([.horizontal, .bottom], Theme.Spacing.medium)
+                .animation(.spring(duration: 0.3, bounce: 0), value: atBottom)
             }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            guard send != nil, !files.isEmpty else { return false }
-            dropped += files
-            return true
-        } isTargeted: { isDropTarget = $0 && send != nil }
-        .overlay {
-            if isDropTarget {
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(.tint, lineWidth: 3)
-                    .padding(4)
-                    .allowsHitTesting(false)
+            .dropDestination(for: URL.self) { urls, _ in
+                let files = urls.filter(\.isFileURL)
+                guard send != nil, !files.isEmpty else { return false }
+                dropped += files
+                return true
+            } isTargeted: { isDropTarget = $0 && send != nil }
+            .overlay {
+                if isDropTarget {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(.tint, lineWidth: 3)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                }
             }
-        }
-        .navigationTitle(chat.title)
-        // Like WhatsApp, the timer belongs to the chat, not to each message.
-        .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
+            .navigationTitle(chat.title)
+            // Like WhatsApp, the timer belongs to the chat, not to each message.
+            .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
     /// The topmost message on screen, reported by the scroll view as the
@@ -62,6 +75,8 @@ struct ConversationView: View {
     /// Whether the end of the timeline is on screen; new messages follow
     /// only then, so reading older ones is never interrupted.
     @State private var atBottom = true
+    /// Bumped by the jump button to scroll to the latest message.
+    @State private var scrollToEnd = 0
 
     private var timeline: some View {
         ScrollViewReader { proxy in
@@ -102,6 +117,11 @@ struct ConversationView: View {
                     showOlder()
                 }
             }
+            .onChange(of: scrollToEnd) {
+                if let last = messages.last?.seq {
+                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                }
+            }
             .onChange(of: messages.last?.seq) { _, last in
                 // A new message: follow it if the end was in view or it is ours.
                 guard let last, atBottom || messages.last?.fromMe == true else { return }
@@ -136,122 +156,6 @@ struct ConversationView: View {
         Task {
             await loadOlder()
             isLoading = false
-        }
-    }
-}
-
-struct Composer: View {
-    let send: @MainActor (String, Int64?) async -> String?
-    let sendFile: @MainActor (URL, String?) async -> String?
-    @Binding var replyingTo: ChatMessage?
-    @Binding var dropped: [URL]
-    @State private var text = ""
-    @State private var picking = false
-    @State private var refusal: String?
-    @State private var isSending = false
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.small) {
-            if let refusal {
-                Text(refusal).font(.caption).foregroundStyle(.red)
-            }
-            if let replyingTo {
-                HStack {
-                    QuoteView(reply: Reply(
-                        kind: replyingTo.kind,
-                        body: replyingTo.body,
-                        fromMe: replyingTo.fromMe,
-                        senderName: replyingTo.contactName ?? replyingTo.senderName
-                    ))
-                    Spacer()
-                    Button("Cancel reply", systemImage: "xmark.circle.fill") { self.replyingTo = nil }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut(.cancelAction)
-                }
-            }
-            HStack(alignment: .bottom) {
-                Button("Attach a photo or file", systemImage: "paperclip") { picking = true }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .disabled(isSending)
-                TextField("Message, or a caption for a file", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1 ... 6)
-                    .focused($focused)
-                    .onSubmit(submit)
-                Button("Send", systemImage: "paperplane.fill", action: submit)
-                    .labelStyle(.iconOnly)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
-            }
-        }
-        .padding(Theme.Spacing.medium)
-        .onAppear { focused = true }
-        .onChange(of: replyingTo?.seq) { focused = true }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
-            guard case let .success(url) = result else { return }
-            sendFiles([url])
-        }
-        .onChange(of: dropped) {
-            guard !dropped.isEmpty, !isSending else { return }
-            let urls = dropped
-            dropped = []
-            sendFiles(urls)
-        }
-        .focusedSceneValue(\.attachFile, $picking)
-    }
-
-    /// One after another, stopping at the first refusal (the queue limit,
-    /// for one), so its reason stays on screen. Text typed beforehand is
-    /// the first file's caption.
-    private func sendFiles(_ urls: [URL]) {
-        refusal = nil
-        isSending = true
-        let draft = text
-        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task {
-            for (index, url) in urls.enumerated() {
-                // A dropped file is readable only while its access is held.
-                let scoped = url.startAccessingSecurityScopedResource()
-                refusal = await sendFile(url, index == 0 && !typed.isEmpty ? typed : nil)
-                if index == 0, refusal == nil, !typed.isEmpty, text == draft {
-                    text = ""
-                }
-                if scoped {
-                    url.stopAccessingSecurityScopedResource()
-                }
-                if refusal != nil {
-                    break
-                }
-            }
-            isSending = false
-            if !dropped.isEmpty {
-                let more = dropped
-                dropped = []
-                sendFiles(more)
-            }
-        }
-    }
-
-    private func submit() {
-        // Return on an empty field does nothing, like other chat apps.
-        guard !isSending, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        refusal = nil
-        isSending = true
-        let draft = text
-        let reply = replyingTo
-        Task {
-            refusal = await send(draft, reply?.seq)
-            // Keep the draft when it was refused, so nothing typed is lost.
-            if refusal == nil, text == draft {
-                text = ""
-                if replyingTo?.seq == reply?.seq {
-                    replyingTo = nil
-                }
-            }
-            isSending = false
         }
     }
 }
