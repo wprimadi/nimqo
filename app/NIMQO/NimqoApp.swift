@@ -26,8 +26,13 @@ struct NimqoApp: App {
         MenuBarExtra {
             StatusMenu(model: model)
         } label: {
+            let unread = model.chats.filter { !$0.muted }.reduce(0) { $0 + $1.unread }
             Label("NIMQO", systemImage: model.statusSymbol)
-                .accessibilityValue(model.statusText)
+                .labelStyle(.iconOnly)
+                .accessibilityValue(unread > 0 ? "\(model.statusText), \(unread) unread" : model.statusText)
+            if unread > 0 {
+                Text("\(unread)")
+            }
         }
     }
 }
@@ -50,8 +55,8 @@ struct ResetCommand: View {
     }
 }
 
-/// Kept small on purpose (plan 7.5): status, open, quit. Recent chats join
-/// when the core lists chats (Phase 3), Settings when a setting exists.
+/// Kept small on purpose (plan 7.5): status, the latest chats, open,
+/// Settings, quit. Not a second app.
 struct StatusMenu: View {
     let model: CoreModel
     @Environment(\.openWindow) private var openWindow
@@ -59,12 +64,32 @@ struct StatusMenu: View {
     var body: some View {
         Text(model.statusText)
         Divider()
-        Button("Open NIMQO") {
-            openWindow(id: MainWindow.id)
-            NSApp.activate()
+        if !model.chats.isEmpty {
+            Section("Recent") {
+                ForEach(model.chats.prefix(5)) { chat in
+                    Button(chat.unread > 0 ? "\(chat.title) (\(chat.unread))" : chat.title) {
+                        open(chat.id)
+                    }
+                }
+            }
+            Divider()
         }
-        .keyboardShortcut("o")
+        Button("Open NIMQO") { open(nil) }
+            .keyboardShortcut("o")
+        SettingsLink {
+            Text("Settings…")
+        }
+        .keyboardShortcut(",")
         Button("Quit NIMQO") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
+    }
+
+    /// Brings the window forward, on `chat` if given.
+    private func open(_ chat: ChatSummary.ID?) {
+        openWindow(id: MainWindow.id)
+        NSApp.activate()
+        if let chat {
+            model.selectedChat = chat
+        }
     }
 }
