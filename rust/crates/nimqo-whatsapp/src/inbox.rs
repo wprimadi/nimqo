@@ -777,10 +777,22 @@ pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     if let Some(audio) = base.audio_message.as_option() {
         return Some(audio.encode_to_vec());
     }
-    if let Some(sticker) = base.sticker_message.as_option() {
+    if let Some(sticker) = sticker_of(base) {
         return Some(sticker.encode_to_vec());
     }
     Some(base.document_message.as_option()?.encode_to_vec())
+}
+
+/// A sticker, plain or animated (Lottie, which comes wrapped once more).
+fn sticker_of(base: &wa::Message) -> Option<&wa::message::StickerMessage> {
+    base.sticker_message.as_option().or_else(|| {
+        base.lottie_sticker_message
+            .as_option()?
+            .message
+            .as_option()?
+            .sticker_message
+            .as_option()
+    })
 }
 
 /// What the timeline shows, or `None` for messages that only change other
@@ -802,7 +814,7 @@ pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<St
     if let Some(m) = b.document_message.as_option() {
         return Some(("document", m.file_name.clone()));
     }
-    if b.sticker_message.as_option().is_some() {
+    if sticker_of(b).is_some() {
         return Some(("sticker", None));
     }
     let silent = b.protocol_message.as_option().is_some()
@@ -971,5 +983,18 @@ mod tests {
         );
         let text = wa::Message::text("hi");
         assert_eq!(classify(&text), Some(("text", Some("hi".into()))));
+    }
+
+    #[test]
+    fn an_animated_sticker_is_a_sticker() {
+        use whatsapp_rust::buffa::MessageField;
+        let mut inner = wa::Message::default();
+        inner.sticker_message = MessageField::some(wa::message::StickerMessage::default());
+        let mut wrapper = wa::message::FutureProofMessage::default();
+        wrapper.message = MessageField::some(inner);
+        let mut m = wa::Message::default();
+        m.lottie_sticker_message = MessageField::some(wrapper);
+        assert_eq!(classify(&m), Some(("sticker", None)));
+        assert!(media_of(&m).is_some());
     }
 }

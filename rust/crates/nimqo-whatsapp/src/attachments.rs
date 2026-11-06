@@ -31,6 +31,11 @@ fn max_bytes(kind: &str) -> u64 {
     megabytes * 1024 * 1024
 }
 
+/// WhatsApp's animated stickers, a Lottie archive rather than WebP.
+fn is_lottie(sticker: &wa::message::StickerMessage) -> bool {
+    sticker.mimetype.as_deref() == Some("application/was")
+}
+
 /// How long a download may take before it counts as failed (offline, it
 /// would otherwise wait forever): 20 s plus 2 s per MB, about 4 Mbit/s.
 /// ponytail: a fixed rate; time out on stalled progress instead if slow
@@ -97,6 +102,17 @@ impl Attachments {
                 bytes: bytes.to_vec(),
                 full: true,
             }));
+        }
+        // A Lottie sticker cannot be drawn here: its preview is all it shows.
+        // ponytail: still image only; a Lottie renderer would animate it.
+        if stored.kind == "sticker" {
+            let sticker = wa::message::StickerMessage::decode_from_slice(&stored.media)?;
+            if is_lottie(&sticker) {
+                return Ok(sticker
+                    .png_thumbnail
+                    .filter(|t| !t.is_empty())
+                    .map(|bytes| Picture { bytes, full: true }));
+            }
         }
         let thumbnail = match stored.kind.as_str() {
             "image" => wa::message::ImageMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail,
@@ -318,6 +334,17 @@ mod tests {
         crate::avatars::write_private(&store.file(&stored), &sealed).unwrap();
         let p = store.picture(chat, seq("s")).unwrap().unwrap();
         assert_eq!((p.bytes.as_slice(), p.full), (&b"webp"[..], true));
+        // An animated (Lottie) sticker: its preview is final, no download.
+        let mut lottie = wa::message::StickerMessage::default();
+        lottie.mimetype = Some("application/was".into());
+        lottie.png_thumbnail = Some(b"still".to_vec());
+        store
+            .inbox
+            .insert_kind_for_test(chat, "l", "sticker", lottie.encode_to_vec());
+        let rows = store.inbox.messages(chat, 10).unwrap();
+        let l = rows.iter().find(|r| r.id == "l").unwrap().seq;
+        let p = store.picture(chat, l).unwrap().unwrap();
+        assert_eq!((p.bytes.as_slice(), p.full), (&b"still"[..], true));
         assert!(store.picture(chat, seq("d")).unwrap().is_none());
         assert!(
             store.stored(chat, seq("d")).unwrap().is_some(),
