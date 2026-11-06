@@ -27,6 +27,12 @@ struct ChatCommands: Commands {
             Button("Previous Chat") { model.selectChat(after: -1) }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
                 .disabled(model.chats.isEmpty)
+            Divider()
+            // ⌘1 to ⌘9: the chats at the top of the list.
+            ForEach(Array(model.chats.prefix(9).enumerated()), id: \.element.id) { index, chat in
+                Button(chat.title) { model.selectedChat = chat.id }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+            }
         }
     }
 }
