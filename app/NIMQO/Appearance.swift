@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// The look of the glass: following macOS, clear over a see-through
-/// window, or always dark or light. Chosen in Settings.
+/// The window is glass in every look: what is behind it shows through,
+/// blurred. Clear lets most of it through; Dark and Light tint it.
 enum GlassLook: String, CaseIterable, Identifiable {
-    case system, clear, dark, light
+    case clear, dark, light
 
     static let key = "glassLook"
 
@@ -14,7 +14,6 @@ enum GlassLook: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .system: "System"
         case .clear: "Clear"
         case .dark: "Dark"
         case .light: "Light"
@@ -23,25 +22,28 @@ enum GlassLook: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .system: "Follows the macOS appearance."
-        case .clear: "See-through glass; the desktop shows, blurred, behind the window."
-        case .dark: "Always dark."
-        case .light: "Always light."
+        case .clear: "Clear glass: the desktop shows through, blurred. Follows the macOS appearance."
+        case .dark: "Dark tinted glass."
+        case .light: "Light tinted glass."
         }
     }
 
     /// Nil follows macOS.
     var scheme: ColorScheme? {
         switch self {
+        case .clear: nil
         case .dark: .dark
         case .light: .light
-        case .system, .clear: nil
         }
     }
 
-    @available(macOS 26, *)
-    var glass: Glass {
-        self == .clear ? .clear : .regular
+    /// Laid over the blur; more of it is less see-through.
+    var tint: Color {
+        switch self {
+        case .clear: .clear
+        case .dark: .black.opacity(0.45)
+        case .light: .white.opacity(0.55)
+        }
     }
 }
 
@@ -50,20 +52,17 @@ enum GlassLook: String, CaseIterable, Identifiable {
 /// glass on glass.
 private struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
-    @AppStorage(GlassLook.key) private var look = GlassLook.system
-
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            content.glassEffect(look.glass.interactive(), in: shape)
+            content.glassEffect(.regular.interactive(), in: shape)
         } else {
-            content.background(look == .clear ? .ultraThinMaterial : .regularMaterial, in: shape)
+            content.background(.regularMaterial, in: shape)
         }
     }
 }
 
 private struct GlassButton: ViewModifier {
     let prominent: Bool
-    @AppStorage(GlassLook.key) private var look = GlassLook.system
 
     func body(content: Content) -> some View {
         if prominent {
@@ -72,8 +71,6 @@ private struct GlassButton: ViewModifier {
             } else {
                 content.buttonStyle(.borderedProminent)
             }
-        } else if #available(macOS 26.1, *) {
-            content.buttonStyle(.glass(look.glass))
         } else if #available(macOS 26, *) {
             content.buttonStyle(.glass)
         } else {
@@ -82,19 +79,45 @@ private struct GlassButton: ViewModifier {
     }
 }
 
-/// The window itself: see-through and blurred for the clear look, the
-/// chosen light or dark otherwise.
+/// The window itself: see-through, blurred, tinted by the look.
 private struct WindowLook: ViewModifier {
-    @AppStorage(GlassLook.key) private var look = GlassLook.system
+    @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @Environment(\.accessibilityReduceTransparency) private var solid
 
     func body(content: Content) -> some View {
         content
             .preferredColorScheme(look.scheme)
             .background {
-                if look == .clear {
-                    BehindWindowBlur().ignoresSafeArea()
+                ZStack {
+                    if solid {
+                        Color(nsColor: .windowBackgroundColor)
+                    } else {
+                        BehindWindowBlur()
+                        look.tint
+                    }
                 }
+                .ignoresSafeArea()
+                .animation(.easeInOut(duration: 0.3), value: look)
             }
+            .background(SeeThroughWindow())
+    }
+}
+
+/// Makes the hosting window see-through, so the blur behind it shows
+/// instead of the window's own opaque background.
+private struct SeeThroughWindow: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context _: Context) {
+        // The window is attached after the first update.
+        DispatchQueue.main.async {
+            guard let window = view.window else { return }
+            window.isOpaque = false
+            window.backgroundColor = .clear
+            window.titlebarAppearsTransparent = true
+        }
     }
 }
 
@@ -103,7 +126,7 @@ private struct BehindWindowBlur: NSViewRepresentable {
     func makeNSView(context _: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.blendingMode = .behindWindow
-        view.material = .underWindowBackground
+        view.material = .hudWindow
         view.state = .active
         return view
     }
@@ -148,7 +171,7 @@ extension View {
 
 /// Settings (⌘,): the glass look, each shown as a small sample.
 struct SettingsView: View {
-    @AppStorage(GlassLook.key) private var look = GlassLook.system
+    @AppStorage(GlassLook.key) private var look = GlassLook.dark
 
     var body: some View {
         Form {
@@ -184,11 +207,7 @@ private struct LookTile: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
-                    .opacity(option == .clear ? 0.9 : 0.6)
-                    Capsule()
-                        .frame(width: 70, height: 22)
-                        .opacity(0)
-                        .glassSample(option)
+                    option.tint
                 }
                 .frame(width: 100, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -206,17 +225,5 @@ private struct LookTile: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(option.title) glass")
         .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-}
-
-private extension View {
-    /// A sample of `option`'s glass, independent of the chosen one.
-    @ViewBuilder
-    func glassSample(_ option: GlassLook) -> some View {
-        if #available(macOS 26, *) {
-            glassEffect(option.glass, in: .capsule)
-        } else {
-            background(option == .clear ? .ultraThinMaterial : .regularMaterial, in: .capsule)
-        }
     }
 }
