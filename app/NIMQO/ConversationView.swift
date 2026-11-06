@@ -277,11 +277,13 @@ struct MessageBubble: View {
                     switch message.kind {
                     case .video: VideoMessageView(chat: chat, message: message, store: pictures)
                     case .audio: AudioMessageView(chat: chat, message: message, store: pictures)
+                    case .document: DocumentMessageView(chat: chat, message: message, store: pictures)
                     default: MessagePictureView(chat: chat, message: message, store: pictures)
                     }
                 }
-                // A shown picture needs no "Photo" label, only its caption.
-                if !(message.hasMedia && message.body == nil) {
+                // A shown picture needs no "Photo" label, only its caption;
+                // a document shows its own name.
+                if !(message.hasMedia && (message.body == nil || message.kind == .document)) {
                     Text(text)
                         .italic(message.kind != .text && !message.hasMedia)
                         .textSelection(.enabled)

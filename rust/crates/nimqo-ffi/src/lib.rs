@@ -287,7 +287,7 @@ impl Core {
         });
     }
 
-    /// Message `seq`'s downloaded video or audio, to play from memory; nil
+    /// Message `seq`'s downloaded video, audio, or document, in memory; nil
     /// until `download_media` has stored it.
     ///
     /// # Errors

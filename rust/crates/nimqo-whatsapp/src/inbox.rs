@@ -224,7 +224,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
-                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio') AS has_media,
+                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document') AS has_media,
                  m.reply_to,
                  -- A quote's copy is the replier's claim: when the original is
                  -- stored, show it instead, so author and content always match.

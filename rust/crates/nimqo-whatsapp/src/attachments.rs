@@ -20,9 +20,14 @@ use crate::media;
 use crate::vault::Key;
 
 /// Larger files are not downloaded: photos and audio stay at 16 MB (their
-/// WhatsApp limit), videos at 64 MB; all are held in memory to play.
+/// WhatsApp limit), videos at 64 MB, documents at 100 MB; all are held in
+/// memory. ponytail: stream documents to disk if bigger ones matter.
 fn max_bytes(kind: &str) -> u64 {
-    let megabytes = if kind == "video" { 64 } else { 16 };
+    let megabytes = match kind {
+        "video" => 64,
+        "document" => 100,
+        _ => 16,
+    };
     megabytes * 1024 * 1024
 }
 
@@ -95,7 +100,8 @@ impl Attachments {
         }))
     }
 
-    /// The downloaded file of message `seq` (photo, video, or audio), or
+    /// The downloaded file of message `seq` (photo, video, audio, or
+    /// document), or
     /// `None` until it is downloaded.
     ///
     /// # Errors
@@ -150,6 +156,9 @@ impl Attachments {
         let item: Box<dyn whatsapp_rust::download::Downloadable> = match stored.kind.as_str() {
             "image" => Box::new(wa::message::ImageMessage::decode_from_slice(&stored.media)?),
             "video" => Box::new(wa::message::VideoMessage::decode_from_slice(&stored.media)?),
+            "document" => Box::new(wa::message::DocumentMessage::decode_from_slice(
+                &stored.media,
+            )?),
             _ => Box::new(wa::message::AudioMessage::decode_from_slice(&stored.media)?),
         };
         let max = max_bytes(&stored.kind);
@@ -225,7 +234,7 @@ impl Attachments {
         Ok(diesel::sql_query(
             "SELECT chat, sender, id, kind, media FROM messages
              WHERE rowid = ? AND chat = ? AND media IS NOT NULL
-               AND kind IN ('image', 'video', 'audio')",
+               AND kind IN ('image', 'video', 'audio', 'document')",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)
@@ -262,6 +271,8 @@ mod tests {
         inbox.insert_kind_for_test(chat, "v", "video", video.encode_to_vec());
         let audio = wa::message::AudioMessage::default();
         inbox.insert_kind_for_test(chat, "a", "audio", audio.encode_to_vec());
+        let doc = wa::message::DocumentMessage::default();
+        inbox.insert_kind_for_test(chat, "d", "document", doc.encode_to_vec());
         let rows = inbox.messages(chat, 10).unwrap();
         let seq = |id: &str| rows.iter().find(|r| r.id == id).unwrap().seq;
         assert!(rows.iter().all(|r| r.has_media));
@@ -270,6 +281,11 @@ mod tests {
         let p = store.picture(chat, seq("v")).unwrap().unwrap();
         assert_eq!((p.bytes.as_slice(), p.full), (&b"still"[..], true));
         assert!(store.picture(chat, seq("a")).unwrap().is_none());
+        assert!(store.picture(chat, seq("d")).unwrap().is_none());
+        assert!(
+            store.stored(chat, seq("d")).unwrap().is_some(),
+            "documents download"
+        );
         assert!(store.file_of(chat, seq("a")).unwrap().is_none());
         let stored = store.stored(chat, seq("a")).unwrap().unwrap();
         let sealed = media::encrypt(&store.key, b"ogg").unwrap();
