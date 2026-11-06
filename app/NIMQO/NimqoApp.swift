@@ -4,6 +4,20 @@ import SwiftUI
 struct NimqoApp: App {
     @State private var model = CoreModel()
 
+    init() {
+        // A second launch brings the running NIMQO forward instead. The
+        // core's data-directory lock still guards the session if this
+        // misses (another copy of the app, a race at launch).
+        let others = NSRunningApplication.runningApplications(
+            withBundleIdentifier: Bundle.main.bundleIdentifier ?? ""
+        ).filter { $0 != .current }
+        let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if let running = others.first, !testing {
+            running.activate()
+            exit(0)
+        }
+    }
+
     var body: some Scene {
         // One main window. Closing it keeps the app and the session running;
         // the Dock icon or the menu bar reopens it, Quit ends both (plan 7.6).
