@@ -31,6 +31,14 @@ fn max_bytes(kind: &str) -> u64 {
     megabytes * 1024 * 1024
 }
 
+/// How long a download may take before it counts as failed (offline, it
+/// would otherwise wait forever): 20 s plus 2 s per MB, about 4 Mbit/s.
+/// ponytail: a fixed rate; time out on stalled progress instead if slow
+/// links matter.
+fn time_limit(bytes: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(20 + bytes / (512 * 1024))
+}
+
 pub struct Attachments {
     inbox: Inbox,
     dir: PathBuf,
@@ -162,10 +170,14 @@ impl Attachments {
             _ => Box::new(wa::message::AudioMessage::decode_from_slice(&stored.media)?),
         };
         let max = max_bytes(&stored.kind);
+        let limit = time_limit(item.file_length().unwrap_or(max));
         let bytes = zeroize::Zeroizing::new(
-            client
-                .download(item.as_ref(), DownloadLimits::new(max + 1024, max))
-                .await?,
+            tokio::time::timeout(
+                limit,
+                client.download(item.as_ref(), DownloadLimits::new(max + 1024, max)),
+            )
+            .await
+            .map_err(|_| anyhow!("download timed out"))??,
         );
         crate::avatars::write_private(&file, &media::encrypt(&self.key, &bytes)?)?;
         self.inbox.notify_changed(vec![stored.chat]);
@@ -257,6 +269,12 @@ fn file_name(chat: &str, sender: &str, id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn downloads_get_more_time_when_larger() {
+        assert_eq!(time_limit(0).as_secs(), 20);
+        assert_eq!(time_limit(64 * 1024 * 1024).as_secs(), 148);
+    }
 
     #[test]
     fn a_video_shows_its_still_and_audio_plays_once_downloaded() {
