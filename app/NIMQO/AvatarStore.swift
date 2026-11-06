@@ -53,6 +53,9 @@ final class AvatarStore {
 struct Avatar: View {
     let chat: ChatSummary
     let store: AvatarStore
+    var size: CGFloat = 36
+    /// Draws the green "online" dot.
+    var online = false
 
     var body: some View {
         Group {
@@ -60,14 +63,21 @@ struct Avatar: View {
                 Image(nsImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: chat.isGroup ? "person.3.fill" : "person.fill")
-                    .font(.system(size: 15))
+                    .font(.system(size: size * 0.42))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.quaternary)
             }
         }
-        .frame(width: 36, height: 36)
+        .frame(width: size, height: size)
         .clipShape(Circle())
+        .overlay(alignment: .bottomTrailing) {
+            if online {
+                Circle().fill(.green)
+                    .frame(width: size * 0.3, height: size * 0.3)
+                    .overlay(Circle().stroke(.background, lineWidth: 1.5))
+            }
+        }
         .accessibilityHidden(true)
         .onAppear { store.request(chat.id) }
     }

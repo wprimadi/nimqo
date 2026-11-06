@@ -70,8 +70,6 @@ struct ConversationView: View {
                 }
             }
             .navigationTitle(chat.title)
-            // Like WhatsApp, the timer belongs to the chat, not to each message.
-            .navigationSubtitle(chat.timer.map { "Disappearing messages: \($0)" } ?? "")
     }
 
     /// The topmost message on screen, reported by the scroll view as the
@@ -87,17 +85,22 @@ struct ConversationView: View {
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: Theme.Spacing.small) {
+                LazyVStack(spacing: 2) {
                     if hasOlder, isFetchingOlder {
                         ProgressView().controlSize(.small)
                     }
                     // seq, not id: ids repeat across senders in groups.
                     ForEach(messages, id: \.seq) { message in
+                        if breaks.days.contains(message.seq) {
+                            DayChip(date: Date(timeIntervalSince1970: TimeInterval(message.timestampSecs)))
+                        }
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures)
                             .background(
                                 .tint.opacity(marked == message.seq ? 0.2 : 0),
                                 in: RoundedRectangle(cornerRadius: 8)
                             )
+                            // Messages in a row from one sender sit close together.
+                            .padding(.top, breaks.runs.contains(message.seq) ? Theme.Spacing.small : 0)
                             .contextMenu {
                                 if send != nil, message.kind != .deleted {
                                     Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
@@ -152,6 +155,29 @@ struct ConversationView: View {
                 }
             }
         }
+    }
+
+    /// Messages that start a new day (shown with a date above), and that
+    /// start a run from another sender or after a pause.
+    private var breaks: (days: Set<Int64>, runs: Set<Int64>) {
+        var days = Set<Int64>(), runs = Set<Int64>()
+        let calendar = Calendar.current
+        var previous: ChatMessage?
+        for message in messages {
+            let time = Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
+            let before = previous.map { Date(timeIntervalSince1970: TimeInterval($0.timestampSecs)) }
+            if before.map({ !calendar.isDate($0, inSameDayAs: time) }) ?? true {
+                days.insert(message.seq)
+            }
+            if let previous {
+                let otherSender = previous.fromMe != message.fromMe || previous.senderName != message.senderName
+                if otherSender || message.timestampSecs - previous.timestampSecs > 300 {
+                    runs.insert(message.seq)
+                }
+            }
+            previous = message
+        }
+        return (days, runs)
     }
 
     /// One page at a time; the scroll restore above keeps a page coming in
@@ -308,5 +334,34 @@ struct QuoteView: View {
         .accessibilityLabel(
             "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
         )
+    }
+}
+
+/// The date between messages of different days, as a small glass capsule.
+private struct DayChip: View {
+    let date: Date
+
+    private var label: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return String(localized: "Today")
+        }
+        if calendar.isDateInYesterday(date) {
+            return String(localized: "Yesterday")
+        }
+        let sameYear = calendar.isDate(date, equalTo: .now, toGranularity: .year)
+        return date.formatted(sameYear ? .dateTime.weekday(.wide).day().month(.wide)
+            : .dateTime.day().month(.wide).year())
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .glassSurface(in: .capsule)
+            .padding(.vertical, Theme.Spacing.small)
+            .accessibilityAddTraits(.isHeader)
     }
 }

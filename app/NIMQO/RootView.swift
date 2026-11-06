@@ -41,35 +41,21 @@ struct MainView: View {
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search messages")
             .searchFocus($searching)
-            .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 280)
+            .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 320)
         } detail: {
             if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
                 if model.messagesChat != chat.id {
                     // Never show another chat's messages while this one loads.
                     ProgressView()
                 } else {
-                    ConversationView(
-                        chat: chat,
-                        messages: model.messages,
-                        hasOlder: model.hasOlderMessages,
-                        isFetchingOlder: model.isFetchingOlder,
-                        pictures: model.pictures,
-                        loadOlder: { await model.loadOlderMessages() },
-                        // Bound to this chat: a send still running after
-                        // switching chats goes where it was started.
-                        send: chat.id == model.sendableChatId
-                            ? { await model.send($0, replyTo: $1, to: chat.id) } : nil,
-                        sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
-                        reveal: model.revealing,
-                        revealed: { model.revealing = nil },
-                        retry: { model.retry($0, in: chat.id) },
-                        react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } }
-                    )
-                    // A new view per chat: it opens at the latest message.
-                    .id(chat.id)
+                    conversation(chat)
                 }
             } else {
-                ContentUnavailableView("Select a chat", systemImage: "text.bubble")
+                ContentUnavailableView(
+                    "Select a chat",
+                    systemImage: "bubble.left.and.text.bubble.right",
+                    description: Text("Pick a conversation on the left. ⌘1 to ⌘9 open the most recent ones.")
+                )
             }
         }
         .focusedSceneValue(\.findMessages, $findRequested)
@@ -80,9 +66,33 @@ struct MainView: View {
         }
     }
 
+    private func conversation(_ chat: ChatSummary) -> some View {
+        ConversationView(
+            chat: chat,
+            messages: model.messages,
+            hasOlder: model.hasOlderMessages,
+            isFetchingOlder: model.isFetchingOlder,
+            pictures: model.pictures,
+            loadOlder: { await model.loadOlderMessages() },
+            // Bound to this chat: a send still running after
+            // switching chats goes where it was started.
+            send: chat.id == model.sendableChatId
+                ? { await model.send($0, replyTo: $1, to: chat.id) } : nil,
+            sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
+            reveal: model.revealing,
+            revealed: { model.revealing = nil },
+            retry: { model.retry($0, in: chat.id) },
+            react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } }
+        )
+        // A new view per chat: it opens at the latest message.
+        .id(chat.id)
+        .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts)
+    }
+
     private var chatList: some View {
         List(model.chats, selection: Bindable(model).selectedChat) { chat in
             ChatRow(chat: chat, avatars: model.avatars)
+                .listRowSeparator(.visible)
                 .contextMenu {
                     // ponytail: the test chat only, like sending.
                     if chat.id == model.sendableChatId {
@@ -109,23 +119,24 @@ struct ChatRow: View {
     let avatars: AvatarStore
 
     var body: some View {
-        HStack {
-            Avatar(chat: chat, store: avatars)
+        HStack(spacing: 12) {
+            Avatar(chat: chat, store: avatars, size: 44)
             details
         }
+        .padding(.vertical, 6)
         .accessibilityElement(children: .combine)
     }
 
     private var details: some View {
-        VStack(alignment: .leading) {
-            HStack {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
                 // The icon keeps a group subject from passing as a person.
                 if chat.isGroup {
                     Image(systemName: "person.3.fill")
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Group")
                 }
-                Text(chat.title).font(.headline).lineLimit(1)
+                Text(chat.title).font(.body.weight(.semibold)).lineLimit(1)
                 if chat.timer != nil {
                     Image(systemName: "timer")
                         .foregroundStyle(.secondary)
@@ -137,22 +148,40 @@ struct ChatRow: View {
                         .accessibilityLabel("Muted")
                 }
                 Spacer()
-                Text(chat.lastActivity, format: .relative(presentation: .numeric))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text(ChatRow.stamp(chat.lastActivity))
+                    .font(.caption.monospacedDigit())
+                    // Tinted while there is something to read, like WhatsApp.
+                    .foregroundStyle(chat.unread > 0 && !chat.muted ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             HStack {
-                Text(chat.preview).foregroundStyle(.secondary).lineLimit(1)
+                Text(chat.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 if chat.unread > 0 {
                     Spacer()
                     Text(chat.unread > 99 ? "99+" : "\(chat.unread)")
                         .font(.caption.bold().monospacedDigit())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
                         .background(Capsule().fill(chat.muted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint)))
                         .accessibilityLabel("\(chat.unread) unread")
                 }
             }
         }
+    }
+
+    /// The time today, "Yesterday", the weekday this week, else the date.
+    nonisolated static func stamp(_ date: Date, now: Date = .now) -> String {
+        let calendar = Calendar.current
+        if calendar.isDate(date, inSameDayAs: now) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: now) ?? now
+        if calendar.isDate(date, inSameDayAs: yesterday) {
+            return String(localized: "Yesterday")
+        }
+        if let days = calendar.dateComponents([.day], from: date, to: now).day, days < 7 {
+            return date.formatted(.dateTime.weekday(.wide))
+        }
+        return date.formatted(date: .numeric, time: .omitted)
     }
 }

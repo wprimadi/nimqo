@@ -13,6 +13,7 @@ pub mod media;
 pub mod mutes;
 pub mod outbox;
 pub mod peer;
+pub mod presence;
 pub mod reads;
 pub mod replies;
 pub mod search;

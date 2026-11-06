@@ -12,14 +12,15 @@ use nimqo_whatsapp::attachments::Attachments;
 use nimqo_whatsapp::avatars::Avatars;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
+use nimqo_whatsapp::presence::Presences;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use nimqo_whatsapp::{history, lids};
 use outbox::OutgoingFile;
-use whatsapp_rust::Client;
 use whatsapp_rust::bot::BotHandle;
 use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::{Event, EventKind};
+use whatsapp_rust::{ChatActivity, Client, PresenceStatus};
 
 uniffi::setup_scaffolding!();
 
@@ -28,6 +29,16 @@ mod outbox;
 mod state;
 
 pub use chats::{Chat, ChatMessage, Delivery, MessageKind, SearchHit};
+
+/// The person in a chat, as last heard: for the chat header.
+#[derive(Debug, uniffi::Record)]
+pub struct ContactStatus {
+    pub online: bool,
+    pub last_seen_secs: Option<i64>,
+    pub typing: bool,
+    /// Their "about" text; nil until fetched or when hidden.
+    pub about: Option<String>,
+}
 
 pub use state::ConnectionState;
 use state::Input;
@@ -134,6 +145,7 @@ pub struct Core {
     sender: Arc<outbox::Sender>,
     avatars: Arc<Avatars>,
     attachments: Arc<Attachments>,
+    presences: Arc<Presences>,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -181,6 +193,7 @@ impl Core {
             sender: session.sender,
             avatars: session.avatars,
             attachments: session.attachments,
+            presences: session.presences,
             lock: Mutex::new(Some(session.lock)),
         }))
     }
@@ -337,6 +350,57 @@ impl Core {
         self.attachments
             .sticker_animation(chat_id, seq)
             .map_err(err(|detail| CoreError::Storage { detail }))
+    }
+
+    /// What is known now about the person in `chat_id`, from memory.
+    #[must_use]
+    pub fn contact_status(&self, chat_id: &str) -> ContactStatus {
+        let s = self.presences.status(chat_id, unix_now());
+        ContactStatus {
+            online: s.online,
+            last_seen_secs: s.last_seen_secs,
+            typing: s.typing,
+            about: s.about,
+        }
+    }
+
+    /// The chat is open: fetches the person's about text once per run and
+    /// follows whether they are online or typing. Changes arrive through
+    /// `on_chats_changed`.
+    pub fn watch_contact(&self, chat_id: String) {
+        let Ok(jid) = chat_id.parse::<Jid>() else {
+            return;
+        };
+        if !chat_id.ends_with("@s.whatsapp.net") {
+            return;
+        }
+        // ponytail: presence of the test chat only, like sending; open it
+        // to all chats once the test phase ends.
+        let follow = chat_id == self.sender.peer_chat();
+        let (client, presences, inbox) = (
+            Arc::clone(&self.client),
+            Arc::clone(&self.presences),
+            self.inbox.clone(),
+        );
+        self.runtime.spawn(async move {
+            if presences.claim_about(&chat_id) {
+                match client
+                    .contacts()
+                    .get_user_info(std::slice::from_ref(&jid))
+                    .await
+                {
+                    Ok(info) => {
+                        presences
+                            .set_about(&chat_id, info.into_values().next().and_then(|u| u.status));
+                        inbox.notify_changed(vec![chat_id.clone()]);
+                    }
+                    Err(e) => log::info!("about not fetched: {e}"),
+                }
+            }
+            if follow && let Err(e) = client.presence().subscribe(jid).await {
+                log::info!("presence not followed: {e}");
+            }
+        });
     }
 
     /// The stored profile picture of a chat (JPEG), if any.
@@ -651,6 +715,7 @@ struct Session {
     sender: Arc<outbox::Sender>,
     avatars: Arc<Avatars>,
     attachments: Arc<Attachments>,
+    presences: Arc<Presences>,
 }
 
 async fn open_stores() -> Result<stores::Stores, CoreError> {
@@ -697,7 +762,15 @@ async fn connect(
         stores.media_dir.clone(),
         stores.media_key.clone(),
     ));
-    let bot = message_handlers(Bot::builder(), history_inbox, &sender_cell, &avatars)
+    let presences = Arc::<Presences>::default();
+    let builder = message_handlers(
+        Bot::builder(),
+        history_inbox.clone(),
+        &sender_cell,
+        &avatars,
+    );
+    let builder = presence_handlers(builder, history_inbox, Arc::clone(&presences));
+    let bot = state_handlers(builder, machine)
         .with_backend(stores.protocol)
         .with_inbound_durability_hook(stores.inbox)
         .with_event_delivery(EVENT_DELIVERY)
@@ -727,26 +800,6 @@ async fn connect(
                 }
             }
         })
-        .on_event_for(
-            &[
-                EventKind::Connected,
-                EventKind::Disconnected,
-                EventKind::LoggedOut,
-                EventKind::StreamReplaced,
-                EventKind::TemporaryBan,
-                EventKind::ClientOutdated,
-                EventKind::ConnectFailure,
-                EventKind::StreamError,
-                EventKind::PairingQrCodesExhausted,
-                EventKind::PairSuccess,
-            ],
-            move |event, _| {
-                if let Some(input) = input_from(&event) {
-                    machine.feed(input);
-                }
-                async {}
-            },
-        )
         .build()
         .await
         .map_err(err(|detail| CoreError::Startup { detail }))?;
@@ -769,7 +822,68 @@ async fn connect(
         sender,
         avatars,
         attachments,
+        presences,
     })
+}
+
+/// Connection events feed the state machine.
+fn state_handlers<B, T, H, R>(
+    builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
+    machine: Arc<Machine>,
+) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
+    builder.on_event_for(
+        &[
+            EventKind::Connected,
+            EventKind::Disconnected,
+            EventKind::LoggedOut,
+            EventKind::StreamReplaced,
+            EventKind::TemporaryBan,
+            EventKind::ClientOutdated,
+            EventKind::ConnectFailure,
+            EventKind::StreamError,
+            EventKind::PairingQrCodesExhausted,
+            EventKind::PairSuccess,
+        ],
+        move |event, _| {
+            if let Some(input) = input_from(&event) {
+                machine.feed(input);
+            }
+            async {}
+        },
+    )
+}
+
+/// Contacts' online and typing state, for the chat header.
+fn presence_handlers<B, T, H, R>(
+    builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
+    inbox: Inbox,
+    presences: Arc<Presences>,
+) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
+    builder.on_event_for(
+        &[EventKind::Presence, EventKind::ChatPresence],
+        move |event, client| {
+            let (inbox, presences) = (inbox.clone(), Arc::clone(&presences));
+            async move {
+                let chat = match &*event {
+                    Event::Presence(p) => {
+                        let chat = lids::phone_chat(&inbox, &client, &p.from).await;
+                        let online = matches!(p.status, PresenceStatus::Available);
+                        presences.set_online(&chat, online, p.last_seen.map(|t| t.timestamp()));
+                        chat
+                    }
+                    // ponytail: people only; group typing needs the sender.
+                    Event::ChatPresence(c) if !c.source.is_group => {
+                        let chat = lids::phone_chat(&inbox, &client, &c.source.chat).await;
+                        let typing = !matches!(c.state, ChatActivity::Idle);
+                        presences.set_typing(&chat, typing, unix_now());
+                        chat
+                    }
+                    _ => return,
+                };
+                inbox.notify_changed(vec![chat]);
+            }
+        },
+    )
 }
 
 /// History import, delivery receipts, and outbox flushes on connect.

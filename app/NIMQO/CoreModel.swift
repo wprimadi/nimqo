@@ -50,12 +50,14 @@ final class CoreModel {
         didSet {
             avatars.core = core
             pictures.core = core
+            contacts.core = core
             notifier.reset()
         }
     }
 
     let avatars = AvatarStore()
     let pictures = PictureStore()
+    let contacts = ContactStore()
     let notifier = Notifier()
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
@@ -160,6 +162,7 @@ final class CoreModel {
         avatars.invalidate(ids)
         if let selectedChat, ids.contains(selectedChat) {
             pictures.invalidate()
+            contacts.invalidate()
         }
         reloadChats()
         if let selectedChat, ids.contains(selectedChat) {

@@ -1,0 +1,186 @@
+import NimqoCore
+import SwiftUI
+
+/// What the core knows now about the person in the open chat. Read from
+/// memory on demand; `invalidate` makes views read again.
+@MainActor
+@Observable
+final class ContactStore {
+    var core: Core? {
+        didSet { generation += 1 }
+    }
+
+    private var generation = 0
+
+    func status(for chat: String) -> ContactStatus? {
+        _ = generation
+        return core?.contactStatus(chatId: chat)
+    }
+
+    /// The chat was opened: fetch the about text, follow online and typing.
+    func watch(_ chat: String) {
+        core?.watchContact(chatId: chat)
+    }
+
+    func invalidate() {
+        generation += 1
+    }
+}
+
+extension View {
+    /// Replaces the plain window title with the chat's picture, name,
+    /// number and status; clicking it shows the contact card.
+    func chatHeader(chat: ChatSummary, avatars: AvatarStore, contacts: ContactStore) -> some View {
+        modifier(ChatHeader(chat: chat, avatars: avatars, contacts: contacts))
+    }
+}
+
+private struct ChatHeader: ViewModifier {
+    let chat: ChatSummary
+    let avatars: AvatarStore
+    let contacts: ContactStore
+    @State private var showsCard = false
+
+    func body(content: Content) -> some View {
+        let status = chat.isGroup ? nil : contacts.status(for: chat.id)
+        content
+            .hidesWindowTitle()
+            .toolbar {
+                ToolbarItem(placement: .navigation) {
+                    Button { showsCard.toggle() } label: {
+                        HeaderLabel(chat: chat, status: status, avatars: avatars)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Contact info")
+                    .popover(isPresented: $showsCard, arrowEdge: .bottom) {
+                        ContactCard(chat: chat, status: status, avatars: avatars)
+                    }
+                }
+            }
+            .task(id: chat.id) { contacts.watch(chat.id) }
+            // Typing ends without a signal when the "paused" one is lost.
+            .task(id: status?.typing) {
+                guard status?.typing == true else { return }
+                try? await Task.sleep(for: .seconds(16))
+                contacts.invalidate()
+            }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func hidesWindowTitle() -> some View {
+        if #available(macOS 15, *) {
+            toolbar(removing: .title)
+        } else {
+            self
+        }
+    }
+}
+
+/// "online", "typing…" or when last seen; nil when unknown.
+private func presenceText(_ status: ContactStatus?) -> Text? {
+    guard let status else { return nil }
+    if status.typing {
+        return Text("typing…").foregroundStyle(.tint)
+    }
+    if status.online {
+        return Text("online").foregroundStyle(.green)
+    }
+    if let secs = status.lastSeenSecs {
+        let date = Date(timeIntervalSince1970: TimeInterval(secs))
+        return Text("last seen \(date, format: .relative(presentation: .named))")
+    }
+    return nil
+}
+
+private struct HeaderLabel: View {
+    let chat: ChatSummary
+    let status: ContactStatus?
+    let avatars: AvatarStore
+
+    /// The number, unless the title already shows it.
+    private var phone: String? {
+        chat.phone.flatMap { chat.title.contains($0) ? nil : $0 }
+    }
+
+    private var subtitle: Text? {
+        let parts: [Text] = chat.isGroup
+            ? [Text("Group")]
+            : [phone.map { Text($0) }, presenceText(status) ?? status?.about.map { Text($0) }].compactMap(\.self)
+        guard var line = parts.first else { return nil }
+        for part in parts.dropFirst() {
+            line = Text("\(line) · \(part)")
+        }
+        return line
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Avatar(chat: chat, store: avatars, size: 30, online: status?.online == true)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
+                    Text(chat.title).font(.headline).lineLimit(1)
+                    if chat.timer != nil {
+                        Image(systemName: "timer").accessibilityLabel("Disappearing messages")
+                    }
+                    if chat.muted {
+                        Image(systemName: "bell.slash").accessibilityLabel("Muted")
+                    }
+                }
+                .imageScale(.small)
+                if let subtitle {
+                    subtitle.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 6)
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Shows contact info.")
+    }
+}
+
+/// The picture, name, number and about text, larger.
+private struct ContactCard: View {
+    let chat: ChatSummary
+    let status: ContactStatus?
+    let avatars: AvatarStore
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.small) {
+            Avatar(chat: chat, store: avatars, size: 96, online: status?.online == true)
+            Text(chat.title).font(.title2.bold()).multilineTextAlignment(.center)
+            if let phone = chat.phone {
+                Text(phone).font(.title3).monospacedDigit().foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let presence = presenceText(status) {
+                presence.font(.callout)
+            }
+            if let about = status?.about {
+                Divider()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("About").font(.caption.bold()).foregroundStyle(.secondary)
+                    Text(about).textSelection(.enabled)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if chat.timer != nil || chat.muted {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    if let timer = chat.timer {
+                        Label("Disappearing messages: \(timer)", systemImage: "timer")
+                    }
+                    if chat.muted {
+                        Label("Muted", systemImage: "bell.slash")
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(Theme.Spacing.medium + 4)
+        .frame(width: 300)
+    }
+}

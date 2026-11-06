@@ -6,6 +6,8 @@ struct ChatSummary: Identifiable, Hashable {
     let id: String
     let title: String
     let isGroup: Bool
+    /// `+<digits>` for a person's chat.
+    let phone: String?
     let preview: String
     let lastActivity: Date
     let unread: Int
@@ -35,6 +37,7 @@ extension ChatSummary {
             }
         }
         isGroup = chat.isGroup
+        phone = chat.phone
         let text = ChatMessage.describe(kind: chat.lastKind, body: chat.lastBody)
         preview = chat.lastFromMe ? "You: \(text)" : text
         lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
