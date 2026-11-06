@@ -75,11 +75,19 @@ fn sane(json: &[u8]) -> bool {
     if assets.len() > MAX_ASSETS || assets.iter().any(|a| a.get("p").is_some()) {
         return false;
     }
+    // Every asset needs its own string id, so no asset escapes the count
+    // that the renderer would still find (it may read a number as an id).
+    let mut by_id = HashMap::new();
+    for asset in assets {
+        let Some(id) = asset.get("id").and_then(Value::as_str) else {
+            return false;
+        };
+        if by_id.insert(id, asset).is_some() {
+            return false;
+        }
+    }
     let mut cost = Cost {
-        assets: assets
-            .iter()
-            .filter_map(|a| Some((a.get("id")?.as_str()?, a)))
-            .collect(),
+        assets: by_id,
         memo: HashMap::new(),
         nesting: 0,
     };
@@ -130,9 +138,10 @@ impl<'a> Cost<'a> {
                         return None;
                     }
                 }
-                if let Some(id) = map.get("refId").and_then(Value::as_str)
-                    && let Some(asset) = self.assets.get(id).copied()
-                {
+                // A reference must name a known asset, as a string.
+                if let Some(reference) = map.get("refId") {
+                    let id = reference.as_str()?;
+                    let asset = self.assets.get(id).copied()?;
                     sum = sum.saturating_add(self.precomp(id, asset)?);
                 }
                 sum
@@ -260,5 +269,11 @@ mod tests {
             !sane(&animation(&reused)),
             "a heavy precomp used many times"
         );
+        let numeric = r#""assets":[{"id":1,"layers":[]}],"layers":[{"ty":0,"refId":1}]"#;
+        assert!(!sane(&animation(numeric)), "a number as an id");
+        let twice = r#""assets":[{"id":"a","layers":[]},{"id":"a","layers":[]}],"layers":[]"#;
+        assert!(!sane(&animation(twice)), "an id used twice");
+        let unknown = r#""layers":[{"ty":0,"refId":"nowhere"}]"#;
+        assert!(!sane(&animation(unknown)), "a reference to no asset");
     }
 }
