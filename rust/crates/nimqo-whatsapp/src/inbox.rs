@@ -232,7 +232,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
-                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document') AS has_media,
+                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document', 'sticker') AS has_media,
                  m.reply_to,
                  -- A quote's copy is the replier's claim: when the original is
                  -- stored, show it instead, so author and content always match.
@@ -763,8 +763,7 @@ pub(crate) fn chat_key(src: &MessageSource) -> String {
         .to_non_ad_string()
 }
 
-/// The encoded image or document message, kept so the file can be
-/// downloaded later. ponytail: other media keep a placeholder.
+/// The encoded media message, kept so the file can be downloaded later.
 #[must_use]
 pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     use whatsapp_rust::buffa::Message as _;
@@ -777,6 +776,9 @@ pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     }
     if let Some(audio) = base.audio_message.as_option() {
         return Some(audio.encode_to_vec());
+    }
+    if let Some(sticker) = base.sticker_message.as_option() {
+        return Some(sticker.encode_to_vec());
     }
     Some(base.document_message.as_option()?.encode_to_vec())
 }

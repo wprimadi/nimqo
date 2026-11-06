@@ -199,6 +199,17 @@ struct MessageBubble: View {
         }
     }
 
+    /// A sticker stands on its own, like in WhatsApp: no bubble.
+    private var bubbleStyle: AnyShapeStyle {
+        if message.kind == .sticker, message.hasMedia {
+            AnyShapeStyle(.clear)
+        } else if message.fromMe {
+            AnyShapeStyle(.tint.opacity(0.2))
+        } else {
+            AnyShapeStyle(.quaternary)
+        }
+    }
+
     private var time: Date {
         Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
     }
@@ -246,10 +257,7 @@ struct MessageBubble: View {
             }
             .padding(.horizontal, Theme.Spacing.medium)
             .padding(.vertical, Theme.Spacing.small)
-            .background(
-                message.fromMe ? AnyShapeStyle(.tint.opacity(0.2)) : AnyShapeStyle(.quaternary),
-                in: .rect(cornerRadius: 12)
-            )
+            .background(bubbleStyle, in: .rect(cornerRadius: 12))
             .overlay(alignment: message.fromMe ? .bottomLeading : .bottomTrailing) {
                 if let reactions = message.reactions {
                     Text(reactions)

@@ -87,6 +87,10 @@ struct MessagePictureView: View {
     let store: PictureStore
     @State private var enlarged = false
 
+    private var isSticker: Bool {
+        message.kind == .sticker
+    }
+
     var body: some View {
         Group {
             if let picture = store.image(chat: chat, message: message) {
@@ -109,9 +113,10 @@ struct MessagePictureView: View {
                     .frame(width: 160, height: 120)
             }
         }
-        .frame(maxWidth: 280, maxHeight: 320)
+        // Stickers are drawn small, as on the phone.
+        .frame(maxWidth: isSticker ? 160 : 280, maxHeight: isSticker ? 160 : 320)
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .accessibilityLabel("Photo")
+        .accessibilityLabel(isSticker ? "Sticker" : "Photo")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the photo at full size.")
         .onTapGesture { enlarged = true }

@@ -89,22 +89,27 @@ impl Attachments {
         let Some(stored) = self.stored(chat, seq)? else {
             return Ok(None);
         };
+        // Images and stickers show the downloaded file once it is here.
+        if matches!(stored.kind.as_str(), "image" | "sticker")
+            && let Some(bytes) = self.read(&stored)?
+        {
+            return Ok(Some(Picture {
+                bytes: bytes.to_vec(),
+                full: true,
+            }));
+        }
         let thumbnail = match stored.kind.as_str() {
-            "image" => {
-                if let Some(bytes) = self.read(&stored)? {
-                    return Ok(Some(Picture {
-                        bytes: bytes.to_vec(),
-                        full: true,
-                    }));
-                }
-                wa::message::ImageMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail
+            "image" => wa::message::ImageMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail,
+            "sticker" => {
+                wa::message::StickerMessage::decode_from_slice(&stored.media)?.png_thumbnail
             }
             "video" => wa::message::VideoMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail,
             _ => None,
         };
         Ok(thumbnail.filter(|t| !t.is_empty()).map(|bytes| Picture {
             bytes,
-            full: stored.kind != "image",
+            // A video's still is all it shows; the rest still download.
+            full: stored.kind == "video",
         }))
     }
 
@@ -165,6 +170,9 @@ impl Attachments {
             "image" => Box::new(wa::message::ImageMessage::decode_from_slice(&stored.media)?),
             "video" => Box::new(wa::message::VideoMessage::decode_from_slice(&stored.media)?),
             "document" => Box::new(wa::message::DocumentMessage::decode_from_slice(
+                &stored.media,
+            )?),
+            "sticker" => Box::new(wa::message::StickerMessage::decode_from_slice(
                 &stored.media,
             )?),
             _ => Box::new(wa::message::AudioMessage::decode_from_slice(&stored.media)?),
@@ -246,7 +254,7 @@ impl Attachments {
         Ok(diesel::sql_query(
             "SELECT chat, sender, id, kind, media FROM messages
              WHERE rowid = ? AND chat = ? AND media IS NOT NULL
-               AND kind IN ('image', 'video', 'audio', 'document')",
+               AND kind IN ('image', 'video', 'audio', 'document', 'sticker')",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)
@@ -291,6 +299,9 @@ mod tests {
         inbox.insert_kind_for_test(chat, "a", "audio", audio.encode_to_vec());
         let doc = wa::message::DocumentMessage::default();
         inbox.insert_kind_for_test(chat, "d", "document", doc.encode_to_vec());
+        let mut sticker = wa::message::StickerMessage::default();
+        sticker.png_thumbnail = Some(b"tiny".to_vec());
+        inbox.insert_kind_for_test(chat, "s", "sticker", sticker.encode_to_vec());
         let rows = inbox.messages(chat, 10).unwrap();
         let seq = |id: &str| rows.iter().find(|r| r.id == id).unwrap().seq;
         assert!(rows.iter().all(|r| r.has_media));
@@ -299,6 +310,14 @@ mod tests {
         let p = store.picture(chat, seq("v")).unwrap().unwrap();
         assert_eq!((p.bytes.as_slice(), p.full), (&b"still"[..], true));
         assert!(store.picture(chat, seq("a")).unwrap().is_none());
+        // A sticker: its small preview until the file is downloaded.
+        let p = store.picture(chat, seq("s")).unwrap().unwrap();
+        assert_eq!((p.bytes.as_slice(), p.full), (&b"tiny"[..], false));
+        let stored = store.stored(chat, seq("s")).unwrap().unwrap();
+        let sealed = media::encrypt(&store.key, b"webp").unwrap();
+        crate::avatars::write_private(&store.file(&stored), &sealed).unwrap();
+        let p = store.picture(chat, seq("s")).unwrap().unwrap();
+        assert_eq!((p.bytes.as_slice(), p.full), (&b"webp"[..], true));
         assert!(store.picture(chat, seq("d")).unwrap().is_none());
         assert!(
             store.stored(chat, seq("d")).unwrap().is_some(),
