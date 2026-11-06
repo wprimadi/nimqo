@@ -106,6 +106,11 @@ struct MessagePictureView: View {
                             ProgressView().controlSize(.small)
                         }
                     }
+            } else if isSticker {
+                // An animated (Lottie) sticker that came without a preview.
+                // ponytail: a Lottie renderer would draw it.
+                Label("Animated sticker", systemImage: "face.smiling")
+                    .foregroundStyle(.secondary)
             } else {
                 Image(systemName: "photo")
                     .font(.largeTitle)
@@ -119,7 +124,8 @@ struct MessagePictureView: View {
         .accessibilityLabel(isSticker ? "Sticker" : "Photo")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Opens the photo at full size.")
-        .onTapGesture { enlarged = true }
+        // Nothing to enlarge until there is a picture.
+        .onTapGesture { enlarged = store.image(chat: chat, message: message) != nil }
         .onAppear { store.request(chat: chat, message: message) }
         .sheet(isPresented: $enlarged) {
             PictureViewer(chat: chat, message: message, store: store)
