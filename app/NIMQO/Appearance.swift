@@ -91,7 +91,8 @@ private struct WindowLook: ViewModifier {
                     if solid {
                         Color(nsColor: .windowBackgroundColor)
                     } else {
-                        BehindWindowBlur()
+                        // Clear lets part of the desktop through unblurred.
+                        BehindWindowBlur().opacity(look == .clear ? 0.65 : 1)
                         look.tint
                     }
                 }
@@ -125,7 +126,27 @@ private struct SeeThroughWindow: NSViewRepresentable {
             case .light: NSAppearance(named: .aqua)
             default: nil
             }
+            if #available(macOS 26, *), let content = window.contentView {
+                clearSidebarGlass(in: content)
+            }
         }
+    }
+}
+
+/// The sidebar sits on its own glass, over the window's blur; clear glass
+/// makes the window read as one sheet.
+/// ponytail: found by walking AppKit's views; if AppKit renames them the
+/// sidebar keeps its regular glass, nothing breaks.
+@available(macOS 26, *)
+@MainActor
+private func clearSidebarGlass(in view: NSView) {
+    let inSplitView = String(describing: type(of: view.superview ?? view)).contains("SplitViewItem")
+    if inSplitView, let glass = view as? NSGlassEffectView {
+        glass.style = .clear
+        return
+    }
+    for child in view.subviews {
+        clearSidebarGlass(in: child)
     }
 }
 
