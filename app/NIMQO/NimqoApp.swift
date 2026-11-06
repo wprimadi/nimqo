@@ -13,7 +13,12 @@ struct NimqoApp: App {
         ).filter { $0 != .current }
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         if let running = others.first, !testing {
-            running.activate()
+            // macOS lets the running app come forward only if this one
+            // hands over; the running app then opens its own window.
+            NSApplication.shared.yieldActivation(to: running)
+            DistributedNotificationCenter.default().postNotificationName(
+                MainWindow.show, object: nil, deliverImmediately: true
+            )
             exit(0)
         }
     }
@@ -43,6 +48,7 @@ struct NimqoApp: App {
             let unread = model.chats.filter { !$0.muted }.reduce(0) { $0 + $1.unread }
             Label("NIMQO", systemImage: model.statusSymbol)
                 .labelStyle(.iconOnly)
+                .modifier(ShowsWindowOnRequest())
                 .accessibilityValue(unread > 0 ? "\(model.statusText), \(unread) unread" : model.statusText)
             if unread > 0 {
                 Text("\(unread)")
@@ -53,6 +59,22 @@ struct NimqoApp: App {
 
 enum MainWindow {
     static let id = "main"
+    /// Posted by a second launch. Anyone can post it; all it does is show
+    /// the window.
+    static let show = Notification.Name("app.nimqo.show-main-window")
+}
+
+/// On the menu bar label, which lives as long as the app (the window may
+/// be closed): opens the window when a second launch asks.
+private struct ShowsWindowOnRequest: ViewModifier {
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onReceive(DistributedNotificationCenter.default().publisher(for: MainWindow.show)) { _ in
+            openWindow(id: MainWindow.id)
+            NSApp.activate()
+        }
+    }
 }
 
 /// App menu > Log Out. Opens the window, where the confirmation is shown.

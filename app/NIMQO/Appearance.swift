@@ -92,8 +92,9 @@ private struct WindowLook: ViewModifier {
                     if solid {
                         Color(nsColor: .windowBackgroundColor)
                     } else {
-                        // Clear lets part of the desktop through unblurred.
-                        BehindWindowBlur().opacity(look == .clear ? 0.65 : 1)
+                        // Clear lets a little of the desktop through
+                        // unblurred: enough to see, not enough to read.
+                        BehindWindowBlur().opacity(look == .clear ? 0.88 : 1)
                         look.tint
                     }
                 }
