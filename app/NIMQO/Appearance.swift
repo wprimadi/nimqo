@@ -86,6 +86,7 @@ private struct WindowLook: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .preferredColorScheme(look.scheme)
             .background {
                 ZStack {
                     if solid {
@@ -118,9 +119,8 @@ private struct SeeThroughWindow: NSViewRepresentable {
             guard let window = view.window else { return }
             window.isOpaque = false
             window.backgroundColor = .clear
-            window.titlebarAppearsTransparent = true
-            // Set on the window, not with preferredColorScheme: going back
-            // to nil there keeps the last forced appearance.
+            // Also set on the window: preferredColorScheme going back to
+            // nil keeps the last forced appearance there.
             window.appearance = switch look.scheme {
             case .dark: NSAppearance(named: .darkAqua)
             case .light: NSAppearance(named: .aqua)
