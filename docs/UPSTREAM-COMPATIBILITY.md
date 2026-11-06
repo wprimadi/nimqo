@@ -7,16 +7,17 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 
 | Item | Value |
 | --- | --- |
-| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58`, used through the fork `wprimadi/whatsapp-rust` branch `nimqo-lid-contacts` @ `ea798c73cc4aaf136ab24b61decdde7eb27da52f` (patches below) |
+| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58` |
 | Features | defaults off; `sqlite-storage`, `tokio-transport`, `tokio-runtime`, `tokio-native`, `ureq-client` |
 | Storage | upstream SQLite store on SQLCipher (`libsqlite3-sys` 0.38 `bundled-sqlcipher`, CommonCrypto) |
 | Rust | 1.99.1 |
 | macOS | 27.0.1, Apple Silicon; binary minimum macOS 14.0 |
 | Tools | `rust/crates/nimqo-whatsapp` binary `nimqo-poc`; SwiftPM app in `app/` via `nimqo-ffi` |
 
-## Patches on the fork
+## Notes
 
-- `lid_contact` app-state mutations (address-book entries keyed by LID) are reported as `ContactUpdate` / `ContactRemoved`; upstream knows the verb but drops it, so most saved names never arrived.
+- Event callbacks get a 256-event mailbox by default and the newest event is dropped when it is full. The address book arrives as one burst of contact events (about 1,500 on the test account), so NIMQO raises the buffer to 50,000 (`EVENT_DELIVERY`).
+- `lid_contact` app-state entries are known upstream but not reported as events; none were seen on the test account.
 
 ## Results
 

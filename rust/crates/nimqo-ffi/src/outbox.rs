@@ -323,7 +323,6 @@ impl Sender {
 
     /// A contact saved, renamed, or removed in the phone's address book.
     pub async fn on_contact(&self, jid: &Jid, name: &str, pn: Option<&str>) {
-        contact_counts::seen(jid.is_lid(), pn.is_some(), name.is_empty());
         // The action can name the phone number when the jid is a LID.
         let chat = match pn.and_then(|p| p.parse::<Jid>().ok()) {
             Some(pn) if pn.is_pn() => pn.to_non_ad_string(),
@@ -344,10 +343,8 @@ impl Sender {
         }
     }
 
-    /// Fetch the whole address book once per launch: live updates alone miss
-    /// entries (names saved by LID were dropped before). A read, nothing is
-    /// sent. ponytail: one snapshot per launch; track a sync version if it
-    /// gets slow.
+    /// Fetch the address book once when none is known (never stored, or
+    /// emptied by a migration). A read, nothing is sent.
     pub async fn load_contacts_once(&self) {
         static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if let Ok((total, by_lid, matched, by_pn, direct, pushed)) = self.inbox.contact_stats() {
@@ -356,7 +353,9 @@ impl Sender {
                  {matched} on chats; {direct} 1:1 chats, {pushed} with a push name"
             );
         }
-        if DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if self.inbox.contact_count().unwrap_or(1) > 0
+            || DONE.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
             return;
         }
         match self
@@ -367,16 +366,7 @@ impl Sender {
             )
             .await
         {
-            Ok(_) => {
-                // Events of the snapshot are still being handled: wait a bit.
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                let n = self.inbox.contact_count().unwrap_or(0);
-                log::info!(
-                    "address book loaded: {n} names; {}; {} event(s) dropped",
-                    contact_counts::summary(),
-                    self.client.stats().events_dropped
-                );
-            }
+            Ok(_) => log::info!("address book loaded"),
             Err(e) => log::warn!("address book not loaded: {e}"),
         }
     }
@@ -448,33 +438,5 @@ mod tests {
         assert!(check(peer, peer, "   ", 0).is_err());
         assert!(check(peer, peer, &"x".repeat(MAX_CHARS + 1), 0).is_err());
         assert!(check(peer, peer, "hi", MAX_QUEUED).is_err(), "queue cap");
-    }
-}
-
-/// Diagnostics, counts only: contact events since launch, by shape.
-/// ponytail: remove once saved names are complete.
-mod contact_counts {
-    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-
-    static ALL: AtomicUsize = AtomicUsize::new(0);
-    static BY_LID: AtomicUsize = AtomicUsize::new(0);
-    static WITH_PN: AtomicUsize = AtomicUsize::new(0);
-    static UNNAMED: AtomicUsize = AtomicUsize::new(0);
-
-    pub fn seen(lid: bool, pn: bool, unnamed: bool) {
-        ALL.fetch_add(1, Relaxed);
-        BY_LID.fetch_add(usize::from(lid), Relaxed);
-        WITH_PN.fetch_add(usize::from(pn), Relaxed);
-        UNNAMED.fetch_add(usize::from(unnamed), Relaxed);
-    }
-
-    pub fn summary() -> String {
-        format!(
-            "{} contact events since launch: {} by LID, {} with a number, {} without a name",
-            ALL.load(Relaxed),
-            BY_LID.load(Relaxed),
-            WITH_PN.load(Relaxed),
-            UNNAMED.load(Relaxed)
-        )
     }
 }

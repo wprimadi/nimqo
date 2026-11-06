@@ -9,8 +9,8 @@ publish.workspace = true
 [dependencies]
 # Pinned upstream revision (plan 9.2). Defaults are off because they include
 # plain bundled SQLite; SQLCipher is linked through libsqlite3-sys below.
-whatsapp-rust = { git = "https://github.com/wprimadi/whatsapp-rust", rev = "ea798c73cc4aaf136ab24b61decdde7eb27da52f", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }
-whatsapp-rust-sqlite-storage = { git = "https://github.com/wprimadi/whatsapp-rust", rev = "ea798c73cc4aaf136ab24b61decdde7eb27da52f", default-features = false }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false }
 libsqlite3-sys = { version = "0.38", default-features = false, features = ["bundled-sqlcipher"] }
 diesel = { version = "2.3.14", default-features = false, features = ["sqlite"] }
 security-framework = "3.7"
