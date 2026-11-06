@@ -27,6 +27,12 @@ struct ConversationView: View {
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
     @State private var isDropTarget = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Nil under Reduce Motion: scrolls jump and marks appear at once.
+    private var motion: Animation? {
+        reduceMotion ? nil : .default
+    }
 
     var body: some View {
         // The timeline runs under the floating controls.
@@ -40,14 +46,14 @@ struct ConversationView: View {
                             .glassButton()
                             .controlSize(.extraLarge)
                             .keyboardShortcut(.downArrow, modifiers: .command)
-                            .transition(.scale.combined(with: .opacity))
+                            .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
                     }
                     if let send {
                         Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped)
                     }
                 }
                 .padding([.horizontal, .bottom], Theme.Spacing.medium)
-                .animation(.spring(duration: 0.3, bounce: 0), value: atBottom)
+                .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0), value: atBottom)
             }
             .dropDestination(for: URL.self) { urls, _ in
                 let files = urls.filter(\.isFileURL)
@@ -119,23 +125,23 @@ struct ConversationView: View {
             }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {
-                    withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    withAnimation(motion) { proxy.scrollTo(last, anchor: .bottom) }
                 }
             }
             .onChange(of: messages.last?.seq) { _, last in
                 // A new message: follow it if the end was in view or it is ours.
                 guard let last, atBottom || messages.last?.fromMe == true else { return }
-                withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                withAnimation(motion) { proxy.scrollTo(last, anchor: .bottom) }
             }
             .task(id: [reveal, messages.first?.seq]) {
                 guard let reveal, messages.contains(where: { $0.seq == reveal }) else { return }
                 // After the scroll kept by a page coming in above.
                 try? await Task.sleep(for: .milliseconds(150))
                 proxy.scrollTo(reveal, anchor: .center)
-                withAnimation { marked = reveal }
+                withAnimation(motion) { marked = reveal }
                 revealed()
                 try? await Task.sleep(for: .seconds(2))
-                withAnimation { marked = nil }
+                withAnimation(motion) { marked = nil }
             }
             .onChange(of: messages.first?.seq) { old, _ in
                 // Older messages went in above (a page, or the phone's

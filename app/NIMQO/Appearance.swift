@@ -82,7 +82,14 @@ private struct GlassButton: ViewModifier {
 /// The window itself: see-through, blurred, tinted by the look.
 private struct WindowLook: ViewModifier {
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
-    @Environment(\.accessibilityReduceTransparency) private var solid
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    /// Reduce Transparency or Increase Contrast: no see-through window.
+    private var solid: Bool {
+        reduceTransparency || contrast == .increased
+    }
 
     func body(content: Content) -> some View {
         content
@@ -99,7 +106,7 @@ private struct WindowLook: ViewModifier {
                     }
                 }
                 .ignoresSafeArea()
-                .animation(.easeInOut(duration: 0.3), value: look)
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: look)
             }
             .background(SeeThroughWindow(look: look))
     }
@@ -237,32 +244,30 @@ private struct LookTile: View {
     }
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.small) {
-            ZStack {
-                LinearGradient(
-                    colors: [.indigo, .teal, .orange],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                option.tint
-            }
-            .frame(width: 100, height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(
-                        selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                        lineWidth: selected ? 3 : 1
+        Button(action: choose) {
+            VStack(spacing: Theme.Spacing.small) {
+                ZStack {
+                    LinearGradient(
+                        colors: [.indigo, .teal, .orange],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
+                    option.tint
+                }
+                .frame(width: 100, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(
+                            selected ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                            lineWidth: selected ? 3 : 1
+                        )
+                }
+                .environment(\.colorScheme, option.scheme ?? .dark)
+                Text(option.title).font(.callout)
             }
-            .environment(\.colorScheme, option.scheme ?? .dark)
-            Text(option.title).font(.callout)
         }
-        .contentShape(.rect)
-        .onTapGesture(perform: choose)
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { choose() }
+        .buttonStyle(.plain)
         .accessibilityLabel("\(option.title) glass")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
