@@ -742,6 +742,7 @@ fn message_handlers<B, T, H, R>(
                 EventKind::ContactUpdate,
                 EventKind::ContactRemoved,
                 EventKind::DisappearingModeChanged,
+                EventKind::AppStateSyncFailed,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
@@ -758,6 +759,13 @@ fn message_handlers<B, T, H, R>(
                                 .await;
                         }
                         Event::ContactRemoved(c) => sender.on_contact(&c.jid, "", None).await,
+                        // Collection names only, never their content.
+                        Event::AppStateSyncFailed(f) => log::warn!(
+                            "app state not synced: fatal {:?}, retryable {:?}, skipped {:?}",
+                            f.fatal,
+                            f.retryable,
+                            f.skipped
+                        ),
                         Event::DisappearingModeChanged(d) => {
                             log::info!("disappearing mode changed: {}s", d.duration);
                             sender.on_timer(&d.from, d.duration).await;

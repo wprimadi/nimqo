@@ -323,6 +323,7 @@ impl Sender {
 
     /// A contact saved, renamed, or removed in the phone's address book.
     pub async fn on_contact(&self, jid: &Jid, name: &str, pn: Option<&str>) {
+        contact_counts::seen(jid.is_lid(), pn.is_some(), name.is_empty());
         // The action can name the phone number when the jid is a LID.
         let chat = match pn.and_then(|p| p.parse::<Jid>().ok()) {
             Some(pn) if pn.is_pn() => pn.to_non_ad_string(),
@@ -367,8 +368,13 @@ impl Sender {
             .await
         {
             Ok(_) => {
+                // Events of the snapshot are still being handled: wait a bit.
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                 let n = self.inbox.contact_count().unwrap_or(0);
-                log::info!("address book loaded: {n} names");
+                log::info!(
+                    "address book loaded: {n} names; {}",
+                    contact_counts::summary()
+                );
             }
             Err(e) => log::warn!("address book not loaded: {e}"),
         }
@@ -441,5 +447,33 @@ mod tests {
         assert!(check(peer, peer, "   ", 0).is_err());
         assert!(check(peer, peer, &"x".repeat(MAX_CHARS + 1), 0).is_err());
         assert!(check(peer, peer, "hi", MAX_QUEUED).is_err(), "queue cap");
+    }
+}
+
+/// Diagnostics, counts only: contact events since launch, by shape.
+/// ponytail: remove once saved names are complete.
+mod contact_counts {
+    use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+    static ALL: AtomicUsize = AtomicUsize::new(0);
+    static BY_LID: AtomicUsize = AtomicUsize::new(0);
+    static WITH_PN: AtomicUsize = AtomicUsize::new(0);
+    static UNNAMED: AtomicUsize = AtomicUsize::new(0);
+
+    pub fn seen(lid: bool, pn: bool, unnamed: bool) {
+        ALL.fetch_add(1, Relaxed);
+        BY_LID.fetch_add(usize::from(lid), Relaxed);
+        WITH_PN.fetch_add(usize::from(pn), Relaxed);
+        UNNAMED.fetch_add(usize::from(unnamed), Relaxed);
+    }
+
+    pub fn summary() -> String {
+        format!(
+            "{} contact events since launch: {} by LID, {} with a number, {} without a name",
+            ALL.load(Relaxed),
+            BY_LID.load(Relaxed),
+            WITH_PN.load(Relaxed),
+            UNNAMED.load(Relaxed)
+        )
     }
 }
