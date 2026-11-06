@@ -38,6 +38,8 @@ final class CoreModel {
     }
 
     nonisolated static let pageSize: UInt32 = 200
+    /// A message (seq) of `messages` to scroll to and mark, then cleared.
+    var revealing: Int64?
     /// The only chat with a composer during development.
     private(set) var sendableChatId: String?
     var selectedChat: ChatSummary.ID? {

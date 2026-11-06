@@ -15,6 +15,10 @@ struct ConversationView: View {
     /// Nil makes the chat read-only. Returns why a message was refused.
     let send: (@MainActor (String, Int64?) async -> String?)?
     let sendFile: @MainActor (URL) async -> String?
+    /// A message to scroll to and mark (from search); `revealed` clears it.
+    var reveal: Int64?
+    var revealed: @MainActor () -> Void = {}
+    @State private var marked: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
@@ -65,6 +69,10 @@ struct ConversationView: View {
                     // seq, not id: ids repeat across senders in groups.
                     ForEach(messages, id: \.seq) { message in
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures)
+                            .background(
+                                .tint.opacity(marked == message.seq ? 0.2 : 0),
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
                             .contextMenu {
                                 if send != nil, message.kind != .deleted {
                                     Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
@@ -90,6 +98,16 @@ struct ConversationView: View {
                 // A new message: follow it if the end was in view or it is ours.
                 guard let last, atBottom || messages.last?.fromMe == true else { return }
                 withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+            }
+            .task(id: [reveal, messages.first?.seq]) {
+                guard let reveal, messages.contains(where: { $0.seq == reveal }) else { return }
+                // After the scroll kept by a page coming in above.
+                try? await Task.sleep(for: .milliseconds(150))
+                proxy.scrollTo(reveal, anchor: .center)
+                withAnimation { marked = reveal }
+                revealed()
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { marked = nil }
             }
             .onChange(of: messages.first?.seq) { old, _ in
                 // Older messages went in above (a page, or the phone's
