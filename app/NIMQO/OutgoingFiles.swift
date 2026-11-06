@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import ImageIO
 import NimqoCore
@@ -5,20 +6,41 @@ import UniformTypeIdentifiers
 
 /// Prepares a picked file for sending. Photos are re-encoded as JPEG at most
 /// 2560 px on the long side; writing only the pixels drops location and
-/// other metadata. Everything else goes as a document, unchanged.
+/// other metadata. Videos are rewritten as MP4 without re-encoding, minus
+/// location and other personal metadata. Common audio goes as audio;
+/// everything else as a document, unchanged.
 enum OutgoingFiles {
-    static func prepare(_ url: URL) throws -> OutgoingFile {
+    /// Audio WhatsApp plays in the chat, by extension.
+    static let audioTypes = [
+        "mp3": "audio/mpeg", "m4a": "audio/mp4", "aac": "audio/aac", "ogg": "audio/ogg", "opus": "audio/ogg",
+    ]
+
+    static func prepare(_ url: URL) async throws -> OutgoingFile {
         let type = UTType(filenameExtension: url.pathExtension) ?? .data
+        if type.conforms(to: .movie), let video = try await video(url) {
+            return video
+        }
         let bytes = try Data(contentsOf: url)
-        let photo = type.conforms(to: .image) ? jpeg(bytes, maxPixels: 2560, quality: 0.8) : nil
-        if let photo {
+        if type.conforms(to: .image), let photo = jpeg(bytes, maxPixels: 2560, quality: 0.8) {
             return OutgoingFile(
                 bytes: photo,
                 fileName: url.deletingPathExtension().lastPathComponent + ".jpg",
                 mimetype: "image/jpeg",
                 caption: nil,
                 thumbnail: jpeg(bytes, maxPixels: 100, quality: 0.6),
-                asPhoto: true
+                kind: .photo,
+                durationSecs: nil
+            )
+        }
+        if let mimetype = audioTypes[url.pathExtension.lowercased()] {
+            return await OutgoingFile(
+                bytes: bytes,
+                fileName: url.lastPathComponent,
+                mimetype: mimetype,
+                caption: nil,
+                thumbnail: nil,
+                kind: .audio,
+                durationSecs: seconds(of: AVURLAsset(url: url))
             )
         }
         return OutgoingFile(
@@ -27,8 +49,44 @@ enum OutgoingFiles {
             mimetype: type.preferredMIMEType ?? "application/octet-stream",
             caption: nil,
             thumbnail: nil,
-            asPhoto: false
+            kind: .document,
+            durationSecs: nil
         )
+    }
+
+    /// Nil when it cannot go into MP4 as it is (it is sent as a document).
+    /// The copy is written to the temporary folder and removed at once.
+    private static func video(_ url: URL) async throws -> OutgoingFile? {
+        let asset = AVURLAsset(url: url)
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
+        else { return nil }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        defer { try? FileManager.default.removeItem(at: out) }
+        session.metadataItemFilter = .forSharing()
+        do {
+            try await session.export(to: out, as: .mp4)
+        } catch {
+            return nil
+        }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 100, height: 100)
+        let still = try? await generator.image(at: .zero).image
+        return try await OutgoingFile(
+            bytes: Data(contentsOf: out),
+            fileName: url.deletingPathExtension().lastPathComponent + ".mp4",
+            mimetype: "video/mp4",
+            caption: nil,
+            thumbnail: still.flatMap { jpeg($0, quality: 0.6) },
+            kind: .video,
+            durationSecs: seconds(of: asset)
+        )
+    }
+
+    private static func seconds(of asset: AVURLAsset) async -> UInt32? {
+        guard let duration = try? await asset.load(.duration).seconds, duration.isFinite, duration >= 0
+        else { return nil }
+        return UInt32(duration.rounded())
     }
 
     /// Nil when the data is not a readable image.
@@ -43,6 +101,10 @@ enum OutgoingFiles {
         guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return nil
         }
+        return jpeg(image, quality: quality)
+    }
+
+    static func jpeg(_ image: CGImage, quality: Double) -> Data? {
         let out = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
             out, UTType.jpeg.identifier as CFString, 1, nil
@@ -74,10 +136,13 @@ extension CoreModel {
     func sendFile(_ url: URL, caption: String?, to chat: String) async -> String? {
         guard let core else { return "Not connected." }
         let result = await Task.detached {
-            Result {
-                var file = try OutgoingFiles.prepare(url)
+            do {
+                var file = try await OutgoingFiles.prepare(url)
                 file.caption = caption
-                return try core.sendFile(chatId: chat, file: file)
+                try core.sendFile(chatId: chat, file: file)
+                return Result<Void, Error>.success(())
+            } catch {
+                return .failure(error)
             }
         }.value
         if case let .failure(error) = result {
