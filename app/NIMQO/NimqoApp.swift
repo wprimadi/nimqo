@@ -10,12 +10,17 @@ struct NimqoApp: App {
         Window("NIMQO", id: MainWindow.id) {
             RootView(model: model)
                 .frame(minWidth: 720, minHeight: 480)
+                .windowLook()
                 .task { model.start() }
         }
 
         .commands {
             CommandGroup(after: .appInfo) { ResetCommand(model: model) }
             ChatCommands(model: model)
+        }
+
+        Settings {
+            SettingsView()
         }
 
         MenuBarExtra {

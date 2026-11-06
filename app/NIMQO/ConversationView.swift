@@ -31,14 +31,14 @@ struct ConversationView: View {
     var body: some View {
         // The timeline runs under the floating controls.
         timeline
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .bottomBar {
                 VStack(alignment: .trailing, spacing: Theme.Spacing.small) {
                     if !atBottom {
                         Button("Jump to the latest message", systemImage: "chevron.down") { scrollToEnd += 1 }
                             .labelStyle(.iconOnly)
                             .buttonBorderShape(.circle)
                             .glassButton()
-                            .controlSize(.large)
+                            .controlSize(.extraLarge)
                             .keyboardShortcut(.downArrow, modifiers: .command)
                             .transition(.scale.combined(with: .opacity))
                     }

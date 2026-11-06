@@ -48,7 +48,7 @@ struct Composer: View {
                     .labelStyle(.iconOnly)
                     .buttonBorderShape(.circle)
                     .glassButton()
-                    .controlSize(.large)
+                    .controlSize(.extraLarge)
                     .disabled(isSending)
                 TextField("Message, or a caption for a file", text: $text, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -63,7 +63,7 @@ struct Composer: View {
                     .fontWeight(.semibold)
                     .buttonBorderShape(.circle)
                     .glassButton(prominent: true)
-                    .controlSize(.large)
+                    .controlSize(.extraLarge)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
             }
