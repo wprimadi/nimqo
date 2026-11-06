@@ -102,6 +102,9 @@ pub struct MessageRow {
     /// Every reaction's emoji, concatenated.
     #[diesel(sql_type = Nullable<Text>)]
     pub reactions: Option<String>,
+    /// This account's own reaction, if any.
+    #[diesel(sql_type = Nullable<Text>)]
+    pub my_reaction: Option<String>,
     /// A picture can be shown for this message.
     #[diesel(sql_type = Bool)]
     pub has_media: bool,
@@ -243,7 +246,9 @@ impl Inbox {
                  coalesce((SELECT name FROM contacts WHERE jid = m.sender),
                           (SELECT name FROM chat_names WHERE chat = m.sender)) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
-                  WHERE x.chat = m.chat AND x.target = m.id) AS reactions
+                  WHERE x.chat = m.chat AND x.target = m.id) AS reactions,
+                 (SELECT emoji FROM reactions y WHERE y.chat = m.chat AND y.target = m.id
+                  AND y.reactor = 'me') AS my_reaction
                FROM messages m
                -- Only an unambiguous match: in groups another member can
                -- reuse an id, and then the quote stays unattributed.

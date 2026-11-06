@@ -112,6 +112,8 @@ pub struct ChatMessage {
     pub has_media: bool,
     /// Every reaction's emoji, concatenated (e.g. "👍❤️").
     pub reactions: Option<String>,
+    /// This account's own reaction, if any.
+    pub my_reaction: Option<String>,
     pub from_me: bool,
     pub timestamp_secs: i64,
     pub kind: MessageKind,
@@ -143,6 +145,7 @@ impl From<MessageRow> for ChatMessage {
             contact_name: r.contact_name,
             edited: r.edited,
             reactions: r.reactions,
+            my_reaction: r.my_reaction,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),

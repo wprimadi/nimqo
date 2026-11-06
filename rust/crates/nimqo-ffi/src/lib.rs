@@ -410,6 +410,22 @@ impl Core {
         Ok(())
     }
 
+    /// Reacts to message `seq` with `emoji`; an empty one removes it.
+    ///
+    /// # Errors
+    /// `SendRefused` for anything but the test chat, more than one emoji, a
+    /// message that is gone, or a failed send; `Storage` if it cannot be
+    /// stored.
+    pub async fn react(&self, chat_id: String, seq: i64, emoji: String) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.runtime
+            .spawn(async move { sender.react(&chat_id, seq, &emoji).await })
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+    }
+
     /// Mutes or unmutes a chat on every device of the account.
     ///
     /// # Errors

@@ -390,6 +390,47 @@ impl Sender {
         Ok(())
     }
 
+    /// Reacts to message `seq` with `emoji`; an empty one removes this
+    /// account's reaction. The test chat only, like sending.
+    pub async fn react(&self, chat: &str, seq: i64, emoji: &str) -> Result<(), CoreError> {
+        let refused = |reason: &str| CoreError::SendRefused {
+            reason: reason.to_owned(),
+        };
+        if chat != self.peer_chat() {
+            return Err(refused(
+                "During development NIMQO only reacts in the test chat.",
+            ));
+        }
+        // One emoji (a flag or a family is several characters, so count
+        // bytes generously); anything longer is not a reaction.
+        if emoji.len() > 32 || emoji.chars().any(char::is_whitespace) {
+            return Err(refused("A reaction is one emoji."));
+        }
+        let (id, from_me) = self
+            .inbox
+            .message_key(chat, seq)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?
+            .ok_or_else(|| refused("That message is gone."))?;
+        let mut key = wa::MessageKey::default();
+        key.remote_jid = Some(chat.to_owned());
+        key.from_me = Some(from_me);
+        key.id = Some(id.clone());
+        self.client
+            .send_reaction_raw(self.peer.clone(), key, emoji)
+            .await
+            .map_err(|e| refused(&format!("reaction not sent: {e}")))?;
+        let emoji = Some(emoji).filter(|e| !e.is_empty());
+        self.inbox
+            .set_own_reaction(chat, &id, emoji)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
     /// Mutes set before NIMQO kept them were synced and dropped: fetch them
     /// once. A read, nothing is sent.
     pub async fn load_mutes_once(&self) {

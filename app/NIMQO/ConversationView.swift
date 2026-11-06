@@ -20,6 +20,8 @@ struct ConversationView: View {
     var revealed: @MainActor () -> Void = {}
     /// Sends a failed message (seq) again.
     var retry: @MainActor (Int64) -> Void = { _ in }
+    /// Reacts to a message (seq); an empty emoji removes the reaction.
+    var react: @MainActor (Int64, String) -> Void = { _, _ in }
     @State private var marked: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
@@ -78,6 +80,7 @@ struct ConversationView: View {
                             .contextMenu {
                                 if send != nil, message.kind != .deleted {
                                     Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
+                                    ReactMenu(mine: message.myReaction) { react(message.seq, $0) }
                                 }
                                 if send != nil, message.delivery == .failed {
                                     Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }

@@ -62,7 +62,8 @@ struct MainView: View {
                         sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
                         reveal: model.revealing,
                         revealed: { model.revealing = nil },
-                        retry: { model.retry($0, in: chat.id) }
+                        retry: { model.retry($0, in: chat.id) },
+                        react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } }
                     )
                     // A new view per chat: it opens at the latest message.
                     .id(chat.id)

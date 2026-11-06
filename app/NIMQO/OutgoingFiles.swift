@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import ImageIO
@@ -129,6 +130,16 @@ extension CoreModel {
             return Self.message(for: error)
         }
         return nil
+    }
+
+    /// Reacts to message `seq` of `chat`; an empty emoji removes it.
+    func react(_ emoji: String, to seq: Int64, in chat: String) async {
+        guard let core else { return }
+        do {
+            try await core.react(chatId: chat, seq: seq, emoji: emoji)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
     }
 
     /// Sends a failed message of `chat` again.

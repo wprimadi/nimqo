@@ -92,7 +92,8 @@ struct CoreModelTests {
         func msg(_ time: Int64, _ seq: Int64) -> ChatMessage {
             ChatMessage(
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
-                reactions: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil, delivery: .none,
+                reactions: nil, myReaction: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil,
+                delivery: .none,
                 reply: nil
             )
         }

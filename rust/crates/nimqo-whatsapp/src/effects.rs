@@ -6,7 +6,7 @@
 //! same chat, so nobody can rewrite someone else's message by naming its id.
 
 use diesel::sql_types::Text;
-use diesel::{QueryResult, RunQueryDsl, SqliteConnection};
+use diesel::{OptionalExtension, QueryResult, RunQueryDsl, SqliteConnection};
 use whatsapp_rust::prelude::{MessageExt, wa};
 use whatsapp_rust::types::durability_hook::InboundMessage;
 
@@ -171,6 +171,50 @@ impl Effect {
     }
 }
 
+impl crate::inbox::Inbox {
+    /// The id of message `seq` in `chat` and whether it is own, to react to.
+    ///
+    /// # Errors
+    /// The store cannot be read.
+    pub fn message_key(&self, chat: &str, seq: i64) -> anyhow::Result<Option<(String, bool)>> {
+        #[derive(diesel::QueryableByName)]
+        struct Key {
+            #[diesel(sql_type = Text)]
+            id: String,
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            from_me: bool,
+        }
+        let mut conn = self.lock()?;
+        let key: Option<Key> = diesel::sql_query(
+            "SELECT id, from_me FROM messages WHERE rowid = ? AND chat = ? AND kind <> 'deleted'",
+        )
+        .bind::<diesel::sql_types::BigInt, _>(seq)
+        .bind::<Text, _>(chat)
+        .get_result(&mut *conn)
+        .optional()?;
+        Ok(key.map(|k| (k.id, k.from_me)))
+    }
+
+    /// Stores this account's reaction to `target`; None removes it.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn set_own_reaction(
+        &self,
+        chat: &str,
+        target: &str,
+        emoji: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let react = Effect::React {
+            chat: chat.to_owned(),
+            reactor: crate::inbox::ME.to_owned(),
+            target: target.to_owned(),
+            emoji: emoji.map(str::to_owned),
+        };
+        self.commit(Vec::new(), &[react])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use whatsapp_rust::buffa::MessageField;
@@ -179,6 +223,38 @@ mod tests {
     use super::*;
     use crate::inbox::{Fault, Inbox};
     use crate::vault::Key;
+
+    #[test]
+    fn own_reactions_are_kept_apart_from_others() {
+        let path = std::env::temp_dir().join(format!("nimqo-react-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([5; 32]), Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        inbox.insert_kind_for_test(chat, "m1", "text", Vec::new());
+        let row = || inbox.messages(chat, 10).unwrap().remove(0);
+        let seq = row().seq;
+        assert_eq!(
+            inbox.message_key(chat, seq).unwrap(),
+            Some(("m1".into(), false))
+        );
+        assert_eq!(inbox.message_key("x@s.whatsapp.net", seq).unwrap(), None);
+        inbox.apply_for_test(&[Effect::React {
+            chat: chat.into(),
+            reactor: chat.into(),
+            target: "m1".into(),
+            emoji: Some("😂".into()),
+        }]);
+        inbox.set_own_reaction(chat, "m1", Some("👍")).unwrap();
+        assert_eq!(row().my_reaction.as_deref(), Some("👍"));
+        assert_eq!(row().reactions.map(|r| r.chars().count()), Some(2));
+        inbox.set_own_reaction(chat, "m1", None).unwrap();
+        assert_eq!(
+            (row().my_reaction, row().reactions.as_deref()),
+            (None, Some("😂"))
+        );
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
 
     fn key(id: &str) -> MessageField<wa::MessageKey> {
         let mut k = wa::MessageKey::default();

@@ -71,3 +71,22 @@ extension CoreModel {
         }
     }
 }
+
+/// The usual reactions; choosing the one already given takes it back.
+struct ReactMenu: View {
+    static let choices = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
+    let mine: String?
+    let choose: (String) -> Void
+
+    var body: some View {
+        Menu("React", systemImage: "face.smiling") {
+            ForEach(Self.choices, id: \.self) { emoji in
+                Button(emoji == mine ? "\(emoji) ✓" : emoji) { choose(emoji == mine ? "" : emoji) }
+            }
+            if mine != nil {
+                Divider()
+                Button("Remove Reaction") { choose("") }
+            }
+        }
+    }
+}
