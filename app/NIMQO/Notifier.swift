@@ -63,7 +63,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         authorized = true
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // The Dock badge is a notification setting too: without .badge,
+        // macOS hides it.
+        Task { [log] in
+            let granted = await (try? center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            let settings = await center.notificationSettings()
+            log.info("""
+            notifications granted \(granted), alerts \(settings.alertSetting.rawValue), \
+            badge \(settings.badgeSetting.rawValue)
+            """)
+        }
     }
 
     nonisolated func userNotificationCenter(
