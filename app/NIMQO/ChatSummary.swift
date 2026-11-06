@@ -11,6 +11,8 @@ struct ChatSummary: Identifiable, Hashable {
     let unread: Int
     /// Disappearing-message duration, e.g. "1 day"; nil when off.
     let timer: String?
+    /// Muted on one of the account's devices: no notification, no count.
+    let muted: Bool
 }
 
 extension ChatSummary {
@@ -38,6 +40,7 @@ extension ChatSummary {
         lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
         unread = Int(chat.unread)
         timer = chat.timerSecs == 0 ? nil : CoreModel.duration(UInt64(chat.timerSecs))
+        muted = chat.muted
     }
 }
 

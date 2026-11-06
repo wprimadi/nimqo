@@ -86,7 +86,7 @@ impl Inbox {
                     .execute(c)?;
             }
             // Per-chat state stored under the LID follows; the number wins.
-            for table in ["chat_timers", "reactions"] {
+            for table in ["chat_timers", "chat_mutes", "reactions"] {
                 diesel::sql_query(format!(
                     "UPDATE OR IGNORE {table} SET chat = ? WHERE chat = ?"
                 ))

@@ -10,6 +10,7 @@ pub mod history;
 pub mod inbox;
 pub mod lids;
 pub mod media;
+pub mod mutes;
 pub mod outbox;
 pub mod peer;
 pub mod reads;

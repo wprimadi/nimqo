@@ -343,6 +343,72 @@ impl Sender {
         }
     }
 
+    /// A chat was muted or unmuted on one of the account's devices.
+    pub async fn on_mute(&self, jid: &Jid, muted: bool, end: Option<i64>) {
+        let chat = lids::phone_chat(&self.inbox, &self.client, jid).await;
+        let until = if muted {
+            end.filter(|e| *e != 0)
+                .unwrap_or(nimqo_whatsapp::mutes::FOREVER)
+        } else {
+            0
+        };
+        match self.inbox.set_mute(&chat, until) {
+            Ok(()) => self.listener.on_chats_changed(vec![chat]),
+            Err(e) => log::warn!("mute not stored: {e:#}"),
+        }
+    }
+
+    /// Mutes or unmutes `chat` on every device of the account. Only the
+    /// test chat while testing on a real account.
+    /// ponytail: lift the limit once mutes are proven harmless.
+    pub async fn set_muted(&self, chat: &str, muted: bool) -> Result<(), CoreError> {
+        if chat != self.peer_chat() {
+            return Err(CoreError::SendRefused {
+                reason: "only the test chat can be muted from here for now".into(),
+            });
+        }
+        let actions = self.client.chat_actions();
+        let done = if muted {
+            actions.mute_chat(&self.peer).await
+        } else {
+            actions.unmute_chat(&self.peer).await
+        };
+        done.map_err(|e| CoreError::SendRefused {
+            reason: format!("mute not changed: {e}"),
+        })?;
+        let until = if muted {
+            nimqo_whatsapp::mutes::FOREVER
+        } else {
+            0
+        };
+        self.inbox
+            .set_mute(chat, until)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
+    /// Mutes set before NIMQO kept them were synced and dropped: fetch them
+    /// once. A read, nothing is sent.
+    pub async fn load_mutes_once(&self) {
+        if !self.inbox.first_time("load mutes").unwrap_or(false) {
+            return;
+        }
+        match self
+            .client
+            .resync_app_state(
+                [whatsapp_rust::WAPatchName::RegularHigh],
+                whatsapp_rust::AppStateResyncMode::Snapshot,
+            )
+            .await
+        {
+            Ok(_) => log::info!("mutes loaded"),
+            Err(e) => log::warn!("mutes not loaded: {e}"),
+        }
+    }
+
     /// Fetch the address book once when none is known (never stored, or
     /// emptied by a migration). A read, nothing is sent.
     pub async fn load_contacts_once(&self) {

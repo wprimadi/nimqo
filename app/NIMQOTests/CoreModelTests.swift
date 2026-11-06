@@ -68,7 +68,8 @@ struct CoreModelTests {
         ) -> ChatSummary {
             ChatSummary(Chat(
                 id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
-                lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved, timerSecs: 86400
+                lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved, timerSecs: 86400,
+                muted: false
             ))
         }
         #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: nil, saved: "Mom").title == "Mom")

@@ -68,6 +68,9 @@ pub struct ChatRow {
     /// Disappearing-message timer in seconds; 0 when off.
     #[diesel(sql_type = BigInt)]
     pub timer: i64,
+    /// Muted on one of the account's devices, and not ended yet.
+    #[diesel(sql_type = Bool)]
+    pub muted: bool,
 }
 
 #[derive(Debug, diesel::QueryableByName)]
@@ -163,7 +166,9 @@ impl Inbox {
                coalesce((SELECT name FROM contacts WHERE jid = m.chat),
                         (SELECT name FROM chat_names WHERE chat = m.chat
                          AND m.chat NOT LIKE '%@g.us')) AS contact_name,
-               COALESCE((SELECT seconds FROM chat_timers WHERE chat = m.chat), 0) AS timer
+               COALESCE((SELECT seconds FROM chat_timers WHERE chat = m.chat), 0) AS timer,
+               EXISTS (SELECT 1 FROM chat_mutes WHERE chat = m.chat AND (until < 0
+                       OR until > CAST(strftime('%s', 'now') AS INTEGER) * 1000)) AS muted
              FROM messages m
              WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
@@ -563,6 +568,14 @@ const LATER: &[(i64, &[&str])] = &[
     // Names saved by LID used to be dropped: empty the address book so the
     // next connection loads it again, complete (load_contacts_once).
     (14, &["DELETE FROM contacts"]),
+    // Muted chats; tasks done once per store (loading the mutes is one).
+    (
+        15,
+        &[
+            "CREATE TABLE chat_mutes (chat TEXT PRIMARY KEY, until INTEGER NOT NULL)",
+            "CREATE TABLE done_once (task TEXT PRIMARY KEY)",
+        ],
+    ),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.

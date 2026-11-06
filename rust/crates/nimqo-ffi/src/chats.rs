@@ -73,6 +73,8 @@ pub struct Chat {
     pub contact_name: Option<String>,
     /// Disappearing-message timer in seconds; 0 when off.
     pub timer_secs: u32,
+    /// No notification or Dock count for it.
+    pub muted: bool,
 }
 
 impl From<ChatRow> for Chat {
@@ -89,6 +91,7 @@ impl From<ChatRow> for Chat {
             unread: u32::try_from(r.unread).unwrap_or(u32::MAX),
             contact_name: r.contact_name,
             timer_secs: u32::try_from(r.timer).unwrap_or(0),
+            muted: r.muted,
             id: r.chat,
         }
     }

@@ -79,6 +79,14 @@ struct MainView: View {
     private var chatList: some View {
         List(model.chats, selection: Bindable(model).selectedChat) { chat in
             ChatRow(chat: chat, avatars: model.avatars)
+                .contextMenu {
+                    // ponytail: the test chat only, like sending.
+                    if chat.id == model.sendableChatId {
+                        Button(chat.muted ? "Unmute" : "Mute") {
+                            Task { await model.setMuted(chat.id, !chat.muted) }
+                        }
+                    }
+                }
         }
         .overlay {
             if model.chats.isEmpty {
@@ -119,6 +127,11 @@ struct ChatRow: View {
                         .foregroundStyle(.secondary)
                         .accessibilityLabel("Disappearing messages")
                 }
+                if chat.muted {
+                    Image(systemName: "bell.slash")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Muted")
+                }
                 Spacer()
                 Text(chat.lastActivity, format: .relative(presentation: .numeric))
                     .font(.caption)
@@ -132,7 +145,7 @@ struct ChatRow: View {
                         .font(.caption.bold().monospacedDigit())
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
-                        .background(Capsule().fill(.tint))
+                        .background(Capsule().fill(chat.muted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint)))
                         .accessibilityLabel("\(chat.unread) unread")
                 }
             }

@@ -383,6 +383,21 @@ impl Core {
         Ok(())
     }
 
+    /// Mutes or unmutes a chat on every device of the account.
+    ///
+    /// # Errors
+    /// `SendRefused` for anything but the test chat, or when WhatsApp does
+    /// not take the change; `Storage` if it cannot be stored.
+    pub async fn set_muted(&self, chat_id: String, muted: bool) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.runtime
+            .spawn(async move { sender.set_muted(&chat_id, muted).await })
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+    }
+
     /// Queues a photo or document and starts sending it, like `send_text`.
     ///
     /// # Errors
@@ -757,44 +772,13 @@ fn message_handlers<B, T, H, R>(
                 EventKind::ContactRemoved,
                 EventKind::DisappearingModeChanged,
                 EventKind::AppStateSyncFailed,
+                EventKind::MuteUpdate,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
                 async move {
-                    let Some(sender) = sender else { return };
-                    match &*event {
-                        Event::Receipt(receipt) => sender.on_receipt(receipt).await,
-                        Event::ServerAck(ack) => sender.on_server_ack(ack),
-                        Event::ContactUpdate(c) => {
-                            let a = &c.action;
-                            let name = a.full_name.as_deref().or(a.first_name.as_deref());
-                            sender
-                                .on_contact(&c.jid, name.unwrap_or(""), a.pn_jid.as_deref())
-                                .await;
-                        }
-                        Event::ContactRemoved(c) => sender.on_contact(&c.jid, "", None).await,
-                        // Collection names only, never their content.
-                        Event::AppStateSyncFailed(f) => log::warn!(
-                            "app state not synced: fatal {:?}, retryable {:?}, skipped {:?}",
-                            f.fatal,
-                            f.retryable,
-                            f.skipped
-                        ),
-                        Event::DisappearingModeChanged(d) => {
-                            log::info!("disappearing mode changed: {}s", d.duration);
-                            sender.on_timer(&d.from, d.duration).await;
-                        }
-                        Event::MarkChatAsReadUpdate(update) => {
-                            let range = update.action.message_range.as_option();
-                            sender
-                                .on_chat_marked_read(
-                                    &update.jid,
-                                    update.action.read.unwrap_or(false),
-                                    range.and_then(|r| r.last_message_timestamp),
-                                )
-                                .await;
-                        }
-                        _ => {}
+                    if let Some(sender) = sender {
+                        on_account_event(sender, &event).await;
                     }
                 }
             },
@@ -809,9 +793,54 @@ fn message_handlers<B, T, H, R>(
                     // Also cleans up chats stored by LID in earlier runs.
                     lids::resolve(&sender.inbox, &sender.client).await;
                     sender.load_contacts_once().await;
+                    sender.load_mutes_once().await;
                 }
             }
         })
+}
+
+/// Receipts and app-state changes synced from the account's other devices.
+async fn on_account_event(sender: Arc<outbox::Sender>, event: &Event) {
+    match event {
+        Event::Receipt(receipt) => sender.on_receipt(receipt).await,
+        Event::ServerAck(ack) => sender.on_server_ack(ack),
+        Event::ContactUpdate(c) => {
+            let a = &c.action;
+            let name = a.full_name.as_deref().or(a.first_name.as_deref());
+            sender
+                .on_contact(&c.jid, name.unwrap_or(""), a.pn_jid.as_deref())
+                .await;
+        }
+        Event::ContactRemoved(c) => sender.on_contact(&c.jid, "", None).await,
+        // Collection names only, never their content.
+        Event::AppStateSyncFailed(f) => log::warn!(
+            "app state not synced: fatal {:?}, retryable {:?}, skipped {:?}",
+            f.fatal,
+            f.retryable,
+            f.skipped
+        ),
+        Event::DisappearingModeChanged(d) => {
+            log::info!("disappearing mode changed: {}s", d.duration);
+            sender.on_timer(&d.from, d.duration).await;
+        }
+        Event::MuteUpdate(m) => {
+            let a = &m.action;
+            sender
+                .on_mute(&m.jid, a.muted.unwrap_or(false), a.mute_end_timestamp)
+                .await;
+        }
+        Event::MarkChatAsReadUpdate(update) => {
+            let range = update.action.message_range.as_option();
+            sender
+                .on_chat_marked_read(
+                    &update.jid,
+                    update.action.read.unwrap_or(false),
+                    range.and_then(|r| r.last_message_timestamp),
+                )
+                .await;
+        }
+        _ => {}
+    }
 }
 
 /// The default 256-event mailbox drops the newest event when full, and the

@@ -59,3 +59,15 @@ extension View {
         }
     }
 }
+
+extension CoreModel {
+    /// Mutes or unmutes `chat` on every device of the account.
+    func setMuted(_ chat: String, _ muted: Bool) async {
+        guard let core else { return }
+        do {
+            try await core.setMuted(chatId: chat, muted: muted)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+}
