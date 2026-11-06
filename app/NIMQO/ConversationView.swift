@@ -274,7 +274,11 @@ struct MessageBubble: View {
                     QuoteView(reply: reply)
                 }
                 if message.hasMedia {
-                    MessagePictureView(chat: chat, message: message, store: pictures)
+                    switch message.kind {
+                    case .video: VideoMessageView(chat: chat, message: message, store: pictures)
+                    case .audio: AudioMessageView(chat: chat, message: message, store: pictures)
+                    default: MessagePictureView(chat: chat, message: message, store: pictures)
+                    }
                 }
                 // A shown picture needs no "Photo" label, only its caption.
                 if !(message.hasMedia && message.body == nil) {

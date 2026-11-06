@@ -1,6 +1,6 @@
-//! Message pictures: the thumbnail that comes inside the message is shown
-//! at once; the full image is downloaded when its message is on screen and
-//! stored encrypted like other media.
+//! Message media: the thumbnail that comes inside the message is shown at
+//! once; the full photo, video, or audio is downloaded when its message is
+//! on screen and stored encrypted like other media.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -19,8 +19,12 @@ use crate::inbox::Inbox;
 use crate::media;
 use crate::vault::Key;
 
-/// Larger images are left as thumbnails.
-const MAX_BYTES: u64 = 16 * 1024 * 1024;
+/// Larger files are not downloaded: photos and audio stay at 16 MB (their
+/// WhatsApp limit), videos at 64 MB; all are held in memory to play.
+fn max_bytes(kind: &str) -> u64 {
+    let megabytes = if kind == "video" { 64 } else { 16 };
+    megabytes * 1024 * 1024
+}
 
 pub struct Attachments {
     inbox: Inbox,
@@ -45,6 +49,8 @@ struct Stored {
     sender: String,
     #[diesel(sql_type = Text)]
     id: String,
+    #[diesel(sql_type = Text)]
+    kind: String,
     #[diesel(sql_type = Binary)]
     media: Vec<u8>,
 }
@@ -61,7 +67,8 @@ impl Attachments {
         }
     }
 
-    /// The picture of message `seq` in `chat`, if it has one.
+    /// The picture of message `seq` in `chat`, if it has one: a photo, or
+    /// the still of a video (complete as it is, so `full`).
     ///
     /// # Errors
     /// The store or the file cannot be read, or fails authentication.
@@ -69,23 +76,47 @@ impl Attachments {
         let Some(stored) = self.stored(chat, seq)? else {
             return Ok(None);
         };
-        match std::fs::read(self.file(&stored)) {
-            Ok(sealed) => {
-                let bytes = media::decrypt(&self.key, &sealed)?.to_vec();
-                return Ok(Some(Picture { bytes, full: true }));
+        let thumbnail = match stored.kind.as_str() {
+            "image" => {
+                if let Some(bytes) = self.read(&stored)? {
+                    return Ok(Some(Picture {
+                        bytes: bytes.to_vec(),
+                        full: true,
+                    }));
+                }
+                wa::message::ImageMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
-        let image = wa::message::ImageMessage::decode_from_slice(&stored.media)?;
-        Ok(image
-            .jpeg_thumbnail
-            .filter(|t| !t.is_empty())
-            .map(|bytes| Picture { bytes, full: false }))
+            "video" => wa::message::VideoMessage::decode_from_slice(&stored.media)?.jpeg_thumbnail,
+            _ => None,
+        };
+        Ok(thumbnail.filter(|t| !t.is_empty()).map(|bytes| Picture {
+            bytes,
+            full: stored.kind != "image",
+        }))
     }
 
-    /// Downloads the full image unless it is stored or being fetched.
-    /// Returns whether a new image was stored.
+    /// The downloaded file of message `seq` (photo, video, or audio), or
+    /// `None` until it is downloaded.
+    ///
+    /// # Errors
+    /// The store or the file cannot be read, or fails authentication.
+    pub fn file_of(&self, chat: &str, seq: i64) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        match self.stored(chat, seq)? {
+            Some(stored) => self.read(&stored),
+            None => Ok(None),
+        }
+    }
+
+    fn read(&self, stored: &Stored) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        match std::fs::read(self.file(stored)) {
+            Ok(sealed) => Ok(Some(media::decrypt(&self.key, &sealed)?)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Downloads the full file unless it is stored or being fetched.
+    /// Returns whether a new file was stored.
     ///
     /// # Errors
     /// The store, download, or file write fails. Old messages' media may
@@ -116,10 +147,15 @@ impl Attachments {
         if file.exists() {
             return Ok(false);
         }
-        let image = wa::message::ImageMessage::decode_from_slice(&stored.media)?;
+        let item: Box<dyn whatsapp_rust::download::Downloadable> = match stored.kind.as_str() {
+            "image" => Box::new(wa::message::ImageMessage::decode_from_slice(&stored.media)?),
+            "video" => Box::new(wa::message::VideoMessage::decode_from_slice(&stored.media)?),
+            _ => Box::new(wa::message::AudioMessage::decode_from_slice(&stored.media)?),
+        };
+        let max = max_bytes(&stored.kind);
         let bytes = zeroize::Zeroizing::new(
             client
-                .download(&image, DownloadLimits::new(MAX_BYTES + 1024, MAX_BYTES))
+                .download(item.as_ref(), DownloadLimits::new(max + 1024, max))
                 .await?,
         );
         crate::avatars::write_private(&file, &media::encrypt(&self.key, &bytes)?)?;
@@ -187,8 +223,9 @@ impl Attachments {
     fn stored(&self, chat: &str, seq: i64) -> Result<Option<Stored>> {
         let mut conn = self.inbox.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, sender, id, media FROM messages
-             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind = 'image'",
+            "SELECT chat, sender, id, kind, media FROM messages
+             WHERE rowid = ? AND chat = ? AND media IS NOT NULL
+               AND kind IN ('image', 'video', 'audio')",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)
@@ -211,6 +248,38 @@ fn file_name(chat: &str, sender: &str, id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_video_shows_its_still_and_audio_plays_once_downloaded() {
+        let base = std::env::temp_dir().join(format!("nimqo-av-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let key = Key::new([7; 32]);
+        let inbox = Inbox::open(&base.join("app.db"), &key, crate::inbox::Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        let mut video = wa::message::VideoMessage::default();
+        video.jpeg_thumbnail = Some(b"still".to_vec());
+        inbox.insert_kind_for_test(chat, "v", "video", video.encode_to_vec());
+        let audio = wa::message::AudioMessage::default();
+        inbox.insert_kind_for_test(chat, "a", "audio", audio.encode_to_vec());
+        let rows = inbox.messages(chat, 10).unwrap();
+        let seq = |id: &str| rows.iter().find(|r| r.id == id).unwrap().seq;
+        assert!(rows.iter().all(|r| r.has_media));
+        let store = Attachments::new(inbox, base.clone(), Key::new([8; 32]));
+
+        let p = store.picture(chat, seq("v")).unwrap().unwrap();
+        assert_eq!((p.bytes.as_slice(), p.full), (&b"still"[..], true));
+        assert!(store.picture(chat, seq("a")).unwrap().is_none());
+        assert!(store.file_of(chat, seq("a")).unwrap().is_none());
+        let stored = store.stored(chat, seq("a")).unwrap().unwrap();
+        let sealed = media::encrypt(&store.key, b"ogg").unwrap();
+        crate::avatars::write_private(&store.file(&stored), &sealed).unwrap();
+        assert_eq!(
+            store.file_of(chat, seq("a")).unwrap().unwrap().as_slice(),
+            b"ogg"
+        );
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn thumbnail_until_downloaded_then_the_stored_image() {

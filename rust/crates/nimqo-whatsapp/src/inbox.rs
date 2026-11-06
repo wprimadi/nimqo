@@ -224,7 +224,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
-                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind = 'image' AS has_media,
+                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio') AS has_media,
                  m.reply_to,
                  -- A quote's copy is the replier's claim: when the original is
                  -- stored, show it instead, so author and content always match.
@@ -321,6 +321,11 @@ impl Inbox {
 
     #[cfg(test)]
     pub(crate) fn insert_media_for_test(&self, chat: &str, id: &str, media: Vec<u8>) {
+        self.insert_kind_for_test(chat, id, "image", media);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_kind_for_test(&self, chat: &str, id: &str, kind: &str, media: Vec<u8>) {
         let row = Row {
             chat: chat.into(),
             sender: chat.into(),
@@ -328,7 +333,7 @@ impl Inbox {
             ts: 1,
             body: None,
             from_me: false,
-            kind: "image".into(),
+            kind: kind.into(),
             sender_name: String::new(),
             status: "",
             read: true,
@@ -748,6 +753,12 @@ pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     let base = message.get_base_message();
     if let Some(image) = base.image_message.as_option() {
         return Some(image.encode_to_vec());
+    }
+    if let Some(video) = base.video_message.as_option() {
+        return Some(video.encode_to_vec());
+    }
+    if let Some(audio) = base.audio_message.as_option() {
+        return Some(audio.encode_to_vec());
     }
     Some(base.document_message.as_option()?.encode_to_vec())
 }

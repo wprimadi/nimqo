@@ -19,7 +19,7 @@ final class PictureStore {
 
     /// Bumped when pictures may have changed; the cache itself is not
     /// observed, so filling it during a view update changes nothing.
-    private var generation = 0
+    private(set) var generation = 0
     /// Keyed by the message itself (chat, sender, id): storage order can be
     /// reused once a message is gone.
     @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)] = [:]
@@ -45,8 +45,14 @@ final class PictureStore {
     /// is here.
     func request(chat: String, message: ChatMessage) {
         let key = Self.key(chat, message)
-        guard let core, images[key]?.full != true, requested.insert(key).inserted else { return }
-        core.downloadPicture(chatId: chat, seq: message.seq)
+        guard images[key]?.full != true else { return }
+        download(chat: chat, message: message)
+    }
+
+    /// Asks the core for the message's file once per session.
+    func download(chat: String, message: ChatMessage) {
+        guard let core, requested.insert(Self.key(chat, message)).inserted else { return }
+        core.downloadMedia(chatId: chat, seq: message.seq)
     }
 
     /// A chat changed: a full image may have arrived for its thumbnails.

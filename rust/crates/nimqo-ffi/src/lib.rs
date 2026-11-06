@@ -276,15 +276,28 @@ impl Core {
             }))
     }
 
-    /// Downloads message `seq`'s full image in the background;
+    /// Downloads message `seq`'s photo, video, or audio in the background;
     /// `on_chats_changed` reports it stored. Call it for messages on screen.
-    pub fn download_picture(&self, chat_id: String, seq: i64) {
+    pub fn download_media(&self, chat_id: String, seq: i64) {
         let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
         self.runtime.spawn(async move {
             if let Err(e) = store.download(&client, &chat_id, seq).await {
-                log::info!("picture not downloaded: {e:#}");
+                log::info!("media not downloaded: {e:#}");
             }
         });
+    }
+
+    /// Message `seq`'s downloaded video or audio, to play from memory; nil
+    /// until `download_media` has stored it.
+    ///
+    /// # Errors
+    /// `Storage` if it cannot be read.
+    pub fn media_file(&self, chat_id: &str, seq: i64) -> Result<Option<Vec<u8>>, CoreError> {
+        Ok(self
+            .attachments
+            .file_of(chat_id, seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .map(|bytes| bytes.to_vec()))
     }
 
     /// The stored profile picture of a chat (JPEG), if any.
