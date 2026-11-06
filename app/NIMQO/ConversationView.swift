@@ -81,6 +81,9 @@ struct ConversationView: View {
     @State private var atBottom = true
     /// Bumped by the jump button to scroll to the latest message.
     @State private var scrollToEnd = 0
+    /// Computed once per change of messages, not per row: scrolling
+    /// re-renders rows, and a pass over every message each time stutters.
+    @State private var breaks = Breaks()
 
     private var timeline: some View {
         ScrollViewReader { proxy in
@@ -126,6 +129,7 @@ struct ConversationView: View {
                     showOlder()
                 }
             }
+            .onChange(of: messages, initial: true) { breaks = Breaks(messages) }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {
                     withAnimation(motion) { proxy.scrollTo(last, anchor: .bottom) }
@@ -155,29 +159,6 @@ struct ConversationView: View {
                 }
             }
         }
-    }
-
-    /// Messages that start a new day (shown with a date above), and that
-    /// start a run from another sender or after a pause.
-    private var breaks: (days: Set<Int64>, runs: Set<Int64>) {
-        var days = Set<Int64>(), runs = Set<Int64>()
-        let calendar = Calendar.current
-        var previous: ChatMessage?
-        for message in messages {
-            let time = Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
-            let before = previous.map { Date(timeIntervalSince1970: TimeInterval($0.timestampSecs)) }
-            if before.map({ !calendar.isDate($0, inSameDayAs: time) }) ?? true {
-                days.insert(message.seq)
-            }
-            if let previous {
-                let otherSender = previous.fromMe != message.fromMe || previous.senderName != message.senderName
-                if otherSender || message.timestampSecs - previous.timestampSecs > 300 {
-                    runs.insert(message.seq)
-                }
-            }
-            previous = message
-        }
-        return (days, runs)
     }
 
     /// One page at a time; the scroll restore above keeps a page coming in
@@ -334,6 +315,35 @@ struct QuoteView: View {
         .accessibilityLabel(
             "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
         )
+    }
+}
+
+/// Messages that start a new day (shown with a date above), and that start
+/// a run from another sender or after a pause.
+struct Breaks {
+    var days = Set<Int64>()
+    var runs = Set<Int64>()
+
+    init() {}
+
+    init(_ messages: [ChatMessage], calendar: Calendar = .current) {
+        var previous: ChatMessage?
+        for message in messages {
+            let time = Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
+            if let previous {
+                let before = Date(timeIntervalSince1970: TimeInterval(previous.timestampSecs))
+                if !calendar.isDate(before, inSameDayAs: time) {
+                    days.insert(message.seq)
+                }
+                let otherSender = previous.fromMe != message.fromMe || previous.senderName != message.senderName
+                if otherSender || message.timestampSecs - previous.timestampSecs > 300 {
+                    runs.insert(message.seq)
+                }
+            } else {
+                days.insert(message.seq)
+            }
+            previous = message
+        }
     }
 }
 
