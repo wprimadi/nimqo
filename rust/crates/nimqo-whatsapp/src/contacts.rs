@@ -134,6 +134,16 @@ mod tests {
             .record_push_names(&[(a.into(), "Ana N".into())])
             .unwrap();
         assert_eq!(inbox.chats(10).unwrap()[0].name.as_deref(), Some("Ana N"));
+        // The name the phone shows, from history, counts as saved.
+        inbox.import(a, Some("Ana H".into()), Vec::new()).unwrap();
+        assert_eq!(
+            inbox.chats(10).unwrap()[0].contact_name.as_deref(),
+            Some("Ana H")
+        );
+        assert_eq!(
+            inbox.messages(a, 10).unwrap()[0].contact_name.as_deref(),
+            Some("Ana H")
+        );
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

@@ -160,7 +160,9 @@ impl Inbox {
                     WHERE l.pn = m.chat LIMIT 1)) END AS name,
                (SELECT COUNT(*) FROM messages u
                 WHERE u.chat = m.chat AND u.from_me = 0 AND u.read = 0) AS unread,
-               (SELECT name FROM contacts WHERE jid = m.chat) AS contact_name,
+               coalesce((SELECT name FROM contacts WHERE jid = m.chat),
+                        (SELECT name FROM chat_names WHERE chat = m.chat
+                         AND m.chat NOT LIKE '%@g.us')) AS contact_name,
                COALESCE((SELECT seconds FROM chat_timers WHERE chat = m.chat), 0) AS timer
              FROM messages m
              WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
@@ -230,8 +232,11 @@ impl Inbox {
                  CASE WHEN q.rowid IS NULL THEN m.quote_body ELSE q.body END AS quote_body,
                  q.from_me AS quote_from_me,
                  coalesce((SELECT name FROM contacts WHERE jid = q.sender),
+                          (SELECT name FROM chat_names WHERE chat = q.sender),
                           nullif(q.sender_name, '')) AS quote_name,
-                 (SELECT name FROM contacts WHERE jid = m.sender) AS contact_name,
+                 -- A person's chat name (from history) is their saved name.
+                 coalesce((SELECT name FROM contacts WHERE jid = m.sender),
+                          (SELECT name FROM chat_names WHERE chat = m.sender)) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = m.chat AND x.target = m.id) AS reactions
                FROM messages m
@@ -263,7 +268,8 @@ impl Inbox {
         }
     }
 
-    /// One history conversation: its messages and, for groups, the subject.
+    /// One history conversation: its messages and its name (a group's
+    /// subject, or the saved name of a person).
     pub(crate) fn import(&self, chat: &str, name: Option<String>, rows: Vec<Row>) -> Result<()> {
         let mut conn = self.lock()?;
         conn.transaction(|c| {

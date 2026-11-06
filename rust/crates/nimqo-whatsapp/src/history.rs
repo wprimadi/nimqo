@@ -18,7 +18,7 @@ use crate::inbox::{Inbox, ME, Row, classify};
 /// The chunk cannot be inflated or the store cannot be written.
 pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
     let mut stream = sync.stream();
-    let (mut total, mut chats, mut pairs) = (0, Vec::new(), Vec::new());
+    let (mut total, mut chats, mut pairs, mut saved) = (0, Vec::new(), Vec::new(), 0);
     while let Some(conv) = stream.next_conversation()? {
         pairs.extend(lid_pair(conv.lid_jid.as_deref(), conv.pn_jid.as_deref()));
         if conv.id.ends_with("@s.whatsapp.net") {
@@ -35,7 +35,15 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
             .filter_map(|m| row(&chat, m))
             .collect();
         total += rows.len();
-        let name = chat.ends_with("@g.us").then_some(conv.name).flatten();
+        // Groups: the subject. People: the name the phone shows for them,
+        // which is how saved names arrive that the address book sync lacks.
+        let name = if chat.ends_with("@g.us") {
+            conv.name
+        } else {
+            conv.name.or(conv.display_name)
+        }
+        .filter(|n| !n.trim().is_empty());
+        saved += usize::from(name.is_some() && !chat.ends_with("@g.us"));
         inbox.import(&chat, name, rows)?;
         if let Some(seconds) = conv.ephemeral_expiration {
             let timer = crate::effects::Effect::Timer {
@@ -51,6 +59,9 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         pairs.extend(lid_pair(m.lid_jid.as_deref(), m.pn_jid.as_deref()));
     }
     inbox.record_lids(&pairs)?;
+    if saved > 0 {
+        log::info!("{saved} saved name(s) of people from history");
+    }
     let names: Vec<(String, String)> = rest
         .pushnames
         .into_iter()
