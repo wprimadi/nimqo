@@ -1,5 +1,4 @@
 import NimqoCore
-import OSLog
 import SwiftUI
 
 /// Timeline, plus a composer where sending is allowed. Older messages load
@@ -367,29 +366,5 @@ struct QuoteView: View {
         .accessibilityLabel(
             "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
         )
-    }
-}
-
-/// Some chats opened blank until scrolled: the scroll view sat where no
-/// row was laid out. When what is in view misses the content entirely,
-/// this logs the geometry (numbers only) and goes to the latest message.
-private struct BlankRecovery: ViewModifier {
-    let count: Int
-    let recover: () -> Void
-    private static let log = Logger(subsystem: "app.nimqo.app", category: "timeline")
-
-    func body(content: Content) -> some View {
-        if #available(macOS 15, *) {
-            content.onScrollGeometryChange(for: Bool.self) { geometry in
-                let all = CGRect(origin: .zero, size: geometry.contentSize)
-                return geometry.contentSize.height > 1 && !geometry.visibleRect.intersects(all)
-            } action: { _, blank in
-                guard blank else { return }
-                Self.log.notice("blank timeline: \(count, privacy: .public) messages; recovering")
-                recover()
-            }
-        } else {
-            content
-        }
     }
 }
