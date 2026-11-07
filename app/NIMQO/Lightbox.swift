@@ -121,7 +121,11 @@ struct LightboxView: View {
         }
         .accessibilityAddTraits(.isModal)
         .task(id: store.generation) { await loadVideo() }
-        .onDisappear { player?.pause() }
+        .onDisappear {
+            if let player {
+                DispatchQueue.global(qos: .utility).async { player.pause() }
+            }
+        }
     }
 
     private func toggleZoom() {
@@ -133,13 +137,14 @@ struct LightboxView: View {
 
     private func close() {
         if let player {
-            // The still shrinks back, not the live player: resizing and
-            // tearing down a playing AVPlayerView stalls the app.
-            player.pause()
+            // The still shrinks back, not the live player. Pausing waits on
+            // the audio device, which can hang for seconds when macOS
+            // cannot start it, so that happens off the main thread.
             self.player = nil
             let retired = (player, source)
             source = nil
             DispatchQueue.global(qos: .utility).async {
+                retired.0.pause()
                 retired.0.replaceCurrentItem(with: nil)
                 _ = retired
             }
@@ -230,21 +235,22 @@ struct LightboxView: View {
             }
             Spacer()
             if let caption = message.body {
-                // As wide as its text, up to 560; a long one shows four
-                // lines until clicked.
+                // The glass hugs the text; the outer frame only caps its
+                // width (a horizontal fixedSize made it one endless line,
+                // pushing the buttons and itself off screen).
                 Text(caption)
                     .lineLimit(captionOpen ? nil : 4)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 560, alignment: .leading)
-                    .fixedSize(horizontal: true, vertical: false)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .glassSurface(in: .rect(cornerRadius: 18, style: .continuous))
                     .onTapGesture { captionOpen.toggle() }
+                    .frame(maxWidth: 592)
             }
         }
         .padding(Theme.Spacing.medium)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
     }
 
