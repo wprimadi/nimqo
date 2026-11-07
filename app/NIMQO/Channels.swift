@@ -108,6 +108,7 @@ struct ChannelView: View {
     let channel: Channel
     let store: ChannelStore
     let pictures: PictureStore
+    @State private var lightbox = Lightbox()
 
     var body: some View {
         let posts = store.posts[channel.id]
@@ -151,6 +152,14 @@ struct ChannelView: View {
                 }
             }
         }
+        .coordinateSpace(.named(Lightbox.space))
+        .overlay {
+            if let open = lightbox.message {
+                LightboxView(lightbox: lightbox, message: open, chat: channel.id, store: pictures)
+                    .transition(.opacity)
+            }
+        }
+        .environment(lightbox)
         .task { await store.open(channel.id) }
         .navigationTitle(channel.name)
         .navigationSubtitle(Text("\(channel.followers, format: .number.notation(.compactName)) followers"))
