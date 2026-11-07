@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use nimqo_whatsapp::attachments::Attachments;
 use nimqo_whatsapp::avatars::Avatars;
+use nimqo_whatsapp::groups::Role;
 use nimqo_whatsapp::inbox::{Fault, Inbox};
 use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::presence::Presences;
@@ -29,6 +30,37 @@ mod outbox;
 mod state;
 
 pub use chats::{Chat, ChatMessage, Delivery, MessageKind, SearchHit};
+
+/// A group as the server describes it, for the group's info card.
+#[derive(Debug, uniffi::Record)]
+pub struct GroupInfo {
+    pub subject: Option<String>,
+    pub description: Option<String>,
+    pub created_secs: Option<i64>,
+    /// Only admins can send.
+    pub announce_only: bool,
+    /// Only admins can edit the group's info.
+    pub locked: bool,
+    /// Owner, then admins, then members.
+    pub members: Vec<GroupMember>,
+}
+
+#[derive(Debug, uniffi::Record)]
+pub struct GroupMember {
+    pub phone: Option<String>,
+    /// From the user's address book.
+    pub saved_name: Option<String>,
+    /// Self-chosen; shown marked as such.
+    pub push_name: Option<String>,
+    pub role: MemberRole,
+}
+
+#[derive(Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum MemberRole {
+    Owner,
+    Admin,
+    Member,
+}
 
 /// The person in a chat, as last heard: for the chat header.
 #[derive(Debug, uniffi::Record)]
@@ -350,6 +382,49 @@ impl Core {
         self.attachments
             .sticker_animation(chat_id, seq)
             .map_err(err(|detail| CoreError::Storage { detail }))
+    }
+
+    /// Asks the server for the group's members, admins and description.
+    /// Read-only and not stored; nil when offline or not a group.
+    pub async fn group_info(&self, chat_id: String) -> Option<GroupInfo> {
+        let (client, inbox) = (Arc::clone(&self.client), self.inbox.clone());
+        let fetched = self
+            .runtime
+            .spawn(async move { nimqo_whatsapp::groups::info(&inbox, &client, &chat_id).await })
+            .await;
+        let info = match fetched {
+            Ok(Ok(info)) => info,
+            Ok(Err(e)) => {
+                log::info!("group info not fetched: {e:#}");
+                return None;
+            }
+            Err(e) => {
+                log::warn!("group info task failed: {e}");
+                return None;
+            }
+        };
+        log::info!("group info: {} member(s)", info.members.len());
+        Some(GroupInfo {
+            subject: info.subject,
+            description: info.description,
+            created_secs: info.created_secs,
+            announce_only: info.announce_only,
+            locked: info.locked,
+            members: info
+                .members
+                .into_iter()
+                .map(|m| GroupMember {
+                    phone: m.phone,
+                    saved_name: m.saved_name,
+                    push_name: m.push_name,
+                    role: match m.role {
+                        Role::Owner => MemberRole::Owner,
+                        Role::Admin => MemberRole::Admin,
+                        Role::Member => MemberRole::Member,
+                    },
+                })
+                .collect(),
+        })
     }
 
     /// What is known now about the person in `chat_id`, from memory.

@@ -6,6 +6,7 @@ pub mod avatars;
 pub mod contacts;
 pub mod db;
 mod effects;
+pub mod groups;
 pub mod history;
 pub mod inbox;
 pub mod lids;

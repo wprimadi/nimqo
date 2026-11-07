@@ -11,15 +11,25 @@ final class ContactStore {
     }
 
     private var generation = 0
+    /// Fetched when a group is opened; nil until then or when offline.
+    private(set) var groups: [String: GroupInfo] = [:]
 
     func status(for chat: String) -> ContactStatus? {
         _ = generation
         return core?.contactStatus(chatId: chat)
     }
 
-    /// The chat was opened: fetch the about text, follow online and typing.
-    func watch(_ chat: String) {
-        core?.watchContact(chatId: chat)
+    /// The chat was opened: a person's about text, online and typing, or a
+    /// group's members and description.
+    func watch(_ chat: ChatSummary) async {
+        guard let core else { return }
+        if chat.isGroup {
+            if let info = await core.groupInfo(chatId: chat.id) {
+                groups[chat.id] = info
+            }
+        } else {
+            core.watchContact(chatId: chat.id)
+        }
     }
 
     func invalidate() {
@@ -48,16 +58,21 @@ private struct ChatHeader: ViewModifier {
             .toolbar {
                 ToolbarItem(placement: .navigation) {
                     Button { showsCard.toggle() } label: {
-                        HeaderLabel(chat: chat, status: status, avatars: avatars)
+                        HeaderLabel(chat: chat, status: status, members: contacts.groups[chat.id]?.members.count,
+                                    avatars: avatars)
                     }
                     .buttonStyle(.plain)
                     .help("Contact info")
                     .popover(isPresented: $showsCard, arrowEdge: .bottom) {
-                        ContactCard(chat: chat, status: status, avatars: avatars)
+                        if chat.isGroup {
+                            GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
+                        } else {
+                            ContactCard(chat: chat, status: status, avatars: avatars)
+                        }
                     }
                 }
             }
-            .task(id: chat.id) { contacts.watch(chat.id) }
+            .task(id: chat.id) { await contacts.watch(chat) }
             // Typing ends without a signal when the "paused" one is lost.
             .task(id: status?.typing) {
                 guard status?.typing == true else { return }
@@ -97,6 +112,7 @@ private func presenceText(_ status: ContactStatus?) -> Text? {
 private struct HeaderLabel: View {
     let chat: ChatSummary
     let status: ContactStatus?
+    let members: Int?
     let avatars: AvatarStore
 
     /// The number, unless the title already shows it.
@@ -106,7 +122,7 @@ private struct HeaderLabel: View {
 
     private var subtitle: Text? {
         let parts: [Text] = chat.isGroup
-            ? [Text("Group")]
+            ? [Text(members.map { "\($0) members" } ?? "Group")]
             : [phone.map { Text($0) }, presenceText(status) ?? status?.about.map { Text($0) }].compactMap(\.self)
         guard var line = parts.first else { return nil }
         for part in parts.dropFirst() {
