@@ -55,23 +55,7 @@ private struct ChatHeader: ViewModifier {
         let status = chat.isGroup ? nil : contacts.status(for: chat.id)
         content
             .hidesWindowTitle()
-            .toolbar {
-                ToolbarItem(placement: .navigation) {
-                    Button { showsCard.toggle() } label: {
-                        HeaderLabel(chat: chat, status: status, members: contacts.groups[chat.id]?.members.count,
-                                    avatars: avatars)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Contact info")
-                    .popover(isPresented: $showsCard, arrowEdge: .bottom) {
-                        if chat.isGroup {
-                            GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
-                        } else {
-                            ContactCard(chat: chat, status: status, avatars: avatars)
-                        }
-                    }
-                }
-            }
+            .toolbar { headerItem(status: status) }
             .task(id: chat.id) { await contacts.watch(chat) }
             // Typing ends without a signal when the "paused" one is lost.
             .task(id: status?.typing) {
@@ -80,9 +64,49 @@ private struct ChatHeader: ViewModifier {
                 contacts.invalidate()
             }
     }
+
+    /// On macOS 26 the item's own glass flickers black where it samples the
+    /// see-through window on hover, so the header draws a calm glass of
+    /// its own instead.
+    @ToolbarContentBuilder
+    private func headerItem(status: ContactStatus?) -> some ToolbarContent {
+        if #available(macOS 26, *) {
+            ToolbarItem(placement: .navigation) { header(status: status) }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .navigation) { header(status: status) }
+        }
+    }
+
+    private func header(status: ContactStatus?) -> some View {
+        Button { showsCard.toggle() } label: {
+            HeaderLabel(chat: chat, status: status, members: contacts.groups[chat.id]?.members.count,
+                        avatars: avatars)
+        }
+        .buttonStyle(.plain)
+        .help("Contact info")
+        .popover(isPresented: $showsCard, arrowEdge: .bottom) {
+            if chat.isGroup {
+                GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
+            } else {
+                ContactCard(chat: chat, status: status, avatars: avatars)
+            }
+        }
+    }
 }
 
 private extension View {
+    /// A plain (not interactive) glass capsule on macOS 26; elsewhere the
+    /// toolbar draws the item as usual.
+    @ViewBuilder
+    func headerGlass() -> some View {
+        if #available(macOS 26, *) {
+            glassEffect(.regular, in: .capsule)
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder
     func hidesWindowTitle() -> some View {
         if #available(macOS 15, *) {
@@ -114,6 +138,7 @@ private struct HeaderLabel: View {
     let status: ContactStatus?
     let members: Int?
     let avatars: AvatarStore
+    @State private var hovering = false
 
     /// The number, unless the title already shows it.
     private var phone: String? {
@@ -150,8 +175,13 @@ private struct HeaderLabel: View {
                 }
             }
         }
-        .padding(.horizontal, 6)
-        .contentShape(.rect)
+        .padding(.leading, 5)
+        .padding(.trailing, 14)
+        .padding(.vertical, 4)
+        .background(.primary.opacity(hovering ? 0.08 : 0), in: .capsule)
+        .headerGlass()
+        .contentShape(.capsule)
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Shows contact info.")
