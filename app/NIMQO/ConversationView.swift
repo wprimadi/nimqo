@@ -82,7 +82,7 @@ struct ConversationView: View {
     }
 
     /// The topmost message on screen, reported by the scroll view as the
-    /// user scrolls; paging keys off it rather than off views appearing.
+    /// user scrolls (macOS 14 only, see `TimelinePaging`).
     @State private var topSeq: Int64?
     @State private var nudger = ScrollNudger()
     @State private var isLoading = false
@@ -132,15 +132,14 @@ struct ConversationView: View {
                 .background(ScrollFinder(nudger: nudger))
                 .padding(Theme.Spacing.medium)
             }
-            .scrollPosition(id: $topSeq, anchor: .top)
-            .defaultScrollAnchor(.bottom)
-            .modifier(BlankRecovery(count: messages.count, recover: nudger.nudge))
-            .onChange(of: topSeq) { _, top in
+            .modifier(TimelinePaging(topSeq: $topSeq) { top in
                 // Near the oldest loaded message: load the page before it.
-                if hasOlder, let top, messages.prefix(5).contains(where: { $0.seq == top }) {
+                if hasOlder, top.map({ top in messages.prefix(5).contains { $0.seq == top } }) ?? true {
                     showOlder()
                 }
-            }
+            })
+            .defaultScrollAnchor(.bottom)
+            .modifier(BlankRecovery(count: messages.count, recover: nudger.nudge))
             .onChange(of: messages, initial: true) { breaks = Breaks(messages) }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {

@@ -137,3 +137,34 @@ struct ScrollFinder: NSViewRepresentable {
         }
     }
 }
+
+/// Loads older messages near the top. On macOS 15 and later from the
+/// scroll offset: a scroll position bound to a message made SwiftUI hold
+/// that message where its guessed height put it, and when the guesses for
+/// a chat full of photos collapsed, the view sat past every row, blank.
+/// macOS 14 has no offset to read and keeps the bound position; `near`
+/// gets the topmost message there, nil on 15.
+struct TimelinePaging: ViewModifier {
+    @Binding var topSeq: Int64?
+    let near: (Int64?) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top < 600
+            } action: { _, isNear in
+                if isNear {
+                    near(nil)
+                }
+            }
+        } else {
+            content
+                .scrollPosition(id: $topSeq, anchor: .top)
+                .onChange(of: topSeq) { _, top in
+                    if top != nil {
+                        near(top)
+                    }
+                }
+        }
+    }
+}
