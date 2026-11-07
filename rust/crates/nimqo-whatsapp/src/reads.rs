@@ -1,7 +1,7 @@
 //! Read state of received messages. Local only: sending read receipts is
 //! the caller's decision (during development, only for the test chat).
 
-use crate::inbox::Inbox;
+use crate::inbox::{Inbox, STATUS};
 use anyhow::Result;
 use diesel::sql_types::Text;
 use diesel::{Connection, RunQueryDsl};
@@ -15,6 +15,46 @@ pub struct Unread {
 }
 
 impl Inbox {
+    /// Marks status update `seq` viewed; returns it when it was not, so the
+    /// caller can tell its poster once.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn view_status(&self, seq: i64) -> Result<Option<Unread>> {
+        let mut conn = self.lock()?;
+        Ok(diesel::OptionalExtension::optional(
+            diesel::sql_query(
+                "UPDATE messages SET read = 1
+                 WHERE chat = ? AND rowid = ? AND from_me = 0 AND read = 0
+                 RETURNING sender, id",
+            )
+            .bind::<Text, _>(STATUS)
+            .bind::<diesel::sql_types::BigInt, _>(seq)
+            .get_result(&mut *conn),
+        )?)
+    }
+
+    /// Status updates (seqs) not viewed yet.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn unviewed_statuses(&self) -> Result<Vec<i64>> {
+        #[derive(diesel::QueryableByName)]
+        struct Seq {
+            #[diesel(sql_type = diesel::sql_types::BigInt)]
+            seq: i64,
+        }
+        let mut conn = self.lock()?;
+        Ok(diesel::sql_query(
+            "SELECT rowid AS seq FROM messages WHERE chat = ? AND from_me = 0 AND read = 0",
+        )
+        .bind::<Text, _>(STATUS)
+        .load::<Seq>(&mut *conn)?
+        .into_iter()
+        .map(|s| s.seq)
+        .collect())
+    }
+
     /// Marks every received message in `chat` read and returns them, so the
     /// caller can send receipts for exactly these.
     ///

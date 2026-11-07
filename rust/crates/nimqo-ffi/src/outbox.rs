@@ -487,6 +487,22 @@ impl Sender {
         }
     }
 
+    /// Tells the test number its status update `id` was viewed; nobody
+    /// else is ever told (the caller checks the poster).
+    pub async fn send_status_receipt(&self, id: String) {
+        let status: Jid = match nimqo_whatsapp::inbox::STATUS.parse() {
+            Ok(j) => j,
+            Err(_) => return,
+        };
+        if let Err(e) = self
+            .client
+            .mark_as_read(&status, Some(&self.peer), &[id.as_str()])
+            .await
+        {
+            log::warn!("status view receipt not sent: {}", e.root_cause());
+        }
+    }
+
     /// Delivered and read receipts for own messages, and reads of received
     /// messages on the account's other devices.
     pub async fn on_receipt(&self, receipt: &Receipt) {

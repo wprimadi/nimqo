@@ -562,6 +562,44 @@ impl Core {
         Ok(())
     }
 
+    /// Marks status update `seq` viewed here. With `tell_poster` a view
+    /// receipt goes to the poster, during development only when that is
+    /// the test number; everyone else never learns it was seen.
+    ///
+    /// # Errors
+    /// `Storage` if the view cannot be recorded.
+    pub fn view_status(&self, seq: i64, tell_poster: bool) -> Result<(), CoreError> {
+        let viewed = self
+            .inbox
+            .view_status(seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?;
+        let Some(viewed) = viewed else { return Ok(()) };
+        self.sender
+            .listener
+            .on_chats_changed(vec![nimqo_whatsapp::inbox::STATUS.to_owned()]);
+        if !tell_poster {
+            return Ok(());
+        }
+        if viewed.sender == self.sender.peer_chat() {
+            let sender = Arc::clone(&self.sender);
+            self.runtime
+                .spawn(async move { sender.send_status_receipt(viewed.id).await });
+        } else {
+            log::info!("status view receipt held back: only the test number is told");
+        }
+        Ok(())
+    }
+
+    /// Status updates (seqs) not viewed yet.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read.
+    pub fn unviewed_statuses(&self) -> Result<Vec<i64>, CoreError> {
+        self.inbox
+            .unviewed_statuses()
+            .map_err(err(|detail| CoreError::Storage { detail }))
+    }
+
     /// Reacts to message `seq` with `emoji`; an empty one removes it.
     ///
     /// # Errors

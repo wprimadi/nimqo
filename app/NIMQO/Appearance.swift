@@ -232,9 +232,19 @@ extension View {
 /// Settings (⌘,): the glass look, each shown as a small sample.
 struct SettingsView: View {
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @AppStorage(StatusStore.receiptsKey) private var sendsStatusReceipts = true
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Tell people when I view their status", isOn: $sendsStatusReceipts)
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("When off, you can watch status updates without the poster seeing you in their viewers. " +
+                    "During development only the test number is ever told.")
+                    .foregroundStyle(.secondary)
+            }
             Section {
                 HStack(spacing: Theme.Spacing.medium) {
                     ForEach(GlassLook.allCases) { option in

@@ -82,6 +82,14 @@ struct MainView: View {
                 )
             }
         }
+        // The status viewer covers the whole window, toolbar included.
+        .overlay {
+            if let update = model.statuses.playing {
+                StatusPlayer(update: update, store: model.statuses, pictures: model.pictures, avatars: model.avatars)
+                    .id(update.seq)
+            }
+        }
+        .toolbar(model.statuses.playing == nil ? .automatic : .hidden, for: .windowToolbar)
         .focusedSceneValue(\.findMessages, $findRequested)
         .onChange(of: findRequested) {
             guard findRequested else { return }
@@ -128,19 +136,12 @@ struct MainView: View {
         }
     }
 
-    @ViewBuilder
     private var statusDetail: some View {
-        let store = model.statuses
-        if let id = store.selected, let poster = store.posters.first(where: { $0.id == id }) {
-            StatusView(poster: poster, store: store, pictures: model.pictures)
-                .id(id)
-        } else {
-            ContentUnavailableView(
-                "Select a status",
-                systemImage: "circle.dashed",
-                description: Text("Viewing stays on this Mac; nobody is told you saw it.")
-            )
-        }
+        ContentUnavailableView(
+            "Select a status",
+            systemImage: "circle.dashed",
+            description: Text("A status plays full window. Whether its poster is told is in Settings.")
+        )
     }
 
     private var statusList: some View {
@@ -148,6 +149,11 @@ struct MainView: View {
         return List(store.posters, selection: Bindable(store).selected) { poster in
             StatusRow(poster: poster, avatars: model.avatars)
                 .listRowSeparator(.visible)
+        }
+        .onChange(of: store.selected) {
+            if let id = store.selected, store.playing == nil {
+                store.play(from: id)
+            }
         }
         .overlay {
             if store.posters.isEmpty {

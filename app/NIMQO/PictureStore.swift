@@ -116,10 +116,11 @@ struct MessagePictureView: View {
         Group {
             if isSticker, let animation = store.animation(chat: chat, message: message) {
                 StickerAnimation(animation: animation)
+                    .frame(maxWidth: 160, maxHeight: 160)
             } else if let picture = store.image(chat: chat, message: message) {
                 Image(nsImage: picture.image)
                     .resizable()
-                    .scaledToFit()
+                    .hugging(picture.image, in: isSticker ? CGSize(width: 160, height: 160) : MediaTile.bounds)
                     // A thumbnail is tiny; soften it until the image comes.
                     .blur(radius: picture.full ? 0 : 6)
                     .overlay {
@@ -147,8 +148,6 @@ struct MessagePictureView: View {
                     }
             }
         }
-        // Stickers are drawn small, as on the phone.
-        .frame(maxWidth: isSticker ? 160 : 280, maxHeight: isSticker ? 160 : 320)
         .modifier(MediaTile(enabled: !isSticker, hovering: hovering))
         .lightboxSource(message, isSticker ? nil : lightbox)
         .onHover { hovering = $0 && !isSticker }
@@ -174,9 +173,21 @@ struct MessagePictureView: View {
     }
 }
 
+extension Image {
+    /// Exactly `image`'s shape, as large as fits `bounds`. A frame that
+    /// only capped the size grew to the full width, so a tall picture sat
+    /// in a wider box and the rounded corners fell on the box, not on it.
+    func hugging(_ image: NSImage, in bounds: CGSize) -> some View {
+        let size = LightboxView.fit(image.size, in: CGRect(origin: .zero, size: bounds), maxScale: .infinity).size
+        return scaledToFit().frame(width: size.width, height: size.height)
+    }
+}
+
 /// A photo or video in a bubble: rounded, a hairline edge, and a lift on
 /// hover to say it opens.
 struct MediaTile: ViewModifier {
+    /// The largest a photo or video is drawn in a bubble.
+    static let bounds = CGSize(width: 280, height: 320)
     let enabled: Bool
     let hovering: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

@@ -709,8 +709,8 @@ impl Row {
         }
         let (kind, body) = classify(&m.message)?;
         let ts = m.info.timestamp.timestamp();
-        // Status updates are read by opening them, never counted as unread,
-        // and go after a day as on the phone.
+        // Status updates go after a day, as on the phone. Unread means not
+        // yet viewed; they are not a chat, so nothing counts them.
         let status = chat_key(src) == STATUS;
         Some(Self {
             chat: chat_key(src),
@@ -723,7 +723,7 @@ impl Row {
             sender_name: m.info.push_name.to_string(),
             // Sent from the phone: the server has it, receipts move it on.
             status: if src.is_from_me { "sent" } else { "" },
-            read: src.is_from_me || status,
+            read: src.is_from_me,
             expires_at: if status {
                 Some(ts + STATUS_LIFETIME)
             } else {
@@ -935,6 +935,15 @@ mod tests {
             .collect();
         assert_eq!(ids, ["a1", "a2"]);
         assert_eq!(inbox.count().unwrap(), 4);
+
+        let seq = inbox.messages(STATUS, 1).unwrap()[0].seq;
+        assert_eq!(inbox.unviewed_statuses().unwrap(), [seq]);
+        assert!(inbox.view_status(seq).unwrap().is_some());
+        assert!(
+            inbox.view_status(seq).unwrap().is_none(),
+            "the poster is told once"
+        );
+        assert_eq!(inbox.unviewed_statuses().unwrap(), Vec::<i64>::new());
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

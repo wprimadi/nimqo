@@ -113,12 +113,11 @@ struct VideoMessageView: View {
     var body: some View {
         Group {
             if let still = store.image(chat: chat, message: message) {
-                Image(nsImage: still.image).resizable().scaledToFit()
+                Image(nsImage: still.image).resizable().hugging(still.image, in: MediaTile.bounds)
             } else {
                 Color.secondary.opacity(0.2).frame(width: 220, height: 140)
             }
         }
-        .frame(maxWidth: 280, maxHeight: 320)
         .overlay {
             Image(systemName: "play.fill")
                 .font(.system(size: 20, weight: .bold))
