@@ -114,6 +114,16 @@ private extension View {
                 // The bar's blur shows on hover and cannot see the desktop
                 // blur behind the see-through window, so it flickers black.
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .overlay(alignment: .top) {
+                    // Spans the toolbar's height, under its items.
+                    GeometryReader { proxy in
+                        WindowBar()
+                            .frame(height: proxy.safeAreaInsets.top)
+                            .offset(y: -proxy.safeAreaInsets.top)
+                    }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
         } else {
             self
         }

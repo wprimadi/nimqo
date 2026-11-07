@@ -158,6 +158,29 @@ private func clearSidebarGlass(in view: NSView) {
     }
 }
 
+/// The bar under the toolbar, drawn from the same desktop blur as the
+/// window. The system's own bar blurs the window's content instead, which
+/// behind a see-through window flickers black.
+struct WindowBar: View {
+    @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        ZStack {
+            if reduceTransparency || contrast == .increased {
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                BehindWindowBlur().opacity(look == .clear ? 0.92 : 1)
+                look.tint
+                // A touch lighter than the window, so it reads as a bar.
+                Color.primary.opacity(0.05)
+            }
+        }
+        .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
 /// Blurs what is behind the window (the desktop and other windows).
 private struct BehindWindowBlur: NSViewRepresentable {
     func makeNSView(context _: Context) -> NSVisualEffectView {
