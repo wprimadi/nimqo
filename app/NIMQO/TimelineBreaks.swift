@@ -60,20 +60,21 @@ struct DayChip: View {
     }
 }
 
-/// Some chats opened blank until scrolled: the scroll view sat where no
-/// row was laid out. When what is in view misses the content entirely,
-/// this goes to the latest message, after the layout pass that left it
-/// there. Logs the geometry, numbers only, to pin down the cause.
+/// Rows not laid out yet are guessed from those that are; at the end of a
+/// chat full of photos the guess is several times too tall. Scrolling up
+/// lays the real rows out, the content shrinks by thousands of points,
+/// and the scroll view stays where it was: past the rows, blank until
+/// scrolled. When the content changes a lot and the offset does not follow
+/// (or what is in view misses it entirely), go back to the message that
+/// was in view. Logs numbers only.
 struct BlankRecovery: ViewModifier {
     let count: Int
     let recover: () -> Void
-    @State private var opened = Date.now
     private static let log = Logger(subsystem: "app.nimqo.app", category: "timeline")
 
     private struct Shape: Equatable {
         var offset: Int
         var height: Int
-        var view: Int
         var blank: Bool
     }
 
@@ -82,23 +83,16 @@ struct BlankRecovery: ViewModifier {
             content.onScrollGeometryChange(for: Shape.self) { geometry in
                 let all = CGRect(origin: .zero, size: geometry.contentSize)
                 return Shape(offset: Int(geometry.visibleRect.minY), height: Int(geometry.contentSize.height),
-                             view: Int(geometry.visibleRect.height),
                              blank: geometry.contentSize.height > 1 && !geometry.visibleRect.intersects(all))
             } action: { old, new in
-                let early = Date.now.timeIntervalSince(opened) < 6
-                if early, abs(new.height - old.height) > 200 {
-                    let (before, after, offset) = (old.height, new.height, new.offset)
-                    Self.log.notice("""
-                    timeline height \(before, privacy: .public) -> \(after, privacy: .public) \
-                    at offset \(offset, privacy: .public), \(count, privacy: .public) messages
-                    """)
-                }
-                guard new.blank, !old.blank else { return }
-                let (offset, height, view) = (new.offset, new.height, new.view)
+                let stranded = abs(new.height - old.height) > 200 && abs(new.offset - old.offset) < 50
+                guard new.blank || stranded else { return }
+                let (before, after, offset) = (old.height, new.height, new.offset)
                 Self.log.notice("""
-                blank timeline: offset \(offset, privacy: .public), height \(height, privacy: .public), \
-                view \(view, privacy: .public), \(count, privacy: .public) messages
+                keeping place: height \(before, privacy: .public) -> \(after, privacy: .public) \
+                at offset \(offset, privacy: .public), \(count, privacy: .public) messages
                 """)
+                // After the layout pass that left it there.
                 DispatchQueue.main.async { recover() }
             }
         } else {

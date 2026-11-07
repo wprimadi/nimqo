@@ -133,7 +133,13 @@ struct ConversationView: View {
             .scrollPosition(id: $topSeq, anchor: .top)
             .defaultScrollAnchor(.bottom)
             .modifier(BlankRecovery(count: messages.count) {
-                if let last = messages.last?.seq {
+                // Back to the message that was in view: the latest one at
+                // the end, else the one that was at the top.
+                if atBottom, let last = messages.last?.seq {
+                    proxy.scrollTo(last, anchor: .bottom)
+                } else if let topSeq {
+                    proxy.scrollTo(topSeq, anchor: .top)
+                } else if let last = messages.last?.seq {
                     proxy.scrollTo(last, anchor: .bottom)
                 }
             })
