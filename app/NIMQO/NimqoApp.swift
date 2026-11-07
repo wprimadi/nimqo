@@ -39,7 +39,7 @@ struct NimqoApp: App {
         }
 
         Settings {
-            SettingsView()
+            SettingsView(core: model.core)
         }
 
         MenuBarExtra {

@@ -28,6 +28,7 @@ uniffi::setup_scaffolding!();
 mod channels;
 mod chats;
 mod outbox;
+mod privacy;
 mod state;
 
 pub use chats::{Chat, ChatMessage, Delivery, MessageKind, SearchHit};
