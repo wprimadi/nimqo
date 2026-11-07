@@ -55,9 +55,12 @@ pub struct Attachments {
     channel: Mutex<ChannelMedia>,
 }
 
-/// Channel files kept for the session; the oldest go first.
-/// ponytail: by count, not size; cap by bytes if large videos pile up.
-const CHANNEL_FILES: usize = 24;
+/// Bytes of channel files kept for the session; the oldest go first. One
+/// file of any allowed size (`max_bytes`) still fits.
+const CHANNEL_BYTES: usize = 128 * 1024 * 1024;
+/// Channel posts whose media message is kept; all are dropped past this.
+/// ponytail: drops everything at once; evict per channel if it bites.
+const CHANNEL_POSTS: usize = 3000;
 
 /// A channel and a post's `server_id`.
 type PostKey = (String, i64);
@@ -109,6 +112,10 @@ impl Attachments {
     /// picture and file can be shown like a chat message's, as `seq`.
     pub fn remember_channel_post(&self, chat: &str, seq: i64, kind: &str, media: Vec<u8>) {
         if let Ok(mut channel) = self.channel.lock() {
+            if channel.posts.len() >= CHANNEL_POSTS {
+                channel.posts.clear();
+                channel.files.clear();
+            }
             channel
                 .posts
                 .insert((chat.to_owned(), seq), (kind.to_owned(), media));
@@ -270,8 +277,9 @@ impl Attachments {
         );
         if is_channel(chat) {
             let mut channel = self.channel.lock().map_err(|_| poisoned())?;
-            if channel.files.len() >= CHANNEL_FILES {
-                channel.files.remove(0);
+            let mut held: usize = channel.files.iter().map(|(_, b)| b.len()).sum();
+            while held + bytes.len() > CHANNEL_BYTES && !channel.files.is_empty() {
+                held -= channel.files.remove(0).1.len();
             }
             channel.files.push(((stored.chat.clone(), seq), bytes));
         } else {
@@ -468,16 +476,10 @@ mod tests {
         assert_eq!((p.bytes.as_slice(), p.full), (&b"thumb"[..], false));
         assert!(store.picture(chat, 6).unwrap().is_none());
 
-        for seq in 0..=i64::try_from(CHANNEL_FILES).unwrap() {
-            let mut channel = store.channel.lock().unwrap();
-            if channel.files.len() >= CHANNEL_FILES {
-                channel.files.remove(0);
-            }
-            channel.files.push((
-                (chat.to_owned(), seq),
-                zeroize::Zeroizing::new(b"full".to_vec()),
-            ));
-        }
+        store.channel.lock().unwrap().files.push((
+            (chat.to_owned(), 5),
+            zeroize::Zeroizing::new(b"full".to_vec()),
+        ));
         assert!(store.file_of(chat, 5).unwrap().is_some());
         assert!(store.picture(chat, 5).unwrap().unwrap().full);
         assert_eq!(
