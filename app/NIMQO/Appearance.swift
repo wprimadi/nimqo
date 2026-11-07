@@ -254,12 +254,17 @@ struct SettingsView: View {
                         LookTile(option: option, look: $look)
                     }
                 }
+                .frame(maxWidth: .infinity)
                 Text(look.detail).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             } header: {
                 Text("Glass")
             }
         }
         .formStyle(.grouped)
+        // The form's own opaque backdrop hid the window's glass and tint.
+        .scrollContentBackground(.hidden)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .windowLook()
