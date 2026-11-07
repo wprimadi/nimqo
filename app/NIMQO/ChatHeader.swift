@@ -85,12 +85,31 @@ private struct ChatHeader: ViewModifier {
         }
         .buttonStyle(.plain)
         .help("Contact info")
+        .onChange(of: showsCard) { _, open in
+            if !open {
+                releaseSidebarFocus()
+            }
+        }
         .popover(isPresented: $showsCard, arrowEdge: .bottom) {
             if chat.isGroup {
                 GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
             } else {
                 ContactCard(chat: chat, status: status, avatars: avatars)
             }
+        }
+    }
+}
+
+/// Closing the card hands key focus to the chat list (the click that
+/// closes it often lands there), and a focused list paints its selection
+/// in the accent colour until something else, like the composer, takes
+/// focus. Give it back to the window, after that click.
+@MainActor
+private func releaseSidebarFocus() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        MainActor.assumeIsolated {
+            guard let window = NSApp.keyWindow, window.firstResponder is NSTableView else { return }
+            window.makeFirstResponder(nil)
         }
     }
 }

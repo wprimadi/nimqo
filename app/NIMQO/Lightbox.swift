@@ -118,6 +118,7 @@ struct LightboxView: View {
                 chrome
                     .opacity(lightbox.expanded ? 1 - pull : 0)
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
         .accessibilityAddTraits(.isModal)
         .task(id: store.generation) { await loadVideo() }
@@ -162,21 +163,24 @@ struct LightboxView: View {
 
     /// The photo itself, blurred and dimmed, filling the view.
     private func backdrop(_ image: NSImage?) -> some View {
-        ZStack {
-            Color.black
-            if let image, !reduceTransparency {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 60, opaque: true)
-                    .saturation(1.5)
-                    .opacity(0.55)
+        // In an overlay, so the filled image cannot size the backdrop: a
+        // tall or wide photo made it, and with it the caption and buttons,
+        // larger than the window.
+        Color.black
+            .overlay {
+                if let image, !reduceTransparency {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .blur(radius: 60, opaque: true)
+                        .saturation(1.5)
+                        .opacity(0.55)
+                }
             }
-            Color.black.opacity(0.35)
-        }
-        .clipped()
-        .ignoresSafeArea()
-        .accessibilityHidden(true)
+            .overlay { Color.black.opacity(0.35) }
+            .clipped()
+            .ignoresSafeArea()
+            .accessibilityHidden(true)
     }
 
     @ViewBuilder
