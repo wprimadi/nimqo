@@ -1,3 +1,4 @@
+import AppKit
 import NimqoCore
 import OSLog
 import SwiftUI
@@ -97,6 +98,42 @@ struct BlankRecovery: ViewModifier {
             }
         } else {
             content
+        }
+    }
+}
+
+/// The AppKit scroll view around the timeline, to nudge it. A blank
+/// timeline came back with any scroll by hand, never with SwiftUI's own
+/// scrollTo or scroll position, which saw nothing to move.
+@MainActor
+final class ScrollNudger {
+    weak var scrollView: NSScrollView?
+
+    /// What a wheel does: moves the clip view, a point and back, inside
+    /// the content, so the rows in view are laid out again.
+    func nudge() {
+        guard let scrollView, let content = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let top = max(0, content.frame.height - clip.bounds.height)
+        let offset = min(max(clip.bounds.origin.y, 0), top)
+        let left = clip.bounds.origin.x
+        clip.scroll(to: NSPoint(x: left, y: offset < top ? offset + 1 : max(0, offset - 1)))
+        clip.scroll(to: NSPoint(x: left, y: offset))
+        scrollView.reflectScrolledClipView(clip)
+    }
+}
+
+/// Placed inside the timeline: hands its scroll view to the nudger.
+struct ScrollFinder: NSViewRepresentable {
+    let nudger: ScrollNudger
+
+    func makeNSView(context _: Context) -> NSView {
+        NSView()
+    }
+
+    func updateNSView(_ view: NSView, context _: Context) {
+        if nudger.scrollView == nil {
+            DispatchQueue.main.async { nudger.scrollView = view.enclosingScrollView }
         }
     }
 }

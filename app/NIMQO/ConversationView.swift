@@ -84,6 +84,7 @@ struct ConversationView: View {
     /// The topmost message on screen, reported by the scroll view as the
     /// user scrolls; paging keys off it rather than off views appearing.
     @State private var topSeq: Int64?
+    @State private var nudger = ScrollNudger()
     @State private var isLoading = false
     /// Whether the end of the timeline is on screen; new messages follow
     /// only then, so reading older ones is never interrupted.
@@ -128,19 +129,12 @@ struct ConversationView: View {
                         .onDisappear { atBottom = false }
                 }
                 .scrollTargetLayout()
+                .background(ScrollFinder(nudger: nudger))
                 .padding(Theme.Spacing.medium)
             }
             .scrollPosition(id: $topSeq, anchor: .top)
             .defaultScrollAnchor(.bottom)
-            .modifier(BlankRecovery(count: messages.count) {
-                // Back to the message that was in view: the latest one at
-                // the end, else the one that was at the top.
-                // Through the scroll position binding: the proxy's scrollTo
-                // did nothing here, the binding owning the position.
-                let place = atBottom ? messages.last?.seq : topSeq ?? messages.last?.seq
-                topSeq = nil
-                DispatchQueue.main.async { topSeq = place }
-            })
+            .modifier(BlankRecovery(count: messages.count, recover: nudger.nudge))
             .onChange(of: topSeq) { _, top in
                 // Near the oldest loaded message: load the page before it.
                 if hasOlder, let top, messages.prefix(5).contains(where: { $0.seq == top }) {
