@@ -134,6 +134,9 @@ struct ChannelView: View {
             .padding(Theme.Spacing.medium)
         }
         .bottomAnchored()
+        // Full size even when the content is narrow: it sized to a short
+        // description, and the bar above with it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if posts?.isEmpty == true {
                 ContentUnavailableView("No posts to show", systemImage: "megaphone",

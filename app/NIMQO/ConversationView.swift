@@ -136,6 +136,9 @@ struct ConversationView: View {
                 }
             })
             .bottomAnchored()
+            // Full size even when the content is narrow: it sized to a short
+            // description, and the bar above with it.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: messages, initial: true) { breaks = Breaks(messages) }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {
