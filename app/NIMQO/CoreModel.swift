@@ -164,9 +164,12 @@ final class CoreModel {
 
     func chatsChanged(_ ids: [String]) {
         avatars.invalidate(ids)
-        if ids.contains(StatusStore.chat) {
+        // Channel media is downloaded under the channel's id.
+        if ids.contains(where: { $0 == StatusStore.chat || $0.hasSuffix("@newsletter") }) {
             pictures.invalidate()
-            statuses.load()
+            if ids.contains(StatusStore.chat) {
+                statuses.load()
+            }
         }
         if let selectedChat, ids.contains(selectedChat) {
             pictures.invalidate()

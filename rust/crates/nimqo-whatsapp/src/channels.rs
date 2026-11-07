@@ -5,7 +5,7 @@
 use anyhow::{Result, anyhow};
 use whatsapp_rust::{Client, Jid, NewsletterState, NewsletterVerification};
 
-use crate::inbox::classify;
+use crate::inbox::{classify, media_of};
 
 /// Posts asked for at a time.
 pub const PAGE: u32 = 30;
@@ -28,6 +28,8 @@ pub struct Post {
     pub kind: &'static str,
     pub body: Option<String>,
     pub edited: bool,
+    /// The encoded media message (`media_of`), for its picture and file.
+    pub media: Option<Vec<u8>>,
 }
 
 /// The followed channels that still exist, by name.
@@ -79,6 +81,7 @@ pub async fn posts(client: &Client, channel: &str, before: Option<u64>) -> Resul
                 kind,
                 body,
                 edited: m.message.is_some() && m.last_edit_timestamp_ms.is_some(),
+                media: m.message.as_ref().and_then(media_of),
             }
         })
         .collect();

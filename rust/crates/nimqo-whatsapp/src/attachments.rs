@@ -2,7 +2,7 @@
 //! once; the full photo, video, or audio is downloaded when its message is
 //! on screen and stored encrypted like other media.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -48,9 +48,28 @@ pub struct Attachments {
     inbox: Inbox,
     dir: PathBuf,
     key: Key,
-    queued: Mutex<HashSet<i64>>,
+    queued: Mutex<HashSet<(String, i64)>>,
     /// Two downloads at a time.
     slots: tokio::sync::Semaphore,
+    /// Channel posts are not stored: their media and files stay in memory.
+    channel: Mutex<ChannelMedia>,
+}
+
+/// Channel files kept for the session; the oldest go first.
+/// ponytail: by count, not size; cap by bytes if large videos pile up.
+const CHANNEL_FILES: usize = 24;
+
+/// A channel and a post's `server_id`.
+type PostKey = (String, i64);
+
+#[derive(Default)]
+struct ChannelMedia {
+    posts: HashMap<PostKey, (String, Vec<u8>)>,
+    files: Vec<(PostKey, zeroize::Zeroizing<Vec<u8>>)>,
+}
+
+fn is_channel(chat: &str) -> bool {
+    chat.ends_with("@newsletter")
 }
 
 /// A picture to show: the full image once downloaded, else the thumbnail.
@@ -82,6 +101,17 @@ impl Attachments {
             key,
             queued: Mutex::default(),
             slots: tokio::sync::Semaphore::new(2),
+            channel: Mutex::default(),
+        }
+    }
+
+    /// Keeps a fetched channel post's media message (`media_of`) so its
+    /// picture and file can be shown like a chat message's, as `seq`.
+    pub fn remember_channel_post(&self, chat: &str, seq: i64, kind: &str, media: Vec<u8>) {
+        if let Ok(mut channel) = self.channel.lock() {
+            channel
+                .posts
+                .insert((chat.to_owned(), seq), (kind.to_owned(), media));
         }
     }
 
@@ -165,6 +195,14 @@ impl Attachments {
     }
 
     fn read(&self, stored: &Stored) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        if is_channel(&stored.chat) {
+            let channel = self.channel.lock().map_err(|_| poisoned())?;
+            return Ok(channel
+                .files
+                .iter()
+                .find(|(key, _)| key.0 == stored.chat && key.1.to_string() == stored.id)
+                .map(|(_, bytes)| bytes.clone()));
+        }
         match std::fs::read(self.file(stored)) {
             Ok(sealed) => Ok(Some(media::decrypt(&self.key, &sealed)?)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -184,13 +222,13 @@ impl Attachments {
                 .queued
                 .lock()
                 .map_err(|_| anyhow!("download queue poisoned"))?;
-            if !queued.insert(seq) {
+            if !queued.insert((chat.to_owned(), seq)) {
                 return Ok(false);
             }
         }
         let result = self.download_queued(client, chat, seq).await;
         if let Ok(mut queued) = self.queued.lock() {
-            queued.remove(&seq);
+            queued.remove(&(chat.to_owned(), seq));
         }
         result
     }
@@ -201,7 +239,12 @@ impl Attachments {
             return Ok(false);
         };
         let file = self.file(&stored);
-        if file.exists() {
+        let have = if is_channel(chat) {
+            self.read(&stored)?.is_some()
+        } else {
+            file.exists()
+        };
+        if have {
             return Ok(false);
         }
         let item: Box<dyn whatsapp_rust::download::Downloadable> = match stored.kind.as_str() {
@@ -225,7 +268,15 @@ impl Attachments {
             .await
             .map_err(|_| anyhow!("download timed out"))??,
         );
-        crate::avatars::write_private(&file, &media::encrypt(&self.key, &bytes)?)?;
+        if is_channel(chat) {
+            let mut channel = self.channel.lock().map_err(|_| poisoned())?;
+            if channel.files.len() >= CHANNEL_FILES {
+                channel.files.remove(0);
+            }
+            channel.files.push(((stored.chat.clone(), seq), bytes));
+        } else {
+            crate::avatars::write_private(&file, &media::encrypt(&self.key, &bytes)?)?;
+        }
         self.inbox.notify_changed(vec![stored.chat]);
         Ok(true)
     }
@@ -288,6 +339,19 @@ impl Attachments {
     }
 
     fn stored(&self, chat: &str, seq: i64) -> Result<Option<Stored>> {
+        if is_channel(chat) {
+            let channel = self.channel.lock().map_err(|_| poisoned())?;
+            return Ok(channel
+                .posts
+                .get(&(chat.to_owned(), seq))
+                .map(|(kind, media)| Stored {
+                    chat: chat.to_owned(),
+                    sender: String::new(),
+                    id: seq.to_string(),
+                    kind: kind.clone(),
+                    media: media.clone(),
+                }));
+        }
         let mut conn = self.inbox.lock()?;
         Ok(diesel::sql_query(
             "SELECT chat, sender, id, kind, media FROM messages
@@ -305,6 +369,10 @@ impl Attachments {
         self.dir
             .join(file_name(&stored.chat, &stored.sender, &stored.id))
     }
+}
+
+fn poisoned() -> anyhow::Error {
+    anyhow!("channel media lock poisoned")
 }
 
 fn file_name(chat: &str, sender: &str, id: &str) -> String {
@@ -381,6 +449,52 @@ mod tests {
             b"ogg"
         );
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn channel_media_stays_in_memory() {
+        let base = std::env::temp_dir().join(format!("nimqo-channel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let key = Key::new([7; 32]);
+        let inbox = Inbox::open(&base.join("app.db"), &key, crate::inbox::Fault::None).unwrap();
+        let store = Attachments::new(inbox, base.clone(), Key::new([8; 32]));
+        let chat = "120363@newsletter";
+        let mut image = wa::message::ImageMessage::default();
+        image.jpeg_thumbnail = Some(b"thumb".to_vec());
+        store.remember_channel_post(chat, 5, "image", image.encode_to_vec());
+
+        let p = store.picture(chat, 5).unwrap().unwrap();
+        assert_eq!((p.bytes.as_slice(), p.full), (&b"thumb"[..], false));
+        assert!(store.picture(chat, 6).unwrap().is_none());
+
+        for seq in 0..=i64::try_from(CHANNEL_FILES).unwrap() {
+            let mut channel = store.channel.lock().unwrap();
+            if channel.files.len() >= CHANNEL_FILES {
+                channel.files.remove(0);
+            }
+            channel.files.push((
+                (chat.to_owned(), seq),
+                zeroize::Zeroizing::new(b"full".to_vec()),
+            ));
+        }
+        assert!(store.file_of(chat, 5).unwrap().is_some());
+        assert!(store.picture(chat, 5).unwrap().unwrap().full);
+        assert_eq!(
+            std::fs::read_dir(&base)
+                .unwrap()
+                .filter(|e| {
+                    e.as_ref()
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .is_some_and(|x| x == "nqm")
+                })
+                .count(),
+            0,
+            "nothing written"
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -158,11 +158,11 @@ struct ChannelView: View {
 }
 
 extension ChannelPost {
-    /// Shown with the chat bubble; channel media is not fetched yet, so a
-    /// photo reads as "Photo" and its caption.
+    /// Shown with the chat bubble; its media comes from the core like a
+    /// chat message's, under the channel id and `serverId`.
     var asMessage: ChatMessage {
         ChatMessage(id: String(serverId), seq: Int64(clamping: serverId), sender: "", senderName: nil,
-                    contactName: nil, edited: edited, hasMedia: false, reactions: nil, myReaction: nil,
+                    contactName: nil, edited: edited, hasMedia: hasMedia, reactions: nil, myReaction: nil,
                     fromMe: false, timestampSecs: timestampSecs, kind: kind, body: body, delivery: .none,
                     reply: nil)
     }

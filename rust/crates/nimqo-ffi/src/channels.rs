@@ -24,6 +24,10 @@ pub struct ChannelPost {
     pub kind: MessageKind,
     pub body: Option<String>,
     pub edited: bool,
+    /// A photo, video, audio, sticker or document to show: `picture`,
+    /// `download_media` and `media_file` take the channel id and
+    /// `server_id` as the seq. Kept in memory only.
+    pub has_media: bool,
 }
 
 #[uniffi::export]
@@ -70,9 +74,10 @@ impl Core {
         before: Option<u64>,
     ) -> Option<Vec<ChannelPost>> {
         let client = Arc::clone(&self.client);
+        let channel = channel_id.clone();
         let fetched = self
             .runtime
-            .spawn(async move { channels::posts(&client, &channel_id, before).await })
+            .spawn(async move { channels::posts(&client, &channel, before).await })
             .await;
         match fetched {
             Ok(Ok(posts)) => {
@@ -80,12 +85,25 @@ impl Core {
                 Some(
                     posts
                         .into_iter()
-                        .map(|p| ChannelPost {
-                            server_id: p.server_id,
-                            timestamp_secs: p.timestamp_secs,
-                            kind: MessageKind::parse(p.kind),
-                            body: p.body,
-                            edited: p.edited,
+                        .map(|p| {
+                            let has_media = p.media.is_some();
+                            if let Some(media) = p.media {
+                                let seq = i64::try_from(p.server_id).unwrap_or(i64::MAX);
+                                self.attachments.remember_channel_post(
+                                    &channel_id,
+                                    seq,
+                                    p.kind,
+                                    media,
+                                );
+                            }
+                            ChannelPost {
+                                server_id: p.server_id,
+                                timestamp_secs: p.timestamp_secs,
+                                kind: MessageKind::parse(p.kind),
+                                body: p.body,
+                                edited: p.edited,
+                                has_media,
+                            }
                         })
                         .collect(),
                 )
