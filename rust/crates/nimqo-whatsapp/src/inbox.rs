@@ -752,7 +752,7 @@ pub(crate) fn sender_key(src: &MessageSource) -> String {
 
 /// The chat status updates are stored under, out of the chat list.
 pub const STATUS: &str = "status@broadcast";
-const STATUS_LIFETIME: i64 = 24 * 60 * 60;
+pub(crate) const STATUS_LIFETIME: i64 = 24 * 60 * 60;
 
 fn is_broadcast_list(chat: &whatsapp_rust::Jid) -> bool {
     chat.server == Server::Broadcast && chat.user != "status"

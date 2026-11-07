@@ -136,12 +136,9 @@ struct MainView: View {
         }
     }
 
+    /// Nothing is playing: write a new update.
     private var statusDetail: some View {
-        ContentUnavailableView(
-            "Select a status",
-            systemImage: "circle.dashed",
-            description: Text("A status plays full window. Whether its poster is told is in Settings.")
-        )
+        StatusComposer(core: model.core)
     }
 
     private var statusList: some View {

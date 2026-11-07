@@ -28,6 +28,7 @@ use whatsapp_rust::{Client, MessageId, SendOptions, SendRequest};
 use crate::{CoreError, CoreListener};
 
 mod files;
+mod status;
 pub use files::OutgoingFile;
 
 const MAX_CHARS: usize = 1000;

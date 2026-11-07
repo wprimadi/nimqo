@@ -620,6 +620,26 @@ impl Core {
             })?
     }
 
+    /// Posts a status update: `text` alone, or a JPEG photo with `text` as
+    /// its caption. During development only the test number can see it.
+    ///
+    /// # Errors
+    /// `SendRefused` for an empty or too long status, a photo that is not
+    /// JPEG or too large, or a failed post; `Storage` if it cannot be kept.
+    pub async fn post_status(
+        &self,
+        text: String,
+        photo: Option<OutgoingFile>,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.runtime
+            .spawn(async move { sender.post_status(&text, photo.as_ref()).await })
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+    }
+
     /// Mutes or unmutes a chat on every device of the account.
     ///
     /// # Errors

@@ -47,7 +47,7 @@ pub struct OutgoingFile {
     pub duration_secs: Option<u32>,
 }
 
-fn check_file(
+pub(super) fn check_file(
     chat_id: &str,
     peer_chat: &str,
     file: &OutgoingFile,

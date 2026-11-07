@@ -136,6 +136,38 @@ impl Inbox {
         Ok(())
     }
 
+    /// An own status update this device posted: the phone does not echo
+    /// it back, so it is stored here, gone after a day like the rest.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn store_own_status(
+        &self,
+        id: &str,
+        ts: i64,
+        kind: &str,
+        body: Option<String>,
+        media: Option<Vec<u8>>,
+    ) -> Result<()> {
+        use crate::inbox::{Row, STATUS, STATUS_LIFETIME};
+        let row = Row {
+            chat: STATUS.to_owned(),
+            sender: ME.to_owned(),
+            id: id.to_owned(),
+            ts,
+            body,
+            from_me: true,
+            kind: kind.to_owned(),
+            sender_name: String::new(),
+            status: "sent",
+            read: true,
+            expires_at: Some(ts + STATUS_LIFETIME),
+            media,
+            quote: None,
+        };
+        self.commit(vec![row], &[])
+    }
+
     /// Replaces an own message's draft with the media message as sent.
     ///
     /// # Errors
@@ -244,6 +276,20 @@ mod tests {
     use super::*;
     use crate::inbox::Fault;
     use crate::vault::Key;
+
+    #[test]
+    fn an_own_status_is_kept_as_sent_and_never_resent() {
+        let path = std::env::temp_dir().join(format!("nimqo-own-status-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([4; 32]), Fault::None).unwrap();
+        inbox
+            .store_own_status("S", 100, "text", Some("hello".into()), None)
+            .unwrap();
+        let m = inbox.messages(crate::inbox::STATUS, 10).unwrap();
+        assert_eq!((m[0].sender.as_str(), m[0].id.as_str()), (ME, "S"));
+        assert!(inbox.pending().unwrap().is_empty(), "not queued again");
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn states_only_move_forward_and_failures_are_bounded() {
