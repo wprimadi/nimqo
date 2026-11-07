@@ -111,6 +111,9 @@ private extension View {
     func hidesWindowTitle() -> some View {
         if #available(macOS 15, *) {
             toolbar(removing: .title)
+                // The bar's blur shows on hover and cannot see the desktop
+                // blur behind the see-through window, so it flickers black.
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         } else {
             self
         }
