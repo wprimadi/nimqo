@@ -26,7 +26,7 @@ pub struct ChannelPost {
     pub edited: bool,
     /// A photo, video, audio, sticker or document to show: `picture`,
     /// `download_media` and `media_file` take the channel id and
-    /// `server_id` as the seq. Kept in memory only.
+    /// `server_id` as the seq. Files last only until the core stops.
     pub has_media: bool,
 }
 

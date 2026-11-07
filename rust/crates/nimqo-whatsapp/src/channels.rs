@@ -1,6 +1,7 @@
 //! Channels the account follows and their posts, asked of the server when
 //! the user opens them. Read-only: nothing goes back (no views, reactions or
-//! follows) and nothing is stored.
+//! follows) and nothing is stored, except opened media until the core
+//! stops (`Attachments::clear_channel_files`).
 
 use anyhow::{Result, anyhow};
 use whatsapp_rust::{Client, Jid, NewsletterState, NewsletterVerification};

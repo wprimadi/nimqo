@@ -2,7 +2,8 @@ import NimqoCore
 import SwiftUI
 
 /// The channels this account follows and the posts of the open one, asked
-/// of the server when shown. Read-only: nothing is sent back or stored.
+/// of the server when shown. Read-only: nothing is sent back, and opened
+/// media is kept (encrypted) only until the app quits.
 @MainActor
 @Observable
 final class ChannelStore {

@@ -748,6 +748,7 @@ impl Core {
     /// Safe to call more than once.
     pub fn stop(&self) {
         const GRACE: Duration = Duration::from_secs(3);
+        self.attachments.clear_channel_files();
         let handle = self.handle.lock().map_or(None, |mut h| h.take());
         if let Some(handle) = handle {
             let report = self
