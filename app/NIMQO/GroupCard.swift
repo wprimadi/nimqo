@@ -116,8 +116,8 @@ private struct MemberRow: View {
             }
             Spacer()
             switch member.role {
-            case .owner: RoleBadge(title: "Owner")
-            case .admin: RoleBadge(title: "Admin")
+            case .owner: RoleBadge(title: "Owner", fill: AnyShapeStyle(.orange))
+            case .admin: RoleBadge(title: "Admin", fill: AnyShapeStyle(.tint))
             case .member: EmptyView()
             }
         }
@@ -127,14 +127,16 @@ private struct MemberRow: View {
 
 private struct RoleBadge: View {
     let title: LocalizedStringKey
+    /// Solid, with white text: a faint tint is unreadable over the blur.
+    let fill: AnyShapeStyle
 
     var body: some View {
         Text(title)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.tint)
-            .padding(.horizontal, 6)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
             .padding(.vertical, 2)
-            .background(.tint.opacity(0.15), in: .capsule)
+            .background(fill, in: .capsule)
     }
 }
 
