@@ -150,6 +150,7 @@ struct ChannelView: View {
         .task { await store.open(channel.id) }
         .navigationTitle(channel.name)
         .navigationSubtitle(Text("\(channel.followers, format: .number.notation(.compactName)) followers"))
+        .windowBar()
     }
 }
 

@@ -162,10 +162,22 @@ private extension View {
     @ViewBuilder
     func hidesWindowTitle() -> some View {
         if #available(macOS 15, *) {
-            toolbar(removing: .title)
-                // The bar's blur shows on hover and cannot see the desktop
-                // blur behind the see-through window, so it flickers black.
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+            toolbar(removing: .title).windowBar()
+        } else {
+            self
+        }
+    }
+}
+
+extension View {
+    /// The calm bar under the toolbar, in place of the system's: its blur
+    /// shows on hover and cannot see the desktop blur behind the
+    /// see-through window, so it flickered black, and it blurred harder
+    /// over whatever content sat under it.
+    @ViewBuilder
+    func windowBar() -> some View {
+        if #available(macOS 15, *) {
+            toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
                 .overlay(alignment: .top) {
                     // Spans the toolbar's height, under its items.
                     GeometryReader { proxy in
