@@ -135,13 +135,11 @@ struct ConversationView: View {
             .modifier(BlankRecovery(count: messages.count) {
                 // Back to the message that was in view: the latest one at
                 // the end, else the one that was at the top.
-                if atBottom, let last = messages.last?.seq {
-                    proxy.scrollTo(last, anchor: .bottom)
-                } else if let topSeq {
-                    proxy.scrollTo(topSeq, anchor: .top)
-                } else if let last = messages.last?.seq {
-                    proxy.scrollTo(last, anchor: .bottom)
-                }
+                // Through the scroll position binding: the proxy's scrollTo
+                // did nothing here, the binding owning the position.
+                let place = atBottom ? messages.last?.seq : topSeq ?? messages.last?.seq
+                topSeq = nil
+                DispatchQueue.main.async { topSeq = place }
             })
             .onChange(of: topSeq) { _, top in
                 // Near the oldest loaded message: load the page before it.

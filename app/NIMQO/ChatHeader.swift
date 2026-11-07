@@ -80,8 +80,10 @@ private struct ChatHeader: ViewModifier {
 
     private func header(status: ContactStatus?) -> some View {
         Button { showsCard.toggle() } label: {
-            HeaderLabel(chat: chat, status: status, members: contacts.groups[chat.id]?.members.count,
-                        avatars: avatars)
+            // The label reads the group's info itself: read here, its
+            // arrival rebuilt the whole toolbar and re-laid out the
+            // timeline below, which then sat past its rows, blank.
+            HeaderLabel(chat: chat, status: status, contacts: contacts, avatars: avatars)
         }
         .buttonStyle(.plain)
         .help("Contact info")
@@ -92,7 +94,7 @@ private struct ChatHeader: ViewModifier {
         }
         .popover(isPresented: $showsCard, arrowEdge: .bottom) {
             if chat.isGroup {
-                GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
+                GroupCardOf(chat: chat, contacts: contacts, avatars: avatars)
             } else {
                 ContactCard(chat: chat, status: status, avatars: avatars)
             }
@@ -199,9 +201,13 @@ private func presenceText(_ status: ContactStatus?) -> Text? {
 private struct HeaderLabel: View {
     let chat: ChatSummary
     let status: ContactStatus?
-    let members: Int?
+    let contacts: ContactStore
     let avatars: AvatarStore
     @State private var hovering = false
+
+    private var members: Int? {
+        contacts.groups[chat.id]?.members.count
+    }
 
     /// The number, unless the title already shows it.
     private var phone: String? {
@@ -291,5 +297,17 @@ private struct ContactCard: View {
         }
         .padding(Theme.Spacing.medium + 4)
         .frame(width: 300)
+    }
+}
+
+/// The group card, reading the group's info here rather than in the
+/// header's modifier (see `header`).
+private struct GroupCardOf: View {
+    let chat: ChatSummary
+    let contacts: ContactStore
+    let avatars: AvatarStore
+
+    var body: some View {
+        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
     }
 }
