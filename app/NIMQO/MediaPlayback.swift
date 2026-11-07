@@ -149,7 +149,8 @@ struct PlayerView: NSViewRepresentable {
     func makeNSView(context _: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
-        view.controlsStyle = .floating
+        // A bar along the bottom, sized to the video, not a fixed panel.
+        view.controlsStyle = .inline
         return view
     }
 
@@ -187,7 +188,9 @@ final class MemoryAsset: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sen
             let end = wanted.requestsAllDataToEndOfResource
                 ? data.count : min(data.count, Int(wanted.requestedOffset) + wanted.requestedLength)
             if start < end {
-                wanted.respond(with: data.subdata(in: start ..< end))
+                // A slice shares the bytes; subdata copied the whole video
+                // for every request.
+                wanted.respond(with: data[start ..< end])
             }
         }
         request.finishLoading()

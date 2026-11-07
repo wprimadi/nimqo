@@ -36,3 +36,13 @@ struct ChatRowTests {
         #expect(breaks.runs == [3, 4, 5])
     }
 }
+
+@Test func `lightbox fit keeps the shape, centres, and caps the scale`() {
+    let bounds = CGRect(x: 0, y: 0, width: 800, height: 600)
+    // A tiny video still grows to fill the width.
+    let video = LightboxView.fit(CGSize(width: 160, height: 90), in: bounds, maxScale: .infinity)
+    #expect(video == CGRect(x: 0, y: 75, width: 800, height: 450))
+    // A small full photo stops at twice its size.
+    let photo = LightboxView.fit(CGSize(width: 100, height: 100), in: bounds, maxScale: 2)
+    #expect(photo == CGRect(x: 300, y: 200, width: 200, height: 200))
+}

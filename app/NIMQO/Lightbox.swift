@@ -76,6 +76,7 @@ struct LightboxView: View {
     @State private var settledPan: CGSize = .zero
     @State private var player: AVPlayer?
     @State private var source: MemoryAsset?
+    @State private var captionOpen = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -93,7 +94,10 @@ struct LightboxView: View {
             let picture = store.image(chat: chat, message: message)
             let size = picture?.image.size ?? CGSize(width: 16, height: 9)
             let bounds = CGRect(origin: .zero, size: geo.size)
-            let target = Self.fit(size, in: bounds.insetBy(dx: 48, dy: 76))
+            // A video's still and a photo's thumbnail are tiny: only a full
+            // photo is held to twice its own size.
+            let target = Self.fit(size, in: bounds.insetBy(dx: 48, dy: 76),
+                                  maxScale: isVideo || picture?.full != true ? .infinity : 2)
             let origin = geo.frame(in: .named(Lightbox.space)).origin
             let start = lightbox.frames[message.seq].map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
                 ?? target.insetBy(dx: target.width * 0.3, dy: target.height * 0.3)
@@ -128,7 +132,18 @@ struct LightboxView: View {
     }
 
     private func close() {
-        player?.pause()
+        if let player {
+            // The still shrinks back, not the live player: resizing and
+            // tearing down a playing AVPlayerView stalls the app.
+            player.pause()
+            self.player = nil
+            let retired = (player, source)
+            source = nil
+            DispatchQueue.global(qos: .utility).async {
+                retired.0.replaceCurrentItem(with: nil)
+                _ = retired
+            }
+        }
         if reduceMotion {
             lightbox.close(reduceMotion: true)
             return
@@ -215,17 +230,18 @@ struct LightboxView: View {
             }
             Spacer()
             if let caption = message.body {
-                ScrollView {
-                    Text(caption)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: 560)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxHeight: 110)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .glassSurface(in: .rect(cornerRadius: 18, style: .continuous))
+                // As wide as its text, up to 560; a long one shows four
+                // lines until clicked.
+                Text(caption)
+                    .lineLimit(captionOpen ? nil : 4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 560, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .glassSurface(in: .rect(cornerRadius: 18, style: .continuous))
+                    .onTapGesture { captionOpen.toggle() }
             }
         }
         .padding(Theme.Spacing.medium)
@@ -245,11 +261,11 @@ struct LightboxView: View {
         player.play()
     }
 
-    /// The largest rect of `size`'s shape inside `bounds`, centred, never
-    /// larger than the picture itself (×2 for small ones, still sharp).
-    nonisolated static func fit(_ size: CGSize, in bounds: CGRect) -> CGRect {
+    /// The largest rect of `size`'s shape inside `bounds`, centred, scaled
+    /// up at most `maxScale` times.
+    nonisolated static func fit(_ size: CGSize, in bounds: CGRect, maxScale: CGFloat) -> CGRect {
         guard size.width > 0, size.height > 0, bounds.width > 0, bounds.height > 0 else { return bounds }
-        let scale = min(bounds.width / size.width, bounds.height / size.height, 2)
+        let scale = min(bounds.width / size.width, bounds.height / size.height, maxScale)
         let fitted = CGSize(width: size.width * scale, height: size.height * scale)
         return CGRect(x: bounds.midX - fitted.width / 2, y: bounds.midY - fitted.height / 2,
                       width: fitted.width, height: fitted.height)
