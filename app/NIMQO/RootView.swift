@@ -29,23 +29,30 @@ struct MainView: View {
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var findRequested = false
-    @State private var showsChannels = false
+    @State private var section = Pane.chats
+
+    private enum Pane {
+        case chats, status, channels
+    }
 
     var body: some View {
         NavigationSplitView {
             Group {
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     SearchResults(model: model, query: query)
-                } else if showsChannels {
-                    channelList
                 } else {
-                    chatList
+                    switch section {
+                    case .chats: chatList
+                    case .status: statusList
+                    case .channels: channelList
+                    }
                 }
             }
             .safeAreaInset(edge: .top) {
-                Picker("Show", selection: $showsChannels) {
-                    Text("Chats").tag(false)
-                    Text("Channels").tag(true)
+                Picker("Show", selection: $section) {
+                    Text("Chats").tag(Pane.chats)
+                    Text("Status").tag(Pane.status)
+                    Text("Channels").tag(Pane.channels)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -56,8 +63,10 @@ struct MainView: View {
             .searchFocus($searching)
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 320)
         } detail: {
-            if showsChannels {
+            if section == .channels {
                 channelDetail
+            } else if section == .status {
+                statusDetail
             } else if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
                 if model.messagesChat != chat.id {
                     // Never show another chat's messages while this one loads.
@@ -116,6 +125,38 @@ struct MainView: View {
                 systemImage: "megaphone",
                 description: Text("Posts are read from WhatsApp when a channel opens; nothing is sent back.")
             )
+        }
+    }
+
+    @ViewBuilder
+    private var statusDetail: some View {
+        let store = model.statuses
+        if let id = store.selected, let poster = store.posters.first(where: { $0.id == id }) {
+            StatusView(poster: poster, store: store, pictures: model.pictures)
+                .id(id)
+        } else {
+            ContentUnavailableView(
+                "Select a status",
+                systemImage: "circle.dashed",
+                description: Text("Viewing stays on this Mac; nobody is told you saw it.")
+            )
+        }
+    }
+
+    private var statusList: some View {
+        let store = model.statuses
+        return List(store.posters, selection: Bindable(store).selected) { poster in
+            StatusRow(poster: poster, avatars: model.avatars)
+                .listRowSeparator(.visible)
+        }
+        .overlay {
+            if store.posters.isEmpty {
+                ContentUnavailableView(
+                    "No status updates",
+                    systemImage: "circle.dashed",
+                    description: Text("Updates from the last 24 hours appear here as they arrive.")
+                )
+            }
         }
     }
 

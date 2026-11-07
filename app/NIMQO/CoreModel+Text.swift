@@ -60,3 +60,32 @@ extension CoreModel {
         return formatter.string(from: TimeInterval(seconds)) ?? "\(seconds) seconds"
     }
 }
+
+/// Receives callbacks on Rust worker threads and hops to the main actor.
+final class Listener: CoreListener, Sendable {
+    private weak let model: CoreModel?
+
+    init(model: CoreModel) {
+        self.model = model
+    }
+
+    func onState(state: ConnectionState) {
+        Task { @MainActor [model] in model?.update(state: state) }
+    }
+
+    func onQr(code: String, timeoutSecs _: UInt64) {
+        Task { @MainActor [model] in model?.update(qrPayload: code) }
+    }
+
+    func onPairCode(code: String, timeoutSecs _: UInt64) {
+        Task { @MainActor [model] in model?.update(pairCode: code) }
+    }
+
+    func onChatsChanged(chatIds: [String]) {
+        Task { @MainActor [model] in model?.chatsChanged(chatIds) }
+    }
+
+    func onPairCodeError(throttled: Bool, retryAfterSecs: UInt64?) {
+        Task { @MainActor [model] in model?.pairCodeFailed(throttled: throttled, retryAfterSecs: retryAfterSecs) }
+    }
+}

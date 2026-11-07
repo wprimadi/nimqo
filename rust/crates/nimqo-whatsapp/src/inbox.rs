@@ -173,7 +173,7 @@ impl Inbox {
                EXISTS (SELECT 1 FROM chat_mutes WHERE chat = m.chat AND (until < 0
                        OR until > CAST(strftime('%s', 'now') AS INTEGER) * 1000)) AS muted
              FROM messages m
-             WHERE m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
+             WHERE m.chat <> 'status@broadcast' AND m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
              ORDER BY m.ts DESC LIMIT ?",
         )
@@ -401,8 +401,8 @@ impl InboundDurabilityHook for Inbox {
         let mut rows = Vec::new();
         let mut effects = Vec::new();
         for m in batch {
-            if m.info.source.chat.server == Server::Broadcast {
-                continue; // status updates, not chats
+            if is_broadcast_list(&m.info.source.chat) {
+                continue; // a broadcast list's copy, not a chat
             }
             // Diagnostics: protocol message types only, never content or ids.
             if let Some(p) = m.message.get_base_message().protocol_message.as_option() {
@@ -704,26 +704,33 @@ pub(crate) struct Row {
 impl Row {
     fn from_inbound(m: &InboundMessage) -> Option<Self> {
         let src = &m.info.source;
-        if src.chat.server == Server::Broadcast {
-            return None; // status updates, not chats
+        if is_broadcast_list(&src.chat) {
+            return None;
         }
         let (kind, body) = classify(&m.message)?;
+        let ts = m.info.timestamp.timestamp();
+        // Status updates are read by opening them, never counted as unread,
+        // and go after a day as on the phone.
+        let status = chat_key(src) == STATUS;
         Some(Self {
             chat: chat_key(src),
             sender: sender_key(src),
             id: m.info.id.to_string(),
-            ts: m.info.timestamp.timestamp(),
+            ts,
             body,
             from_me: src.is_from_me,
             kind: kind.to_owned(),
             sender_name: m.info.push_name.to_string(),
             // Sent from the phone: the server has it, receipts move it on.
             status: if src.is_from_me { "sent" } else { "" },
-            read: src.is_from_me,
-            expires_at: m
-                .message
-                .get_ephemeral_expiration()
-                .map(|s| m.info.timestamp.timestamp() + i64::from(s)),
+            read: src.is_from_me || status,
+            expires_at: if status {
+                Some(ts + STATUS_LIFETIME)
+            } else {
+                m.message
+                    .get_ephemeral_expiration()
+                    .map(|s| ts + i64::from(s))
+            },
             media: media_of(&m.message),
             quote: crate::replies::quote_of(&m.message),
         })
@@ -743,6 +750,14 @@ pub(crate) fn sender_key(src: &MessageSource) -> String {
         .to_non_ad_string()
 }
 
+/// The chat status updates are stored under, out of the chat list.
+pub const STATUS: &str = "status@broadcast";
+const STATUS_LIFETIME: i64 = 24 * 60 * 60;
+
+fn is_broadcast_list(chat: &whatsapp_rust::Jid) -> bool {
+    chat.server == Server::Broadcast && chat.user != "status"
+}
+
 /// Sender key of the user's own messages.
 pub(crate) const ME: &str = "me";
 
@@ -750,6 +765,9 @@ pub(crate) const ME: &str = "me";
 /// the phone number when the message carries it, so both addressings of the
 /// same contact land in the same chat.
 pub(crate) fn chat_key(src: &MessageSource) -> String {
+    if src.chat.server == Server::Broadcast && src.chat.user == "status" {
+        return STATUS.to_owned();
+    }
     if src.is_group || src.chat.is_pn() {
         return src.chat.to_non_ad_string();
     }
@@ -891,6 +909,7 @@ mod tests {
                 row(alice, "a1", 10, false, "Alice"),
                 row(alice, "a2", 30, true, ""),
                 row(group, "g1", 20, false, "Bob"),
+                row(STATUS, "s1", 40, false, "Carol"),
             ])
             .unwrap();
         inbox
@@ -899,7 +918,7 @@ mod tests {
 
         let chats = inbox.chats(10).unwrap();
         let order: Vec<_> = chats.iter().map(|c| (c.chat.as_str(), c.ts)).collect();
-        assert_eq!(order, [(alice, 30), (group, 20)]);
+        assert_eq!(order, [(alice, 30), (group, 20)], "status is not a chat");
         assert_eq!(
             chats[0].name.as_deref(),
             Some("Alice"),
@@ -915,7 +934,7 @@ mod tests {
             .map(|m| m.id)
             .collect();
         assert_eq!(ids, ["a1", "a2"]);
-        assert_eq!(inbox.count().unwrap(), 3);
+        assert_eq!(inbox.count().unwrap(), 4);
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }
@@ -969,6 +988,14 @@ mod tests {
             ..MessageSource::default()
         };
         assert_eq!(chat_key(&unknown), "999@lid");
+        let status = MessageSource {
+            chat: "status@broadcast".parse().unwrap(),
+            sender: Jid::lid("999"),
+            sender_alt: Some(Jid::pn("628111")),
+            ..MessageSource::default()
+        };
+        assert_eq!(chat_key(&status), STATUS);
+        assert_eq!(sender_key(&status), "628111@s.whatsapp.net");
     }
 
     #[test]
