@@ -27,6 +27,7 @@ struct ConversationView: View {
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
     @State private var isDropTarget = false
+    @State private var lightbox = Lightbox()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Nil under Reduce Motion: scrolls jump and marks appear at once.
@@ -69,6 +70,14 @@ struct ConversationView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .coordinateSpace(.named(Lightbox.space))
+            .overlay {
+                if let open = lightbox.message {
+                    LightboxView(lightbox: lightbox, message: open, chat: chat.id, store: pictures)
+                        .transition(.opacity)
+                }
+            }
+            .environment(lightbox)
             .navigationTitle(chat.title)
     }
 
@@ -184,9 +193,17 @@ struct MessageBubble: View {
     }
 
     private var sender: String {
-        // ponytail: push names only until contacts are mapped; "~" marks them
-        // as self-chosen.
-        message.fromMe ? "You" : message.contactName ?? message.senderName.map { "~\($0)" } ?? "Unknown"
+        message.displaySender
+    }
+
+    /// A photo or video fills its bubble edge to edge, nearly.
+    private var isVisual: Bool {
+        message.hasMedia && (message.kind == .image || message.kind == .video)
+    }
+
+    /// With no caption, the time sits on the picture, as on the phone.
+    private var timeOnPicture: Bool {
+        isVisual && message.body == nil
     }
 
     private struct Badge {
@@ -221,23 +238,59 @@ struct MessageBubble: View {
         Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
     }
 
+    private var stamp: some View {
+        HStack(spacing: 4) {
+            Text(time, format: .dateTime.hour().minute())
+            if message.edited {
+                Text("Edited")
+            }
+            if let symbol = deliverySymbol {
+                Image(systemName: symbol.name)
+                    .foregroundStyle(symbol.tint)
+                    .accessibilityLabel(symbol.label)
+            }
+        }
+        .font(.caption2)
+    }
+
+    /// The time on a dark chip over the picture's corner.
+    @ViewBuilder
+    private var pictureStamp: some View {
+        if timeOnPicture {
+            stamp
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(.black.opacity(0.45), in: .capsule)
+                .padding(6)
+                .allowsHitTesting(false)
+        }
+    }
+
     var body: some View {
         HStack {
             if message.fromMe {
                 Spacer(minLength: Theme.Spacing.large)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                if showsSender, !message.fromMe {
-                    Text(sender).font(.caption.bold()).foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: isVisual ? 4 : 2) {
+                Group {
+                    if showsSender, !message.fromMe {
+                        Text(sender).font(.caption.bold()).foregroundStyle(.tint)
+                    }
+                    if let reply = message.reply {
+                        QuoteView(reply: reply)
+                    }
                 }
-                if let reply = message.reply {
-                    QuoteView(reply: reply)
-                }
+                .padding(.horizontal, isVisual ? 8 : 0)
+                .padding(.top, isVisual ? 4 : 0)
                 if message.hasMedia {
                     switch message.kind {
                     case .video: VideoMessageView(chat: chat, message: message, store: pictures)
+                        .overlay(alignment: .bottomTrailing) { pictureStamp }
                     case .audio: AudioMessageView(chat: chat, message: message, store: pictures)
                     case .document: DocumentMessageView(chat: chat, message: message, store: pictures)
+                    case .image: MessagePictureView(chat: chat, message: message, store: pictures)
+                        .overlay(alignment: .bottomTrailing) { pictureStamp }
                     default: MessagePictureView(chat: chat, message: message, store: pictures)
                     }
                 }
@@ -247,24 +300,17 @@ struct MessageBubble: View {
                     Text(text)
                         .italic(message.kind != .text && !message.hasMedia)
                         .textSelection(.enabled)
+                        .padding(.horizontal, isVisual ? 8 : 0)
                 }
-                HStack(spacing: 4) {
-                    Text(time, format: .dateTime.hour().minute())
-                    if message.edited {
-                        Text("Edited")
-                    }
-                    if let symbol = deliverySymbol {
-                        Image(systemName: symbol.name)
-                            .foregroundStyle(symbol.tint)
-                            .accessibilityLabel(symbol.label)
-                    }
+                if !timeOnPicture {
+                    stamp
+                        .foregroundStyle(.secondary)
+                        .padding([.horizontal, .bottom], isVisual ? 8 : 0)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, Theme.Spacing.medium)
-            .padding(.vertical, Theme.Spacing.small)
-            .background(bubbleStyle, in: .rect(cornerRadius: 12))
+            .padding(.horizontal, isVisual ? 4 : Theme.Spacing.medium)
+            .padding(.vertical, isVisual ? 4 : Theme.Spacing.small)
+            .background(bubbleStyle, in: .rect(cornerRadius: isVisual ? 16 : 12, style: .continuous))
             .overlay(alignment: message.fromMe ? .bottomLeading : .bottomTrailing) {
                 if let reactions = message.reactions {
                     Text(reactions)
@@ -315,63 +361,5 @@ struct QuoteView: View {
         .accessibilityLabel(
             "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
         )
-    }
-}
-
-/// Messages that start a new day (shown with a date above), and that start
-/// a run from another sender or after a pause.
-struct Breaks {
-    var days = Set<Int64>()
-    var runs = Set<Int64>()
-
-    init() {}
-
-    init(_ messages: [ChatMessage], calendar: Calendar = .current) {
-        var previous: ChatMessage?
-        for message in messages {
-            let time = Date(timeIntervalSince1970: TimeInterval(message.timestampSecs))
-            if let previous {
-                let before = Date(timeIntervalSince1970: TimeInterval(previous.timestampSecs))
-                if !calendar.isDate(before, inSameDayAs: time) {
-                    days.insert(message.seq)
-                }
-                let otherSender = previous.fromMe != message.fromMe || previous.senderName != message.senderName
-                if otherSender || message.timestampSecs - previous.timestampSecs > 300 {
-                    runs.insert(message.seq)
-                }
-            } else {
-                days.insert(message.seq)
-            }
-            previous = message
-        }
-    }
-}
-
-/// The date between messages of different days, as a small glass capsule.
-private struct DayChip: View {
-    let date: Date
-
-    private var label: String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(date) {
-            return String(localized: "Today")
-        }
-        if calendar.isDateInYesterday(date) {
-            return String(localized: "Yesterday")
-        }
-        let sameYear = calendar.isDate(date, equalTo: .now, toGranularity: .year)
-        return date.formatted(sameYear ? .dateTime.weekday(.wide).day().month(.wide)
-            : .dateTime.day().month(.wide).year())
-    }
-
-    var body: some View {
-        Text(label)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
-            .glassSurface(in: .capsule)
-            .padding(.vertical, Theme.Spacing.small)
-            .accessibilityAddTraits(.isHeader)
     }
 }

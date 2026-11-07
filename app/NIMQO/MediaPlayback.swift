@@ -106,76 +106,38 @@ struct VideoMessageView: View {
     let chat: String
     let message: ChatMessage
     let store: PictureStore
-    @State private var open = false
+    @Environment(Lightbox.self) private var lightbox: Lightbox?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
 
     var body: some View {
         Group {
             if let still = store.image(chat: chat, message: message) {
                 Image(nsImage: still.image).resizable().scaledToFit()
             } else {
-                Color.secondary.opacity(0.2).frame(width: 200, height: 120)
+                Color.secondary.opacity(0.2).frame(width: 220, height: 140)
             }
         }
         .frame(maxWidth: 280, maxHeight: 320)
         .overlay {
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 44))
-                .foregroundStyle(.white, .black.opacity(0.4))
+            Image(systemName: "play.fill")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: 2)
+                .frame(width: 52, height: 52)
+                .background(.ultraThinMaterial, in: .circle)
+                .overlay { Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5) }
+                .environment(\.colorScheme, .dark)
+                .scaleEffect(hovering && !reduceMotion ? 1.1 : 1)
+                .shadow(color: .black.opacity(0.3), radius: 8, y: 2)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .contentShape(.rect)
+        .modifier(MediaTile(enabled: true, hovering: hovering))
+        .lightboxSource(message, lightbox)
+        .onHover { hovering = $0 }
         .accessibilityLabel("Video")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Plays the video.")
-        .onTapGesture { open = true }
-        .sheet(isPresented: $open) {
-            VideoViewer(chat: chat, message: message, store: store)
-        }
-    }
-}
-
-struct VideoViewer: View {
-    let chat: String
-    let message: ChatMessage
-    let store: PictureStore
-    @State private var player: AVPlayer?
-    @State private var source: MemoryAsset?
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            if let player {
-                PlayerView(player: player)
-                    .frame(minWidth: 480, idealWidth: 720, minHeight: 300, idealHeight: 480)
-            } else if store.didFail(chat: chat, message: message) {
-                RetryDownload(chat: chat, message: message, store: store)
-                    .frame(minWidth: 480, minHeight: 300)
-            } else {
-                ProgressView("Downloading the video…")
-                    .frame(minWidth: 480, minHeight: 300)
-            }
-            if let caption = message.body {
-                Text(caption).textSelection(.enabled)
-            }
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(Theme.Spacing.medium)
-        .task(id: store.generation) {
-            guard player == nil else { return }
-            guard let data = store.media(chat: chat, message: message) else {
-                store.download(chat: chat, message: message)
-                return
-            }
-            let asset = MemoryAsset(data)
-            source = asset
-            player = AVPlayer(playerItem: AVPlayerItem(asset: asset.asset))
-            player?.play()
-        }
-        .onDisappear { player?.pause() }
+        .onTapGesture { lightbox?.open(message, reduceMotion: reduceMotion) }
     }
 }
 
@@ -187,7 +149,7 @@ struct PlayerView: NSViewRepresentable {
     func makeNSView(context _: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
-        view.controlsStyle = .inline
+        view.controlsStyle = .floating
         return view
     }
 

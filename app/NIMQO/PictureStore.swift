@@ -104,7 +104,9 @@ struct MessagePictureView: View {
     let chat: String
     let message: ChatMessage
     let store: PictureStore
-    @State private var enlarged = false
+    @Environment(Lightbox.self) private var lightbox: Lightbox?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
 
     private var isSticker: Bool {
         message.kind == .sticker
@@ -140,12 +142,18 @@ struct MessagePictureView: View {
         }
         // Stickers are drawn small, as on the phone.
         .frame(maxWidth: isSticker ? 160 : 280, maxHeight: isSticker ? 160 : 320)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .modifier(MediaTile(enabled: !isSticker, hovering: hovering))
+        .lightboxSource(message, isSticker ? nil : lightbox)
+        .onHover { hovering = $0 && !isSticker }
         .accessibilityLabel(isSticker ? "Sticker" : "Photo")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("Opens the photo at full size.")
-        // Nothing to enlarge until there is a picture.
-        .onTapGesture { enlarged = store.image(chat: chat, message: message) != nil }
+        .accessibilityAddTraits(isSticker ? [] : .isButton)
+        .accessibilityHint(isSticker ? "" : "Opens the photo.")
+        // Nothing to enlarge until there is a picture; stickers stay put.
+        .onTapGesture {
+            if !isSticker, store.image(chat: chat, message: message) != nil {
+                lightbox?.open(message, reduceMotion: reduceMotion)
+            }
+        }
         // A sticker always downloads: an animated one may show a preview
         // that counts as complete.
         .onAppear {
@@ -155,8 +163,30 @@ struct MessagePictureView: View {
                 store.request(chat: chat, message: message)
             }
         }
-        .sheet(isPresented: $enlarged) {
-            PictureViewer(chat: chat, message: message, store: store)
+    }
+}
+
+/// A photo or video in a bubble: rounded, a hairline edge, and a lift on
+/// hover to say it opens.
+struct MediaTile: ViewModifier {
+    let enabled: Bool
+    let hovering: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+                }
+                .brightness(hovering ? 0.04 : 0)
+                .scaleEffect(hovering && !reduceMotion ? 1.012 : 1)
+                .animation(.spring(duration: 0.25, bounce: 0), value: hovering)
+                .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        } else {
+            content
         }
     }
 }
@@ -174,47 +204,6 @@ private struct StickerAnimation: View {
             .resizable()
             .scaledToFit()
             .frame(width: 160, height: 160)
-    }
-}
-
-/// The photo at full size in a sheet; Escape or Done closes it.
-struct PictureViewer: View {
-    let chat: String
-    let message: ChatMessage
-    let store: PictureStore
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: Theme.Spacing.medium) {
-            if let picture = store.image(chat: chat, message: message) {
-                Image(nsImage: picture.image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(
-                        idealWidth: picture.image.size.width,
-                        maxWidth: .infinity,
-                        idealHeight: picture.image.size.height,
-                        maxHeight: .infinity
-                    )
-                    .accessibilityLabel(message.body ?? "Photo")
-                if store.didFail(chat: chat, message: message) {
-                    RetryDownload(chat: chat, message: message, store: store)
-                } else if !picture.full {
-                    Label("Downloading the full photo…", systemImage: "arrow.down.circle")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            if let caption = message.body {
-                Text(caption).textSelection(.enabled)
-            }
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(Theme.Spacing.medium)
-        .frame(minWidth: 400, maxWidth: 1200, minHeight: 300, maxHeight: 900)
     }
 }
 
