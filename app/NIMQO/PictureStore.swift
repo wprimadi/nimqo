@@ -138,6 +138,13 @@ struct MessagePictureView: View {
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
                     .frame(width: 160, height: 120)
+                    // No thumbnail either: say so when the download failed
+                    // (an old photo gone from WhatsApp's servers).
+                    .overlay(alignment: .bottom) {
+                        if store.didFail(chat: chat, message: message) {
+                            RetryDownload(chat: chat, message: message, store: store).padding(6)
+                        }
+                    }
             }
         }
         // Stickers are drawn small, as on the phone.
@@ -156,7 +163,8 @@ struct MessagePictureView: View {
         }
         // A sticker always downloads: an animated one may show a preview
         // that counts as complete.
-        .onAppear {
+        // Once on screen: the timeline lays out every message at once.
+        .onShown {
             if isSticker {
                 store.download(chat: chat, message: message)
             } else {

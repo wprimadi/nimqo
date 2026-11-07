@@ -1,6 +1,4 @@
-import AppKit
 import NimqoCore
-import OSLog
 import SwiftUI
 
 /// Messages that start a new day (shown with a date above), and that start
@@ -61,83 +59,6 @@ struct DayChip: View {
     }
 }
 
-/// Rows not laid out yet are guessed from those that are; at the end of a
-/// chat full of photos the guess is several times too tall. Scrolling up
-/// lays the real rows out, the content shrinks by thousands of points,
-/// and the scroll view stays where it was: past the rows, blank until
-/// scrolled. When the content changes a lot and the offset does not follow
-/// (or what is in view misses it entirely), go back to the message that
-/// was in view. Logs numbers only.
-struct BlankRecovery: ViewModifier {
-    let count: Int
-    let recover: () -> Void
-    private static let log = Logger(subsystem: "app.nimqo.app", category: "timeline")
-
-    private struct Shape: Equatable {
-        var offset: Int
-        var height: Int
-        var blank: Bool
-    }
-
-    func body(content: Content) -> some View {
-        if #available(macOS 15, *) {
-            content.onScrollGeometryChange(for: Shape.self) { geometry in
-                let all = CGRect(origin: .zero, size: geometry.contentSize)
-                return Shape(offset: Int(geometry.visibleRect.minY), height: Int(geometry.contentSize.height),
-                             blank: geometry.contentSize.height > 1 && !geometry.visibleRect.intersects(all))
-            } action: { old, new in
-                let stranded = abs(new.height - old.height) > 200 && abs(new.offset - old.offset) < 50
-                guard new.blank || stranded else { return }
-                let (before, after, offset) = (old.height, new.height, new.offset)
-                Self.log.notice("""
-                keeping place: height \(before, privacy: .public) -> \(after, privacy: .public) \
-                at offset \(offset, privacy: .public), \(count, privacy: .public) messages
-                """)
-                // After the layout pass that left it there.
-                DispatchQueue.main.async { recover() }
-            }
-        } else {
-            content
-        }
-    }
-}
-
-/// The AppKit scroll view around the timeline, to nudge it. A blank
-/// timeline came back with any scroll by hand, never with SwiftUI's own
-/// scrollTo or scroll position, which saw nothing to move.
-@MainActor
-final class ScrollNudger {
-    weak var scrollView: NSScrollView?
-
-    /// What a wheel does: moves the clip view, a point and back, inside
-    /// the content, so the rows in view are laid out again.
-    func nudge() {
-        guard let scrollView, let content = scrollView.documentView else { return }
-        let clip = scrollView.contentView
-        let top = max(0, content.frame.height - clip.bounds.height)
-        let offset = min(max(clip.bounds.origin.y, 0), top)
-        let left = clip.bounds.origin.x
-        clip.scroll(to: NSPoint(x: left, y: offset < top ? offset + 1 : max(0, offset - 1)))
-        clip.scroll(to: NSPoint(x: left, y: offset))
-        scrollView.reflectScrolledClipView(clip)
-    }
-}
-
-/// Placed inside the timeline: hands its scroll view to the nudger.
-struct ScrollFinder: NSViewRepresentable {
-    let nudger: ScrollNudger
-
-    func makeNSView(context _: Context) -> NSView {
-        NSView()
-    }
-
-    func updateNSView(_ view: NSView, context _: Context) {
-        if nudger.scrollView == nil {
-            DispatchQueue.main.async { nudger.scrollView = view.enclosingScrollView }
-        }
-    }
-}
-
 /// Loads older messages near the top. On macOS 15 and later from the
 /// scroll offset: a scroll position bound to a message made SwiftUI hold
 /// that message where its guessed height put it, and when the guesses for
@@ -165,6 +86,47 @@ struct TimelinePaging: ViewModifier {
                         near(top)
                     }
                 }
+        }
+    }
+}
+
+/// The timeline's rows. On macOS 15 and later all of them are laid out:
+/// a lazy stack guesses the rows it has not laid out from those it has,
+/// and at the end of a chat full of photos the guess was several times too
+/// tall; when it collapsed the view sat past every row, blank until
+/// scrolled. macOS 14 cannot tell a row is on screen without a lazy stack
+/// (`onShown`), so it keeps one.
+/// ponytail: every loaded message is laid out; fine for a few hundred,
+/// a sized lazy layout if long histories get slow.
+struct TimelineStack<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(macOS 15, *) {
+            VStack(spacing: 2) { content }
+        } else {
+            LazyVStack(spacing: 2) { content }
+        }
+    }
+}
+
+extension View {
+    /// Runs when the view comes on screen in its scroll view.
+    func onShown(_ action: @escaping () -> Void) -> some View {
+        onShownChange {
+            if $0 {
+                action()
+            }
+        }
+    }
+
+    /// Whether the view is on screen in its scroll view, as that changes.
+    @ViewBuilder
+    func onShownChange(_ action: @escaping (Bool) -> Void) -> some View {
+        if #available(macOS 15, *) {
+            onScrollVisibilityChange(threshold: 0.01, action)
+        } else {
+            onAppear { action(true) }.onDisappear { action(false) }
         }
     }
 }

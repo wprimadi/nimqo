@@ -84,7 +84,6 @@ struct ConversationView: View {
     /// The topmost message on screen, reported by the scroll view as the
     /// user scrolls (macOS 14 only, see `TimelinePaging`).
     @State private var topSeq: Int64?
-    @State private var nudger = ScrollNudger()
     @State private var isLoading = false
     /// Whether the end of the timeline is on screen; new messages follow
     /// only then, so reading older ones is never interrupted.
@@ -98,7 +97,7 @@ struct ConversationView: View {
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                TimelineStack {
                     if hasOlder, isFetchingOlder {
                         ProgressView().controlSize(.small)
                     }
@@ -125,11 +124,9 @@ struct ConversationView: View {
                             }
                     }
                     Color.clear.frame(height: 1)
-                        .onAppear { atBottom = true }
-                        .onDisappear { atBottom = false }
+                        .onShownChange { atBottom = $0 }
                 }
                 .scrollTargetLayout()
-                .background(ScrollFinder(nudger: nudger))
                 .padding(Theme.Spacing.medium)
             }
             .modifier(TimelinePaging(topSeq: $topSeq) { top in
@@ -139,7 +136,6 @@ struct ConversationView: View {
                 }
             })
             .defaultScrollAnchor(.bottom)
-            .modifier(BlankRecovery(count: messages.count, recover: nudger.nudge))
             .onChange(of: messages, initial: true) { breaks = Breaks(messages) }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {
