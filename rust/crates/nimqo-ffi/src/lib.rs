@@ -327,9 +327,12 @@ impl Core {
     /// or gone from WhatsApp's servers); it may be asked for again.
     pub async fn download_media(&self, chat_id: String, seq: i64) -> bool {
         let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
+        // Asking for old media again reaches the sender's phone: the test
+        // peer only, as with everything that contacts other people.
+        let reupload_chat = self.sender.peer_chat();
         let done = self
             .runtime
-            .spawn(async move { store.download(&client, &chat_id, seq).await })
+            .spawn(async move { store.download(&client, &chat_id, seq, &reupload_chat).await })
             .await;
         match done {
             Ok(Ok(_)) => true,

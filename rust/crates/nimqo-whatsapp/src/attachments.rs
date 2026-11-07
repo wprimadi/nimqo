@@ -237,12 +237,20 @@ impl Attachments {
     }
 
     /// Downloads the full file unless it is stored or being fetched.
-    /// Returns whether a new file was stored.
+    /// Returns whether a new file was stored. Media gone from WhatsApp's
+    /// servers is asked of the sender's phone again, but only in
+    /// `reupload_chat`: that asks another person's device.
     ///
     /// # Errors
     /// The store, download, or file write fails. Old messages' media may
     /// no longer be on WhatsApp's servers.
-    pub async fn download(&self, client: &Client, chat: &str, seq: i64) -> Result<bool> {
+    pub async fn download(
+        &self,
+        client: &Client,
+        chat: &str,
+        seq: i64,
+        reupload_chat: &str,
+    ) -> Result<bool> {
         {
             let mut queued = self
                 .queued
@@ -252,14 +260,20 @@ impl Attachments {
                 return Ok(false);
             }
         }
-        let result = self.download_queued(client, chat, seq).await;
+        let result = self.download_queued(client, chat, seq, reupload_chat).await;
         if let Ok(mut queued) = self.queued.lock() {
             queued.remove(&(chat.to_owned(), seq));
         }
         result
     }
 
-    async fn download_queued(&self, client: &Client, chat: &str, seq: i64) -> Result<bool> {
+    async fn download_queued(
+        &self,
+        client: &Client,
+        chat: &str,
+        seq: i64,
+        reupload_chat: &str,
+    ) -> Result<bool> {
         let _slot = self.slots.acquire().await?;
         let Some(stored) = self.stored(chat, seq)? else {
             return Ok(false);
@@ -268,27 +282,24 @@ impl Attachments {
         if file.exists() {
             return Ok(false);
         }
-        let item: Box<dyn whatsapp_rust::download::Downloadable> = match stored.kind.as_str() {
-            "image" => Box::new(wa::message::ImageMessage::decode_from_slice(&stored.media)?),
-            "video" => Box::new(wa::message::VideoMessage::decode_from_slice(&stored.media)?),
-            "document" => Box::new(wa::message::DocumentMessage::decode_from_slice(
-                &stored.media,
-            )?),
-            "sticker" => Box::new(wa::message::StickerMessage::decode_from_slice(
-                &stored.media,
-            )?),
-            _ => Box::new(wa::message::AudioMessage::decode_from_slice(&stored.media)?),
+        let bytes = match fetch(client, &stored.kind, &stored.media).await {
+            Err(e) if chat == reupload_chat && is_gone(&e) => {
+                let from_me = stored.sender == crate::inbox::ME;
+                let fresh = crate::reupload::ask(
+                    client,
+                    chat,
+                    &stored.id,
+                    from_me,
+                    &stored.kind,
+                    &stored.media,
+                )
+                .await?
+                .ok_or(e)?;
+                self.replace_media(chat, seq, &fresh)?;
+                fetch(client, &stored.kind, &fresh).await?
+            }
+            other => other?,
         };
-        let max = max_bytes(&stored.kind);
-        let limit = time_limit(item.file_length().unwrap_or(max));
-        let bytes = zeroize::Zeroizing::new(
-            tokio::time::timeout(
-                limit,
-                client.download(item.as_ref(), DownloadLimits::new(max + 1024, max)),
-            )
-            .await
-            .map_err(|_| anyhow!("download timed out"))??,
-        );
         let sealed = media::encrypt(&self.key, &bytes)?;
         if is_channel(chat) {
             self.prune_channel_files(sealed.len() as u64)?;
@@ -355,6 +366,18 @@ impl Attachments {
         Ok(removed)
     }
 
+    /// Keeps the media message with its new path, so the next download
+    /// goes there directly.
+    fn replace_media(&self, chat: &str, seq: i64, media: &[u8]) -> Result<()> {
+        let mut conn = self.inbox.lock()?;
+        diesel::sql_query("UPDATE messages SET media = ? WHERE chat = ? AND rowid = ?")
+            .bind::<Binary, _>(media)
+            .bind::<Text, _>(chat)
+            .bind::<BigInt, _>(seq)
+            .execute(&mut *conn)?;
+        Ok(())
+    }
+
     fn stored(&self, chat: &str, seq: i64) -> Result<Option<Stored>> {
         if is_channel(chat) {
             let posts = self
@@ -392,6 +415,35 @@ impl Attachments {
         }
         .join(file_name(&stored.chat, &stored.sender, &stored.id))
     }
+}
+
+/// Downloads the file of a media message (`media_of`) of `kind`.
+async fn fetch(client: &Client, kind: &str, media: &[u8]) -> Result<zeroize::Zeroizing<Vec<u8>>> {
+    let item: Box<dyn whatsapp_rust::download::Downloadable> = match kind {
+        "image" => Box::new(wa::message::ImageMessage::decode_from_slice(media)?),
+        "video" => Box::new(wa::message::VideoMessage::decode_from_slice(media)?),
+        "document" => Box::new(wa::message::DocumentMessage::decode_from_slice(media)?),
+        "sticker" => Box::new(wa::message::StickerMessage::decode_from_slice(media)?),
+        _ => Box::new(wa::message::AudioMessage::decode_from_slice(media)?),
+    };
+    let max = max_bytes(kind);
+    let limit = time_limit(item.file_length().unwrap_or(max));
+    Ok(zeroize::Zeroizing::new(
+        tokio::time::timeout(
+            limit,
+            client.download(item.as_ref(), DownloadLimits::new(max + 1024, max)),
+        )
+        .await
+        .map_err(|_| anyhow!("download timed out"))??,
+    ))
+}
+
+/// The CDN refused the reference: expired or removed, not offline.
+fn is_gone(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<whatsapp_rust::download::ClientDownloadError>(),
+        Some(whatsapp_rust::download::ClientDownloadError::ReferenceRejected(_))
+    )
 }
 
 fn file_name(chat: &str, sender: &str, id: &str) -> String {
