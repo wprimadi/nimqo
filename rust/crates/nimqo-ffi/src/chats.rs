@@ -16,7 +16,7 @@ pub enum MessageKind {
 }
 
 impl MessageKind {
-    fn parse(kind: &str) -> Self {
+    pub(crate) fn parse(kind: &str) -> Self {
         match kind {
             "text" => Self::Text,
             "image" => Self::Image,

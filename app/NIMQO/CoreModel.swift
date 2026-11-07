@@ -51,6 +51,7 @@ final class CoreModel {
             avatars.core = core
             pictures.core = core
             contacts.core = core
+            channels.core = core
             notifier.reset()
         }
     }
@@ -58,6 +59,7 @@ final class CoreModel {
     let avatars = AvatarStore()
     let pictures = PictureStore()
     let contacts = ContactStore()
+    let channels = ChannelStore()
     let notifier = Notifier()
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?

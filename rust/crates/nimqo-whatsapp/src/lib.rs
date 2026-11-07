@@ -3,6 +3,7 @@
 
 pub mod attachments;
 pub mod avatars;
+pub mod channels;
 pub mod contacts;
 pub mod db;
 mod effects;

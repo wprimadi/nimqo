@@ -29,21 +29,36 @@ struct MainView: View {
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var findRequested = false
+    @State private var showsChannels = false
 
     var body: some View {
         NavigationSplitView {
             Group {
-                if query.trimmingCharacters(in: .whitespaces).isEmpty {
-                    chatList
-                } else {
+                if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     SearchResults(model: model, query: query)
+                } else if showsChannels {
+                    channelList
+                } else {
+                    chatList
                 }
+            }
+            .safeAreaInset(edge: .top) {
+                Picker("Show", selection: $showsChannels) {
+                    Text("Chats").tag(false)
+                    Text("Channels").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, Theme.Spacing.medium)
+                .padding(.vertical, Theme.Spacing.small)
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search messages")
             .searchFocus($searching)
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 320)
         } detail: {
-            if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
+            if showsChannels {
+                channelDetail
+            } else if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
                 if model.messagesChat != chat.id {
                     // Never show another chat's messages while this one loads.
                     ProgressView()
@@ -87,6 +102,45 @@ struct MainView: View {
         // A new view per chat: it opens at the latest message.
         .id(chat.id)
         .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts)
+    }
+
+    @ViewBuilder
+    private var channelDetail: some View {
+        let store = model.channels
+        if let id = store.selected, let channel = store.channels?.first(where: { $0.id == id }) {
+            ChannelView(channel: channel, store: store, pictures: model.pictures)
+                .id(id)
+        } else {
+            ContentUnavailableView(
+                "Select a channel",
+                systemImage: "megaphone",
+                description: Text("Posts are read from WhatsApp when a channel opens; nothing is sent back.")
+            )
+        }
+    }
+
+    private var channelList: some View {
+        let store = model.channels
+        return List(store.channels ?? [], id: \.id, selection: Bindable(store).selected) { channel in
+            ChannelRow(channel: channel)
+                .listRowSeparator(.visible)
+        }
+        .overlay {
+            if store.channels == nil {
+                if store.failed {
+                    ContentUnavailableView("Couldn't load channels", systemImage: "wifi.slash")
+                } else {
+                    ProgressView()
+                }
+            } else if store.channels?.isEmpty == true {
+                ContentUnavailableView(
+                    "No channels",
+                    systemImage: "megaphone",
+                    description: Text("Channels this account follows appear here.")
+                )
+            }
+        }
+        .task { await store.load() }
     }
 
     private var chatList: some View {
