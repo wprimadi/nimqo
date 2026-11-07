@@ -16,7 +16,7 @@ use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::presence::Presences;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use nimqo_whatsapp::{history, lids};
-use outbox::OutgoingFile;
+use outbox::{OutgoingFile, StatusFont};
 use whatsapp_rust::bot::BotHandle;
 use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
 use whatsapp_rust::prelude::*;
@@ -620,8 +620,8 @@ impl Core {
             })?
     }
 
-    /// Posts a status update: `text` alone, or a JPEG photo with `text` as
-    /// its caption. During development only the test number can see it.
+    /// Posts a status update: `text` alone on `background` (RGB) in `font`,
+    /// or a JPEG photo with `text` as its caption. During development only the test number can see it.
     ///
     /// # Errors
     /// `SendRefused` for an empty or too long status, a photo that is not
@@ -630,10 +630,16 @@ impl Core {
         &self,
         text: String,
         photo: Option<OutgoingFile>,
+        background: u32,
+        font: StatusFont,
     ) -> Result<(), CoreError> {
         let sender = Arc::clone(&self.sender);
         self.runtime
-            .spawn(async move { sender.post_status(&text, photo.as_ref()).await })
+            .spawn(async move {
+                sender
+                    .post_status(&text, photo.as_ref(), background, font)
+                    .await
+            })
             .await
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e}"),

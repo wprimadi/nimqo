@@ -30,6 +30,7 @@ use crate::{CoreError, CoreListener};
 mod files;
 mod status;
 pub use files::OutgoingFile;
+pub use status::StatusFont;
 
 const MAX_CHARS: usize = 1000;
 /// Spacing between sends (the account is real; no blasting).

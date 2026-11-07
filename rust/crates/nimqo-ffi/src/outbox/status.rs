@@ -4,6 +4,7 @@
 
 use whatsapp_rust::media::{ImageOptions, image_message};
 use whatsapp_rust::prelude::wa;
+use whatsapp_rust::prelude::wa::message::extended_text_message::FontType;
 use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::{MessageId, StatusPrivacySetting, StatusSendOptions, UploadOptions};
 
@@ -13,8 +14,27 @@ use crate::CoreError;
 
 /// What the phone allows in a text status.
 const MAX_STATUS_CHARS: usize = 700;
-/// The phone's default text status colour (opaque teal).
-const BACKGROUND: u32 = 0xFF1E_6E4F;
+/// The typeface of a text status; the phone draws it in its own fonts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum StatusFont {
+    Sans,
+    Bold,
+    Serif,
+    Mono,
+    Script,
+}
+
+impl StatusFont {
+    fn wire(self) -> FontType {
+        match self {
+            Self::Sans => FontType::System,
+            Self::Bold => FontType::SystemBold,
+            Self::Serif => FontType::CalistogaRegular,
+            Self::Mono => FontType::CourierprimeBold,
+            Self::Script => FontType::MorningbreezeRegular,
+        }
+    }
+}
 
 /// A text status, or a photo with an optional caption.
 fn check_status(text: &str, photo: Option<&OutgoingFile>) -> Result<(), &'static str> {
@@ -37,6 +57,8 @@ impl Sender {
         &self,
         text: &str,
         photo: Option<&OutgoingFile>,
+        background: u32,
+        font: StatusFont,
     ) -> Result<(), CoreError> {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
@@ -48,7 +70,9 @@ impl Sender {
             None => {
                 let mut m = wa::message::ExtendedTextMessage::default();
                 m.text = Some(text.to_owned());
-                m.background_argb = Some(BACKGROUND);
+                // Opaque, so the text always sits on the colour shown.
+                m.background_argb = Some(background | 0xFF00_0000);
+                m.font = Some(font.wire());
                 let mut message = wa::Message::default();
                 message.extended_text_message = whatsapp_rust::buffa::MessageField::some(m);
                 message
