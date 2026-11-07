@@ -100,17 +100,48 @@ private struct ChatHeader: ViewModifier {
     }
 }
 
-/// Closing the card hands key focus to the chat list (the click that
-/// closes it often lands there), and a focused list paints its selection
-/// in the accent colour until something else, like the composer, takes
-/// focus. Give it back to the window, after that click.
+/// Closing the card hands key focus back to the chat list, and a focused
+/// list paints its selection in the accent colour until something else,
+/// like the composer, takes focus. Focus goes to the window instead, the
+/// moment it is key again and before it redraws (a delay showed a flash).
 @MainActor
 private func releaseSidebarFocus() {
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+    let watch = FocusWatch()
+    watch.token = NotificationCenter.default.addObserver(
+        forName: NSWindow.didBecomeKeyNotification, object: nil, queue: nil
+    ) { note in
+        let id = (note.object as AnyObject?).map(ObjectIdentifier.init)
         MainActor.assumeIsolated {
-            guard let window = NSApp.keyWindow, window.firstResponder is NSTableView else { return }
-            window.makeFirstResponder(nil)
+            guard let window = NSApp.mainWindow, ObjectIdentifier(window) == id else { return }
+            FocusWatch.release(window)
+            watch.stop()
         }
+    }
+    FocusWatch.release(NSApp.keyWindow)
+    // In case the window never stopped being key, or the closing click
+    // landed on the list.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        MainActor.assumeIsolated {
+            FocusWatch.release(NSApp.mainWindow)
+            watch.stop()
+        }
+    }
+}
+
+@MainActor
+private final class FocusWatch {
+    var token: NSObjectProtocol?
+
+    static func release(_ window: NSWindow?) {
+        guard let window, window.firstResponder is NSTableView else { return }
+        window.makeFirstResponder(nil)
+    }
+
+    func stop() {
+        if let token {
+            NotificationCenter.default.removeObserver(token)
+        }
+        token = nil
     }
 }
 
