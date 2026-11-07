@@ -65,14 +65,24 @@ final class ChannelStore {
 /// A channel in the sidebar: its name, a seal when verified, followers.
 struct ChannelRow: View {
     let channel: Channel
+    let avatars: AvatarStore
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "megaphone.fill")
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(.tint, in: .circle)
-                .accessibilityHidden(true)
+            Group {
+                if let image = avatars.image(for: channel.id) {
+                    Image(nsImage: image).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "megaphone.fill")
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(.tint)
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(.circle)
+            .accessibilityHidden(true)
+            .onAppear { avatars.request(channel.id) }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(channel.name).font(.body.weight(.semibold)).lineLimit(1)
@@ -123,9 +133,12 @@ struct ChannelView: View {
             }
             .padding(Theme.Spacing.medium)
         }
-        .defaultScrollAnchor(.bottom)
+        .bottomAnchored()
         .overlay {
-            if posts == nil {
+            if posts?.isEmpty == true {
+                ContentUnavailableView("No posts to show", systemImage: "megaphone",
+                                       description: Text("WhatsApp sent no posts for this channel."))
+            } else if posts == nil {
                 if !store.unreachable.contains(channel.id) {
                     ProgressView()
                 } else {

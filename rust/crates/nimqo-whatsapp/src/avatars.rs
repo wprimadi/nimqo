@@ -93,6 +93,11 @@ impl Avatars {
             return Ok(false);
         }
         let jid: Jid = chat.parse().map_err(|_| anyhow!("not a chat id"))?;
+        if chat.ends_with("@newsletter") {
+            return self
+                .refresh_channel(client, chat, &jid, picture_id, now)
+                .await;
+        }
         let target = if chat.ends_with("@g.us") {
             ProfilePictureTarget::Group(&jid)
         } else {
@@ -120,6 +125,40 @@ impl Avatars {
             _ => {
                 self.record(chat, picture_id.as_deref(), now)?;
                 false
+            }
+        };
+        if changed {
+            self.inbox.notify_changed(vec![chat.to_owned()]);
+        }
+        Ok(changed)
+    }
+
+    /// A channel's picture: its metadata names the preview's path on the
+    /// picture server; the path doubles as the picture's id.
+    async fn refresh_channel(
+        &self,
+        client: &Client,
+        chat: &str,
+        jid: &Jid,
+        picture_id: Option<String>,
+        now: i64,
+    ) -> Result<bool> {
+        let meta = client.newsletter().get_metadata(jid).await;
+        tokio::time::sleep(SPACING).await;
+        let path = meta?.preview_url.filter(|p| p.starts_with('/'));
+        let have = self.file(chat).exists();
+        let changed = match path {
+            Some(path) if have && picture_id.as_deref() == Some(path.as_str()) => false,
+            Some(path) => {
+                let bytes = download(client, &channel_picture_url(&path)).await?;
+                write_private(&self.file(chat), &media::encrypt(&self.key, &bytes)?)?;
+                self.record(chat, Some(&path), now)?;
+                true
+            }
+            None => {
+                let had = std::fs::remove_file(self.file(chat)).is_ok();
+                self.record(chat, None, now)?;
+                had
             }
         };
         if changed {
@@ -196,6 +235,12 @@ async fn download(client: &Client, url: &str) -> Result<Vec<u8>> {
     Ok(response.body)
 }
 
+/// Where WhatsApp serves a channel picture's path from; `download` still
+/// checks the host.
+fn channel_picture_url(path: &str) -> String {
+    format!("https://pps.whatsapp.net{path}")
+}
+
 fn is_picture_url(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
         return false;
@@ -231,6 +276,13 @@ pub(crate) fn write_private(path: &Path, contents: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_picture_paths_stay_on_the_picture_server() {
+        assert!(is_picture_url(&channel_picture_url("/v/t61.0-24/pic.jpg")));
+        assert!(!is_picture_url(&channel_picture_url("@evil.example/x")));
+        assert!(!is_picture_url(&channel_picture_url(".evil.example/x")));
+    }
 
     #[test]
     fn only_whatsapp_picture_hosts_are_fetched() {

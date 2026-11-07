@@ -135,7 +135,7 @@ struct ConversationView: View {
                     showOlder()
                 }
             })
-            .defaultScrollAnchor(.bottom)
+            .bottomAnchored()
             .onChange(of: messages, initial: true) { breaks = Breaks(messages) }
             .onChange(of: scrollToEnd) {
                 if let last = messages.last?.seq {

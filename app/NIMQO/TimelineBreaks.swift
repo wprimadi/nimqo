@@ -130,3 +130,18 @@ extension View {
         }
     }
 }
+
+extension View {
+    /// Opens at the end and stays there as content grows. On macOS 15 and
+    /// later not for aligning short content: that drew an empty panel
+    /// above it, so a short timeline sits at the top instead.
+    @ViewBuilder
+    func bottomAnchored() -> some View {
+        if #available(macOS 15, *) {
+            defaultScrollAnchor(.bottom, for: .initialOffset)
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            defaultScrollAnchor(.bottom)
+        }
+    }
+}

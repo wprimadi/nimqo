@@ -122,7 +122,7 @@ struct MainView: View {
     private var channelList: some View {
         let store = model.channels
         return List(store.channels ?? [], id: \.id, selection: Bindable(store).selected) { channel in
-            ChannelRow(channel: channel)
+            ChannelRow(channel: channel, avatars: model.avatars)
                 .listRowSeparator(.visible)
         }
         .overlay {
