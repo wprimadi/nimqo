@@ -31,7 +31,7 @@ mod outbox;
 mod privacy;
 mod state;
 
-pub use chats::{Chat, ChatMessage, Delivery, MessageKind, SearchHit};
+pub use chats::{Chat, ChatMessage, Delivery, Mention, MessageKind, SearchHit};
 
 /// A group as the server describes it, for the group's info card.
 #[derive(Debug, uniffi::Record)]
@@ -267,7 +267,7 @@ impl Core {
         before: Option<Cursor>,
         limit: u32,
     ) -> Result<Vec<ChatMessage>, CoreError> {
-        Ok(self
+        let mut messages: Vec<ChatMessage> = self
             .inbox
             .messages_before(
                 chat_id,
@@ -277,7 +277,23 @@ impl Core {
             .map_err(err(|detail| CoreError::Storage { detail }))?
             .into_iter()
             .map(ChatMessage::from)
-            .collect())
+            .collect();
+        let mut names = std::collections::HashMap::new();
+        for m in &mut messages {
+            let Some(body) = &m.body else { continue };
+            for user in chats::mentioned_users(body) {
+                let name = names
+                    .entry(user.to_owned())
+                    .or_insert_with(|| self.inbox.mention_name(user).ok().flatten());
+                if let Some(name) = name {
+                    m.mentions.push(chats::Mention {
+                        user: user.to_owned(),
+                        name: name.clone(),
+                    });
+                }
+            }
+        }
+        Ok(messages)
     }
 
     /// Messages containing `text` in any chat, newest first, at most 100.

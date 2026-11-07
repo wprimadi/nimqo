@@ -230,6 +230,14 @@ struct LightboxView: View {
                     .glassButton()
                     .controlSize(.large)
                 }
+                Button("Save As…", systemImage: "arrow.down.to.line") { store.save(chat: chat, message: message) }
+                    .labelStyle(.iconOnly)
+                    .buttonBorderShape(.circle)
+                    .glassButton()
+                    .controlSize(.large)
+                    .disabled(store.isSaving(chat: chat, message: message))
+                    .keyboardShortcut("s", modifiers: .command)
+                    .help("Save As… (⌘S)")
                 Button("Close", systemImage: "xmark") { close() }
                     .labelStyle(.iconOnly)
                     .buttonBorderShape(.circle)
@@ -242,7 +250,7 @@ struct LightboxView: View {
                 // The glass hugs the text; the outer frame only caps its
                 // width (a horizontal fixedSize made it one endless line,
                 // pushing the buttons and itself off screen).
-                Text(caption)
+                Text(MessageText.attributed(caption, mentions: message.mentions))
                     .lineLimit(captionOpen ? nil : 4)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)

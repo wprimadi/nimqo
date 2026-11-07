@@ -122,6 +122,33 @@ pub struct ChatMessage {
     pub delivery: Delivery,
     /// What this message replies to.
     pub reply: Option<Reply>,
+    /// Who each "@number" in `body` is, where known.
+    pub mentions: Vec<Mention>,
+}
+
+/// "@`user`" in a message body stands for `name`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Mention {
+    pub user: String,
+    pub name: String,
+}
+
+/// The digits after each "@" in `body` that look like a WhatsApp user (a
+/// phone number or a LID), each once.
+pub(crate) fn mentioned_users(body: &str) -> Vec<&str> {
+    let mut users: Vec<&str> = body
+        .split('@')
+        .skip(1)
+        .filter_map(|rest| {
+            let end = rest
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(rest.len());
+            Some(&rest[..end]).filter(|d| (5..=20).contains(&d.len()))
+        })
+        .collect();
+    users.sort_unstable();
+    users.dedup();
+    users
 }
 
 /// The quoted message of a reply, as quoted.
@@ -157,6 +184,7 @@ impl From<MessageRow> for ChatMessage {
                 from_me: r.quote_from_me,
                 sender_name: r.quote_name,
             }),
+            mentions: Vec::new(),
         }
     }
 }
@@ -169,4 +197,15 @@ pub struct SearchHit {
     pub timestamp_secs: i64,
     pub body: String,
     pub from_me: bool,
+}
+
+#[cfg(test)]
+mod mention_tests {
+    #[test]
+    fn mentions_are_long_digit_runs_after_at() {
+        assert_eq!(
+            super::mentioned_users("hi @178219684741240, @62811 and @62811 a@b @12"),
+            vec!["178219684741240", "62811"]
+        );
+    }
 }

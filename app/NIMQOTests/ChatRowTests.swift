@@ -21,7 +21,7 @@ struct ChatRowTests {
             ChatMessage(
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: mine, timestampSecs: time, kind: .text, body: nil,
-                delivery: .none, reply: nil
+                delivery: .none, reply: nil, mentions: []
             )
         }
         let day = Int64(86400)
@@ -45,4 +45,14 @@ struct ChatRowTests {
     // A small full photo stops at twice its size.
     let photo = LightboxView.fit(CGSize(width: 100, height: 100), in: bounds, maxScale: 2)
     #expect(photo == CGRect(x: 300, y: 200, width: 200, height: 200))
+}
+
+@Test func `mentions show names and only web and mail links open`() {
+    let text = MessageText.attributed(
+        "hi @178219684741240 see example.com, @62811 file:///etc/passwd",
+        mentions: [Mention(user: "178219684741240", name: "Ana")]
+    )
+    #expect(String(text.characters) == "hi @Ana see example.com, @62811 file:///etc/passwd")
+    let links = text.runs.compactMap(\.link)
+    #expect(links.map(\.absoluteString) == ["http://example.com"])
 }

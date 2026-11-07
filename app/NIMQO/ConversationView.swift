@@ -118,6 +118,11 @@ struct ConversationView: View {
                                     Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
                                     ReactMenu(mine: message.myReaction) { react(message.seq, $0) }
                                 }
+                                if message.canSave {
+                                    Button("Save As…", systemImage: "square.and.arrow.down") {
+                                        pictures.save(chat: chat.id, message: message)
+                                    }
+                                }
                                 if send != nil, message.delivery == .failed {
                                     Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
                                 }
@@ -191,6 +196,11 @@ struct MessageBubble: View {
 
     private var text: String {
         ChatMessage.describe(kind: message.kind, body: message.body)
+    }
+
+    /// Mentions by name, links clickable.
+    private var rich: AttributedString {
+        MessageText.attributed(text, mentions: message.mentions)
     }
 
     private var sender: String {
@@ -298,7 +308,7 @@ struct MessageBubble: View {
                 // A shown picture needs no "Photo" label, only its caption;
                 // a document shows its own name.
                 if !(message.hasMedia && (message.body == nil || message.kind == .document)) {
-                    Text(text)
+                    Text(rich)
                         .italic(message.kind != .text && !message.hasMedia)
                         .textSelection(.enabled)
                         .padding(.horizontal, isVisual ? 8 : 0)
@@ -328,7 +338,7 @@ struct MessageBubble: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(sender), \(text), \(time.formatted(date: .omitted, time: .shortened))"
+            "\(sender), \(String(rich.characters)), \(time.formatted(date: .omitted, time: .shortened))"
                 + (message.edited ? ", edited" : "")
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")

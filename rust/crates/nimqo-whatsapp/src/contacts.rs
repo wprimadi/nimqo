@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use diesel::RunQueryDsl;
-use diesel::sql_types::{BigInt, Text};
+use diesel::sql_types::{BigInt, Nullable, Text};
 
 use crate::inbox::Inbox;
 
@@ -57,6 +57,46 @@ impl Inbox {
             Ok::<_, diesel::result::Error>(())
         })?;
         Ok(())
+    }
+
+    /// Who "@`user`" in a message is: their saved name, else "~" and the
+    /// name they chose, else "+" and a LID's number; `user` is a phone
+    /// number or a LID, as mentions carry either.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn mention_name(&self, user: &str) -> Result<Option<String>> {
+        #[derive(diesel::QueryableByName)]
+        struct Names {
+            #[diesel(sql_type = Nullable<Text>)]
+            saved: Option<String>,
+            #[diesel(sql_type = Nullable<Text>)]
+            push: Option<String>,
+            #[diesel(sql_type = Nullable<Text>)]
+            pn: Option<String>,
+        }
+        let mut conn = self.lock()?;
+        // ponytail: the sender_name fallback scans messages; index sender if
+        // pages with many mentions get slow.
+        let n: Names = diesel::sql_query(
+            "WITH ids(j) AS (SELECT ?1 UNION SELECT ?2
+               UNION SELECT pn FROM lid_map WHERE lid = ?2
+               UNION SELECT lid FROM lid_map WHERE pn = ?1)
+             SELECT coalesce((SELECT name FROM contacts WHERE jid IN (SELECT j FROM ids) LIMIT 1),
+                             (SELECT name FROM chat_names WHERE chat IN (SELECT j FROM ids) LIMIT 1)) AS saved,
+                    coalesce((SELECT nullif(name, '') FROM push_names
+                              WHERE jid IN (SELECT j FROM ids) LIMIT 1),
+                             (SELECT sender_name FROM messages WHERE sender IN (SELECT j FROM ids)
+                              AND sender_name <> '' ORDER BY ts DESC LIMIT 1)) AS push,
+                    -- Only a LID's known number: an unknown one stays as typed.
+                    (SELECT pn FROM lid_map WHERE lid = ?2) AS pn",
+        )
+        .bind::<Text, _>(format!("{user}@s.whatsapp.net"))
+        .bind::<Text, _>(format!("{user}@lid"))
+        .get_result(&mut *conn)?;
+        Ok(n.saved.or(n.push.map(|p| format!("~{p}"))).or(n
+            .pn
+            .and_then(|p| p.split('@').next().map(|d| format!("+{d}")))))
     }
 
     /// Diagnostics, counts only: saved names, how many are keyed by LID,
@@ -144,6 +184,30 @@ mod tests {
             inbox.messages(a, 10).unwrap()[0].contact_name.as_deref(),
             Some("Ana H")
         );
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn mentions_name_people_by_number_or_lid() {
+        let path = std::env::temp_dir().join(format!("nimqo-mentions-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([7; 32]), Fault::None).unwrap();
+        assert_eq!(inbox.mention_name("178").unwrap(), None);
+        inbox
+            .record_lids(&[("178@lid".into(), "62811@s.whatsapp.net".into())])
+            .unwrap();
+        assert_eq!(
+            inbox.mention_name("178").unwrap().as_deref(),
+            Some("+62811")
+        );
+        inbox
+            .record_push_names(&[("178@lid".into(), "Bo".into())])
+            .unwrap();
+        assert_eq!(inbox.mention_name("178").unwrap().as_deref(), Some("~Bo"));
+        inbox.save_contact("62811@s.whatsapp.net", "Bob").unwrap();
+        assert_eq!(inbox.mention_name("178").unwrap().as_deref(), Some("Bob"));
+        assert_eq!(inbox.mention_name("62811").unwrap().as_deref(), Some("Bob"));
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

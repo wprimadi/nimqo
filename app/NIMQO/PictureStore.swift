@@ -16,6 +16,8 @@ final class PictureStore {
             animations = [:]
             requested = []
             failed = []
+            pendingSaves = [:]
+            saving = []
             generation += 1
         }
     }
@@ -32,8 +34,12 @@ final class PictureStore {
     @ObservationIgnored private var animations: [String: LottieAnimation?] = [:]
     /// Downloads that failed; shown with a retry button.
     private var failed: Set<String> = []
+    /// Files to save once downloaded (see MediaSaving.swift), by key.
+    @ObservationIgnored var pendingSaves: [String: (chat: String, message: ChatMessage)] = [:]
+    /// Keys being downloaded to save; shown as progress.
+    var saving: Set<String> = []
 
-    private static func key(_ chat: String, _ message: ChatMessage) -> String {
+    static func key(_ chat: String, _ message: ChatMessage) -> String {
         "\(chat)\n\(message.sender)\n\(message.id)"
     }
 
@@ -79,6 +85,8 @@ final class PictureStore {
             if await !core.downloadMedia(chatId: chat, seq: message.seq) {
                 requested.remove(key)
                 failed.insert(key)
+                pendingSaves[key] = nil
+                saving.remove(key)
             }
         }
     }
@@ -97,6 +105,7 @@ final class PictureStore {
         images = images.filter(\.value.full)
         animations = animations.filter { $0.value != nil }
         generation += 1
+        finishSaves()
     }
 }
 
