@@ -113,7 +113,7 @@ struct ConversationView: View {
                                       openQuote: show)
                             // A shown message pops once, on a band across the
                             // whole row that fades away, like on the phone.
-                            .scaleEffect(pulsing == message.seq ? 1.04 : 1,
+                            .scaleEffect(pulsing == message.seq ? 1.06 : 1,
                                          anchor: message.fromMe ? .trailing : .leading)
                             .background {
                                 if marked == message.seq {
@@ -172,7 +172,9 @@ struct ConversationView: View {
                 // After the scroll kept by a page coming in above.
                 try? await Task.sleep(for: .milliseconds(150))
                 withAnimation(motion) { proxy.scrollTo(reveal, anchor: .center) }
-                revealed()
+                // Cleared only at the end: clearing it changes this task's id,
+                // which cancels the task and skips every wait below.
+                defer { revealed() }
                 try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 350))
                 withAnimation(.easeOut(duration: 0.15)) { marked = reveal }
                 if !reduceMotion {
