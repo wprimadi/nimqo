@@ -7,6 +7,11 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.medium) {
+            // The app's own icon, so the first screen says whose it is.
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 96, height: 96)
+                .accessibilityHidden(true)
             Text("Welcome to NIMQO")
                 .font(.largeTitle.bold())
             Text("A native Mac app for your WhatsApp account. Before you link it, please read this.")

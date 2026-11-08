@@ -41,7 +41,10 @@ targets:
   NIMQO:
     type: application
     platform: macOS
-    sources: [NIMQO]
+    sources:
+      - path: NIMQO
+        # Local tool state lands in this folder; never ship it in the app.
+        excludes: ["*.db", "*.db-*", "*.log", "evidence", ".swarm", ".claude-flow"]
     dependencies:
       - target: NimqoCore
       - package: Lottie
@@ -50,6 +53,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.nimqo.dev
         PRODUCT_NAME: NIMQO
         GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_CFBundleDisplayName: NIMQO
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.social-networking
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Wahyu Primadi. MIT License."
