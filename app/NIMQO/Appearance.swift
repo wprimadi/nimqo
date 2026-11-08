@@ -8,6 +8,8 @@ enum GlassLook: String, CaseIterable, Identifiable {
     case clear, dark, light
 
     static let key = "glassLook"
+    /// 0 see-through, 0.5 the look as designed, 1 solid.
+    static let opacityKey = "windowOpacity"
 
     var id: Self {
         self
@@ -44,6 +46,31 @@ enum GlassLook: String, CaseIterable, Identifiable {
         case .clear: .clear
         case .dark: .black.opacity(0.45)
         case .light: .white.opacity(0.55)
+        }
+    }
+
+    /// The window's own color, laid on as opacity goes past the middle.
+    var solid: Color {
+        switch self {
+        case .clear: Color(nsColor: .windowBackgroundColor)
+        case .dark: Color(white: 0.13)
+        case .light: Color(white: 0.95)
+        }
+    }
+}
+
+/// What lies over the blur, for every surface drawn from it: below the
+/// middle of the opacity slider the look's tint thins (down to clear
+/// glass, still blurred, so text stays legible); above it the window's
+/// own color thickens until the window is solid.
+struct GlassTint: View {
+    let look: GlassLook
+    let opacity: Double
+
+    var body: some View {
+        ZStack {
+            look.tint.opacity(min(1, opacity * 2))
+            look.solid.opacity(max(0, opacity * 2 - 1))
         }
     }
 }
@@ -83,6 +110,7 @@ private struct GlassButton: ViewModifier {
 /// The window itself: see-through, blurred, tinted by the look.
 private struct WindowLook: ViewModifier {
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @AppStorage(GlassLook.opacityKey) private var opacity = 0.5
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -103,7 +131,7 @@ private struct WindowLook: ViewModifier {
                         // Clear lets a little of the desktop through
                         // unblurred: enough to see, not enough to read.
                         BehindWindowBlur().opacity(look == .clear ? 0.88 : 1)
-                        look.tint
+                        GlassTint(look: look, opacity: opacity)
                     }
                 }
                 .ignoresSafeArea()
@@ -164,6 +192,7 @@ private func clearSidebarGlass(in view: NSView) {
 /// behind a see-through window flickers black.
 struct WindowBar: View {
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @AppStorage(GlassLook.opacityKey) private var opacity = 0.5
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -173,7 +202,7 @@ struct WindowBar: View {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 BehindWindowBlur().opacity(look == .clear ? 0.92 : 1)
-                look.tint
+                GlassTint(look: look, opacity: opacity)
                 // A touch lighter than the window, so it reads as a bar.
                 Color.primary.opacity(0.05)
             }
@@ -234,7 +263,14 @@ extension View {
 struct SettingsView: View {
     let core: Core?
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
+    @AppStorage(GlassLook.opacityKey) private var opacity = 0.5
     @AppStorage(StatusStore.receiptsKey) private var sendsStatusReceipts = true
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    private var solid: Bool {
+        reduceTransparency || contrast == .increased
+    }
 
     var body: some View {
         Form {
@@ -250,15 +286,28 @@ struct SettingsView: View {
             Section {
                 HStack(spacing: Theme.Spacing.medium) {
                     ForEach(GlassLook.allCases) { option in
-                        LookTile(option: option, look: $look)
+                        LookTile(option: option, look: $look, opacity: opacity)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 Text(look.detail).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+                Slider(value: $opacity, in: 0 ... 1) {
+                    Text("Opacity")
+                } minimumValueLabel: {
+                    Text("See-through")
+                } maximumValueLabel: {
+                    Text("Solid")
+                }
+                .accessibilityValue("\(Int(opacity * 100)) percent")
             } header: {
                 Text("Glass")
+            } footer: {
+                if solid {
+                    Text("Reduce Transparency or Increase Contrast is on in macOS, so the window stays solid.")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)
@@ -274,6 +323,7 @@ private struct LookTile: View {
     let option: GlassLook
     /// A binding, not a flag: a Form row kept its first value otherwise.
     @Binding var look: GlassLook
+    let opacity: Double
 
     private var selected: Bool {
         look == option
@@ -292,7 +342,7 @@ private struct LookTile: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
-                    option.tint
+                    GlassTint(look: option, opacity: opacity)
                 }
                 .frame(width: 100, height: 64)
                 .clipShape(RoundedRectangle(cornerRadius: 10))

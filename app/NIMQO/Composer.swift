@@ -56,6 +56,13 @@ struct Composer: View {
                     .lineLimit(1 ... 6)
                     .focused($focused)
                     .onSubmit(submit)
+                    // Shift-Return starts a new line where the cursor is, as
+                    // Option-Return already does; Return alone sends.
+                    .onKeyPress(.return, phases: .down) { press in
+                        guard press.modifiers.contains(.shift) else { return .ignored }
+                        NSApp.sendAction(#selector(NSText.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+                        return .handled
+                    }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .glassSurface(in: .rect(cornerRadius: 18))
