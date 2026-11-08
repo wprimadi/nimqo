@@ -162,7 +162,7 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
 @Observable
 final class RemoteVideo {
     @ObservationIgnored let layer = AVSampleBufferDisplayLayer()
-    /// Quarter turns clockwise to show the picture upright.
+    /// Quarter turns the picture needs, counterclockwise, to stand upright.
     private(set) var turns = 0
     private(set) var hasPicture = false
     @ObservationIgnored private var format: CMVideoFormatDescription?

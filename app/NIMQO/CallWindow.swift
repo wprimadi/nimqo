@@ -300,7 +300,8 @@ private struct RemotePicture: View {
             LayerView(layer: remote.layer)
                 .frame(width: sideways ? geometry.size.height : geometry.size.width,
                        height: sideways ? geometry.size.width : geometry.size.height)
-                .rotationEffect(.degrees(Double(remote.turns) * 90))
+                // Counterclockwise: turning clockwise showed a portrait phone upside down.
+                .rotationEffect(.degrees(Double(remote.turns) * -90))
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .opacity(remote.hasPicture ? 1 : 0)
         }
@@ -309,12 +310,39 @@ private struct RemotePicture: View {
 }
 
 /// Keeps a ringing call above other apps' windows; draggable by its
-/// background throughout.
+/// background throughout; pulled back on screen when it grows for video.
 private struct FloatingWindow: NSViewRepresentable {
     let floating: Bool
 
     func makeNSView(context _: Context) -> NSView {
-        NSView()
+        KeepOnScreen()
+    }
+
+    /// A window grows to the right and down; near the screen's edge that
+    /// pushes half of it off, so it slides back in after every resize.
+    private final class KeepOnScreen: NSView {
+        private var observer: NSObjectProtocol?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            let center = NotificationCenter.default
+            observer.map(center.removeObserver)
+            guard let window else { return observer = nil }
+            let resized = NSWindow.didResizeNotification
+            observer = center.addObserver(forName: resized, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.slideIn() }
+            }
+        }
+
+        private func slideIn() {
+            guard let window, let visible = window.screen?.visibleFrame else { return }
+            var origin = window.frame.origin
+            origin.x = max(visible.minX, min(origin.x, visible.maxX - window.frame.width))
+            origin.y = max(visible.minY, min(origin.y, visible.maxY - window.frame.height))
+            if origin != window.frame.origin {
+                window.setFrameOrigin(origin)
+            }
+        }
     }
 
     func updateNSView(_ view: NSView, context _: Context) {
