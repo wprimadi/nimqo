@@ -27,6 +27,22 @@ impl Inbox {
         Ok(())
     }
 
+    /// Everyone in the address book, as stored (by number, or by LID when
+    /// the number is unknown).
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn contact_jids(&self) -> Result<Vec<String>> {
+        #[derive(diesel::QueryableByName)]
+        struct J {
+            #[diesel(sql_type = Text)]
+            jid: String,
+        }
+        let mut conn = self.lock()?;
+        let rows: Vec<J> = diesel::sql_query("SELECT jid FROM contacts").load(&mut *conn)?;
+        Ok(rows.into_iter().map(|r| r.jid).collect())
+    }
+
     /// # Errors
     /// The query fails.
     pub fn contact_count(&self) -> Result<i64> {

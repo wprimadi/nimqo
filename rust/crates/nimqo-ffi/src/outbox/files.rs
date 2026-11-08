@@ -12,7 +12,7 @@ use whatsapp_rust::media::{
 use whatsapp_rust::prelude::wa;
 use whatsapp_rust::wacore::download::MediaType;
 
-use super::{MAX_CHARS, MAX_QUEUED, Sender};
+use super::{MAX_CHARS, Sender};
 use crate::CoreError;
 
 /// What WhatsApp itself accepts for photos.
@@ -47,7 +47,7 @@ pub struct OutgoingFile {
     pub duration_secs: Option<u32>,
 }
 
-pub(super) fn check_file(file: &OutgoingFile, queued: usize) -> Result<(), &'static str> {
+pub(super) fn check_file(file: &OutgoingFile) -> Result<(), &'static str> {
     if file.bytes.is_empty() {
         return Err("The file is empty.");
     }
@@ -82,15 +82,12 @@ pub(super) fn check_file(file: &OutgoingFile, queued: usize) -> Result<(), &'sta
         .as_deref()
         .is_some_and(|c| c.chars().count() > MAX_CHARS)
     {
-        return Err("The caption is longer than 1000 characters.");
-    }
-    if queued >= MAX_QUEUED {
-        return Err("Too many messages waiting to send. Try again when they have gone out.");
+        return Err("The caption is too long.");
     }
     Ok(())
 }
 
-fn storage(e: impl std::fmt::Display) -> CoreError {
+pub(super) fn storage(e: impl std::fmt::Display) -> CoreError {
     CoreError::Storage {
         detail: format!("{e:#}"),
     }
@@ -103,13 +100,8 @@ impl Sender {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
-        let _queueing = self
-            .queueing
-            .lock()
-            .map_err(|_| refused("internal lock poisoned"))?;
-        let queued = self.inbox.pending().map_err(storage)?.len();
-        self.may_send(chat_id)?;
-        check_file(file, queued).map_err(refused)?;
+        Self::may_send(chat_id)?;
+        check_file(file).map_err(refused)?;
         let caption = file
             .caption
             .as_deref()
@@ -256,22 +248,21 @@ mod tests {
 
     #[test]
     fn videos_are_mp4_and_audio_has_no_caption() {
-        assert!(check_file(&of(FileKind::Video, 10, "video/mp4"), 0).is_ok());
-        assert!(check_file(&of(FileKind::Video, 10, "video/quicktime"), 0).is_err());
-        assert!(check_file(&of(FileKind::Audio, 10, "audio/mpeg"), 0).is_ok());
-        assert!(check_file(&of(FileKind::Audio, MAX_PHOTO_BYTES + 1, "audio/mpeg"), 0).is_err());
+        assert!(check_file(&of(FileKind::Video, 10, "video/mp4")).is_ok());
+        assert!(check_file(&of(FileKind::Video, 10, "video/quicktime")).is_err());
+        assert!(check_file(&of(FileKind::Audio, 10, "audio/mpeg")).is_ok());
+        assert!(check_file(&of(FileKind::Audio, MAX_PHOTO_BYTES + 1, "audio/mpeg")).is_err());
         let mut captioned = of(FileKind::Audio, 10, "audio/mpeg");
         captioned.caption = Some("hi".into());
-        assert!(check_file(&captioned, 0).is_err());
+        assert!(check_file(&captioned).is_err());
     }
 
     #[test]
     fn files_stay_within_limits() {
-        assert!(check_file(&file(true, 10, "image/jpeg"), 0).is_ok());
-        assert!(check_file(&file(false, 10, "application/pdf"), 0).is_ok());
-        assert!(check_file(&file(true, 0, "image/jpeg"), 0).is_err());
-        assert!(check_file(&file(true, MAX_PHOTO_BYTES + 1, "image/jpeg"), 0).is_err());
-        assert!(check_file(&file(true, 10, "image/png"), 0).is_err());
-        assert!(check_file(&file(false, 10, "x"), MAX_QUEUED).is_err());
+        assert!(check_file(&file(true, 10, "image/jpeg")).is_ok());
+        assert!(check_file(&file(false, 10, "application/pdf")).is_ok());
+        assert!(check_file(&file(true, 0, "image/jpeg")).is_err());
+        assert!(check_file(&file(true, MAX_PHOTO_BYTES + 1, "image/jpeg")).is_err());
+        assert!(check_file(&file(true, 10, "image/png")).is_err());
     }
 }

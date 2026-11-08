@@ -36,8 +36,6 @@ extension CoreModel {
 
     static func message(for error: Error) -> String {
         switch error as? CoreError {
-        case .InvalidPeer:
-            "NIMQO_TEST_PEER is not an international phone number."
         case .InvalidPhoneNumber:
             "Enter the number in international format, for example +62 812 3456 7890."
         case .AlreadyRunning:

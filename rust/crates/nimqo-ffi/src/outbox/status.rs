@@ -1,6 +1,6 @@
-//! Posting own status updates. During development the update is encrypted
-//! for the test number only (and the account's own devices): nobody else
-//! can see it, whatever the phone's status privacy says.
+//! Posting own status updates, to the audience the phone's status privacy
+//! names (My contacts, My contacts except…, Only share with…). When that is
+//! not known, or cannot be applied exactly, nothing is posted.
 
 use whatsapp_rust::media::{ImageOptions, image_message};
 use whatsapp_rust::prelude::wa;
@@ -8,8 +8,12 @@ use whatsapp_rust::prelude::wa::message::extended_text_message::FontType;
 use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::{MessageId, StatusPrivacySetting, StatusSendOptions, UploadOptions};
 
+use whatsapp_rust::prelude::wa::sync_action_value::status_privacy_action::StatusDistributionMode as Mode;
+
+use whatsapp_rust::Jid;
+
 use super::Sender;
-use super::files::{FileKind, OutgoingFile, check_file};
+use super::files::{FileKind, OutgoingFile, check_file, storage};
 use crate::CoreError;
 
 /// What the phone allows in a text status.
@@ -43,14 +47,82 @@ fn check_status(text: &str, photo: Option<&OutgoingFile>) -> Result<(), &'static
     }
     match photo {
         Some(p) if p.kind != FileKind::Photo => Err("Only photos can be posted as a status here."),
-        Some(p) => check_file(p, 0),
+        Some(p) => check_file(p),
         None if text.trim().is_empty() => Err("The status is empty."),
         None => Ok(()),
     }
 }
 
+/// The contacts minus everyone hidden (each with all their known
+/// addresses). None when a hidden person matches no contact under any
+/// known address: they may be a contact stored under the other one, so
+/// leaving them out can't be made sure of.
+fn contacts_except(contacts: Vec<String>, hidden: &[Vec<String>]) -> Option<Vec<String>> {
+    if hidden
+        .iter()
+        .any(|aliases| aliases.len() == 1 && !contacts.contains(&aliases[0]))
+    {
+        return None;
+    }
+    Some(
+        contacts
+            .into_iter()
+            .filter(|c| !hidden.iter().flatten().any(|h| h == c))
+            .collect(),
+    )
+}
+
 impl Sender {
-    /// Posts a status update seen only by the test number, and keeps it
+    /// Who may see a new status, per the phone's status privacy.
+    fn audience(&self) -> Result<(StatusPrivacySetting, Vec<Jid>), CoreError> {
+        let refused = |reason: &str| CoreError::SendRefused {
+            reason: reason.to_owned(),
+        };
+        let Some(a) = self.client.status().audience() else {
+            return Err(refused(
+                "NIMQO doesn't know your status privacy yet. Open Settings > Privacy > Status on your phone once.",
+            ));
+        };
+        let mode = a.mode.or_else(|| a.modes.first().copied());
+        let is = |m: Mode| mode == Some(m.into());
+        let (setting, jids) = if is(Mode::CONTACTS) {
+            (
+                StatusPrivacySetting::Contacts,
+                self.inbox.contact_jids().map_err(storage)?,
+            )
+        } else if is(Mode::DENY_LIST) {
+            let contacts = self.inbox.contact_jids().map_err(storage)?;
+            let mut hidden = Vec::new();
+            for jid in &a.user_jid {
+                hidden.push(self.inbox.aliases(jid).map_err(storage)?);
+            }
+            let allowed = contacts_except(contacts, &hidden).ok_or_else(|| {
+                refused("Someone you hide your status from can't be matched here yet, so nothing was posted.")
+            })?;
+            (StatusPrivacySetting::DenyList, allowed)
+        } else if is(Mode::ALLOW_LIST) {
+            (StatusPrivacySetting::AllowList, a.user_jid.clone())
+        } else if is(Mode::CUSTOM_LIST) {
+            let chosen = a
+                .custom_lists
+                .iter()
+                .filter(|l| l.is_selected == Some(true))
+                .flat_map(|l| l.user_jid.iter().cloned())
+                .collect();
+            (StatusPrivacySetting::AllowList, chosen)
+        } else {
+            return Err(refused(
+                "This status audience (close friends) isn't supported yet.",
+            ));
+        };
+        let jids: Vec<Jid> = jids.iter().filter_map(|j| j.parse().ok()).collect();
+        if jids.is_empty() {
+            return Err(refused("Nobody is in your status audience."));
+        }
+        Ok((setting, jids))
+    }
+
+    /// Posts a status update to the phone's status audience, and keeps it
     /// under My Status.
     pub async fn post_status(
         &self,
@@ -93,15 +165,14 @@ impl Sender {
                 image_message(upload, options)
             }
         };
+        let (privacy, audience) = self.audience()?;
         let id = self.client.generate_message_id();
         let options = StatusSendOptions::default()
-            .with_privacy(StatusPrivacySetting::AllowList)
+            .with_privacy(privacy)
             .with_message_id(MessageId::try_from(id.to_string()).map_err(|_| refused("bad id"))?);
-        self.pace().await;
-        // The recipient list is the whole audience: the test number only.
         self.client
             .status()
-            .send_raw(message.clone(), std::slice::from_ref(&self.peer), options)
+            .send_raw(message.clone(), &audience, options)
             .await
             .map_err(|e| {
                 refused(&format!(
@@ -142,6 +213,21 @@ mod tests {
             kind,
             duration_secs: None,
         }
+    }
+
+    #[test]
+    fn hidden_people_never_get_a_status() {
+        let c = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let contacts = c(&["1@s.whatsapp.net", "2@s.whatsapp.net", "3@lid"]);
+        assert_eq!(
+            contacts_except(
+                contacts.clone(),
+                &[c(&["9@lid", "2@s.whatsapp.net"]), c(&["3@lid"])]
+            ),
+            Some(c(&["1@s.whatsapp.net"]))
+        );
+        // Not matchable: could be "1" under its LID.
+        assert_eq!(contacts_except(contacts, &[c(&["8@lid"])]), None);
     }
 
     #[test]

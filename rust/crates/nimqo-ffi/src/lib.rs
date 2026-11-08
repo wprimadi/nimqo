@@ -95,8 +95,6 @@ pub trait CoreListener: Send + Sync {
 /// reports; it never contains message content.
 #[derive(Debug, PartialEq, Eq, uniffi::Error)]
 pub enum CoreError {
-    /// The configured test number is not an international number.
-    InvalidPeer { detail: String },
     /// The number entered for pairing is not an international number.
     InvalidPhoneNumber,
     /// Another NIMQO process (app or CLI) has the session open.
@@ -113,7 +111,6 @@ pub enum CoreError {
 impl std::fmt::Display for CoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (kind, detail) = match self {
-            Self::InvalidPeer { detail } => ("invalid test number", detail.as_str()),
             Self::InvalidPhoneNumber => (
                 "invalid phone number",
                 "use the international format, e.g. +62 812 3456 7890",
@@ -190,10 +187,10 @@ impl Core {
     /// task is running, so call it off the main thread.
     ///
     /// # Errors
-    /// The peer number is invalid, another process holds the session, or the
-    /// stores or client cannot start.
+    /// Another process holds the session, or the stores or client cannot
+    /// start.
     #[uniffi::constructor]
-    pub fn start(test_peer: &str, listener: Arc<dyn CoreListener>) -> Result<Arc<Self>, CoreError> {
+    pub fn start(listener: Arc<dyn CoreListener>) -> Result<Arc<Self>, CoreError> {
         init_logging();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -207,11 +204,7 @@ impl Core {
             listener,
         });
         let pair_phone = Arc::new(Mutex::new(None));
-        let session = runtime.block_on(connect(
-            test_peer,
-            Arc::clone(&machine),
-            Arc::clone(&pair_phone),
-        ))?;
+        let session = runtime.block_on(connect(Arc::clone(&machine), Arc::clone(&pair_phone)))?;
         runtime.spawn(purge_expired(
             session.inbox.clone(),
             Arc::clone(&session.attachments),
@@ -321,7 +314,7 @@ impl Core {
     /// or group already stored here.
     #[must_use]
     pub fn can_send(&self, chat_id: &str) -> bool {
-        self.sender.may_send(chat_id).is_ok()
+        outbox::Sender::may_send(chat_id).is_ok()
     }
 
     /// The picture of message `seq`: the full image once downloaded, else
@@ -347,7 +340,7 @@ impl Core {
         let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
         // Asking for old media again reaches the sender's phone: only in a
         // person's or group's chat, not a channel.
-        let reupload_chat = if self.sender.may_send(&chat_id).is_ok() {
+        let reupload_chat = if outbox::Sender::may_send(&chat_id).is_ok() {
             chat_id.clone()
         } else {
             String::new()
@@ -584,8 +577,7 @@ impl Core {
     }
 
     /// Marks status update `seq` viewed here. With `tell_poster` a view
-    /// receipt goes to the poster, during development only when that is
-    /// the test number; everyone else never learns it was seen.
+    /// receipt goes to the poster; without it nobody learns it was seen.
     ///
     /// # Errors
     /// `Storage` if the view cannot be recorded.
@@ -601,12 +593,10 @@ impl Core {
         if !tell_poster {
             return Ok(());
         }
-        if viewed.sender == self.sender.peer_chat() {
+        if let Ok(poster) = viewed.sender.parse::<Jid>() {
             let sender = Arc::clone(&self.sender);
             self.runtime
-                .spawn(async move { sender.send_status_receipt(viewed.id).await });
-        } else {
-            log::info!("status view receipt held back: only the test number is told");
+                .spawn(async move { sender.send_status_receipt(poster, viewed.id).await });
         }
         Ok(())
     }
@@ -893,11 +883,9 @@ async fn open_stores() -> Result<stores::Stores, CoreError> {
 }
 
 async fn connect(
-    test_peer: &str,
     machine: Arc<Machine>,
     pair_phone: Arc<Mutex<Option<String>>>,
 ) -> Result<Session, CoreError> {
-    let peer = Peer::parse(test_peer).map_err(err(|detail| CoreError::InvalidPeer { detail }))?;
     let mut stores = open_stores().await?;
     let listener = Arc::clone(&machine.listener);
     stores
@@ -969,7 +957,6 @@ async fn connect(
     let sender = Arc::new(outbox::Sender::new(
         inbox.clone(),
         Arc::clone(&client),
-        peer.jid(),
         sender_listener,
         Arc::clone(&attachments),
         Box::new(move || sender_machine.current() == ConnectionState::Connected),
@@ -1255,15 +1242,6 @@ impl log::Log for NimqoOnly {
 mod tests {
     use super::*;
 
-    struct Silent;
-    impl CoreListener for Silent {
-        fn on_state(&self, _: ConnectionState) {}
-        fn on_qr(&self, _: String, _: u64) {}
-        fn on_pair_code(&self, _: String, _: u64) {}
-        fn on_pair_code_error(&self, _: bool, _: Option<u64>) {}
-        fn on_chats_changed(&self, _: Vec<String>) {}
-    }
-
     #[test]
     fn only_nimqo_targets_reach_the_unified_log() {
         use log::Log;
@@ -1276,11 +1254,5 @@ mod tests {
         };
         assert!(logger.enabled(&meta("nimqo_ffi")));
         assert!(!logger.enabled(&meta("whatsapp_rust::client")));
-    }
-
-    #[test]
-    fn invalid_peer_fails_before_touching_storage() {
-        let e = Core::start("not a number", Arc::new(Silent)).err().unwrap();
-        assert!(matches!(e, CoreError::InvalidPeer { .. }), "{e}");
     }
 }

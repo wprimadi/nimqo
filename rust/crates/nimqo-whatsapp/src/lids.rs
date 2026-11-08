@@ -29,6 +29,26 @@ impl Inbox {
         Ok(())
     }
 
+    /// `jid` and the other address it is known by (number <-> LID).
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn aliases(&self, jid: &str) -> Result<Vec<String>> {
+        #[derive(diesel::QueryableByName)]
+        struct A {
+            #[diesel(sql_type = Text)]
+            jid: String,
+        }
+        let mut conn = self.lock()?;
+        let rows: Vec<A> = diesel::sql_query(
+            "SELECT ?1 AS jid UNION SELECT pn FROM lid_map WHERE lid = ?1
+             UNION SELECT lid FROM lid_map WHERE pn = ?1",
+        )
+        .bind::<Text, _>(jid)
+        .load(&mut *conn)?;
+        Ok(rows.into_iter().map(|a| a.jid).collect())
+    }
+
     fn known_pn(&self, lid: &str) -> Result<Option<String>> {
         #[derive(diesel::QueryableByName)]
         struct P {

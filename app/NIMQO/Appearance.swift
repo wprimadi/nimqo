@@ -244,8 +244,7 @@ struct SettingsView: View {
             } header: {
                 Text("Status")
             } footer: {
-                Text("When off, you can watch status updates without the poster seeing you in their viewers. " +
-                    "During development only the test number is ever told.")
+                Text("When off, you can watch status updates without the poster seeing you in their viewers.")
                     .foregroundStyle(.secondary)
             }
             Section {

@@ -1,6 +1,6 @@
-//! Sending (plan 10.5). Messages, reactions, mutes, and read receipts go
-//! only to a person or group already stored here; statuses, channels, and
-//! broadcast lists are refused before anything reaches the store.
+//! Sending (plan 10.5): messages, reactions, mutes, and read receipts to
+//! any person or group, as WhatsApp itself allows. Statuses, channels, and
+//! broadcast lists are not chats and are refused.
 //!
 //! A successful `send` only means the stanza was written to the socket; on a
 //! dead connection that succeeds and the message is lost. So a message stays
@@ -8,13 +8,11 @@
 //! id) when the connection comes back.
 //!
 //! Messages are queued at once (the UI shows them as sending) and sent one
-//! at a time, at least `MIN_INTERVAL` apart. The anti-burst guard is a cap
-//! on unsent messages rather than a refusal of fast typing.
+//! at a time, in order.
 
 use std::collections::HashSet;
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 use nimqo_whatsapp::attachments::Attachments;
 use nimqo_whatsapp::inbox::Inbox;
@@ -33,11 +31,8 @@ mod status;
 pub use files::OutgoingFile;
 pub use status::StatusFont;
 
-const MAX_CHARS: usize = 1000;
-/// Spacing between sends (the account is real; no blasting).
-const MIN_INTERVAL: Duration = Duration::from_secs(1);
-/// Unsent messages allowed at once; stops runaway repeats, not typing.
-const MAX_QUEUED: usize = 10;
+/// WhatsApp's own limit for a text message.
+const MAX_CHARS: usize = 65_536;
 
 /// A person (by number or LID) or a group; never a status, channel, or
 /// broadcast list.
@@ -49,17 +44,14 @@ fn chat_jid(chat_id: &str) -> Option<Jid> {
         .flatten()
 }
 
-/// Text and queue cap. Returns the trimmed text to send.
-fn check(text: &str, queued: usize) -> Result<&str, &'static str> {
+/// Returns the trimmed text to send.
+fn check(text: &str) -> Result<&str, &'static str> {
     let text = text.trim();
     if text.is_empty() {
         return Err("The message is empty.");
     }
     if text.chars().count() > MAX_CHARS {
-        return Err("The message is longer than 1000 characters.");
-    }
-    if queued >= MAX_QUEUED {
-        return Err("Too many messages waiting to send. Try again when they have gone out.");
+        return Err("The message is too long.");
     }
     Ok(text)
 }
@@ -67,16 +59,11 @@ fn check(text: &str, queued: usize) -> Result<&str, &'static str> {
 pub struct Sender {
     pub inbox: Inbox,
     pub client: Arc<Client>,
-    pub peer: Jid,
     pub listener: Arc<dyn CoreListener>,
     attachments: Arc<Attachments>,
     /// True while the connection is up; sends wait for it otherwise, so a
     /// message written offline does not burn its retries.
     online: Box<dyn Fn() -> bool + Send + Sync>,
-    /// When the last message was written; paces the next one.
-    last_send: Mutex<Option<Instant>>,
-    /// Makes the queue-cap check and the insert one step.
-    queueing: Mutex<()>,
     /// Written on this connection, waiting for the server's ack.
     in_flight: Mutex<HashSet<String>>,
     /// One flush at a time, so a message is never sent twice concurrently.
@@ -87,7 +74,6 @@ impl Sender {
     pub fn new(
         inbox: Inbox,
         client: Arc<Client>,
-        peer: Jid,
         listener: Arc<dyn CoreListener>,
         attachments: Arc<Attachments>,
         online: Box<dyn Fn() -> bool + Send + Sync>,
@@ -95,35 +81,20 @@ impl Sender {
         Self {
             inbox,
             client,
-            peer,
             listener,
             attachments,
             online,
-            last_send: Mutex::new(None),
-            queueing: Mutex::new(()),
             in_flight: Mutex::new(HashSet::new()),
             flushing: tokio::sync::Mutex::new(()),
         }
     }
 
-    pub fn peer_chat(&self) -> String {
-        self.peer.to_non_ad_string()
-    }
-
-    /// The chat's address, if NIMQO may act in it: a person or group that
-    /// is already stored here.
-    pub fn may_send(&self, chat_id: &str) -> Result<Jid, CoreError> {
-        let refused = || CoreError::SendRefused {
-            reason: "NIMQO only sends to people and groups already in your chats.".into(),
-        };
-        let jid = chat_jid(chat_id).ok_or_else(refused)?;
-        let known = self
-            .inbox
-            .knows_chat(chat_id)
-            .map_err(|e| CoreError::Storage {
-                detail: format!("{e:#}"),
-            })?;
-        known.then_some(jid).ok_or_else(refused)
+    /// The chat's address, if it is one a message can go to: a person or
+    /// a group.
+    pub fn may_send(chat_id: &str) -> Result<Jid, CoreError> {
+        chat_jid(chat_id).ok_or_else(|| CoreError::SendRefused {
+            reason: "Messages can go to people and groups only.".into(),
+        })
     }
 
     /// Validates and stores the message as pending. The caller then flushes.
@@ -136,19 +107,8 @@ impl Sender {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
-        let _queueing = self
-            .queueing
-            .lock()
-            .map_err(|_| refused("internal lock poisoned"))?;
-        let queued = self
-            .inbox
-            .pending()
-            .map_err(|e| CoreError::Storage {
-                detail: format!("{e:#}"),
-            })?
-            .len();
-        self.may_send(chat_id)?;
-        let text = check(text, queued).map_err(refused)?;
+        Self::may_send(chat_id)?;
+        let text = check(text).map_err(refused)?;
         let quote = match reply_to {
             Some(seq) => Some(
                 self.inbox
@@ -196,10 +156,7 @@ impl Sender {
                 continue; // written already; waiting for the ack
             }
             let outcome = match chat_jid(&p.chat) {
-                Some(to) => {
-                    self.pace().await;
-                    self.send(&p, &to).await
-                }
+                Some(to) => self.send(&p, &to).await,
                 // Defense in depth: never a status or channel, whatever is stored.
                 None => Err("not a person or group".to_owned()),
             };
@@ -272,22 +229,6 @@ impl Sender {
             sender,
             &quoted.message(),
         ))
-    }
-
-    /// Waits until `MIN_INTERVAL` has passed since the previous send, then
-    /// claims the slot. Only called under the flush lock.
-    async fn pace(&self) {
-        let wait = self
-            .last_send
-            .lock()
-            .ok()
-            .and_then(|l| l.and_then(|t| MIN_INTERVAL.checked_sub(t.elapsed())));
-        if let Some(wait) = wait {
-            tokio::time::sleep(wait).await;
-        }
-        if let Ok(mut l) = self.last_send.lock() {
-            *l = Some(Instant::now());
-        }
     }
 
     fn in_flight(&self) -> Option<std::sync::MutexGuard<'_, HashSet<String>>> {
@@ -380,7 +321,7 @@ impl Sender {
 
     /// Mutes or unmutes `chat` on every device of the account.
     pub async fn set_muted(&self, chat: &str, muted: bool) -> Result<(), CoreError> {
-        let jid = self.may_send(chat)?;
+        let jid = Self::may_send(chat)?;
         let actions = self.client.chat_actions();
         let done = if muted {
             actions.mute_chat(&jid).await
@@ -410,7 +351,7 @@ impl Sender {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
-        let jid = self.may_send(chat)?;
+        let jid = Self::may_send(chat)?;
         // One emoji (a flag or a family is several characters, so count
         // bytes generously); anything longer is not a reaction.
         if emoji.len() > 32 || emoji.chars().any(char::is_whitespace) {
@@ -496,7 +437,9 @@ impl Sender {
     /// sender. Only where sending is allowed.
     /// ponytail: lost when offline; queue them like messages if that matters.
     pub async fn send_read_receipts(&self, chat: &str, read: Vec<(String, String)>) {
-        let Ok(jid) = self.may_send(chat) else { return };
+        let Ok(jid) = Self::may_send(chat) else {
+            return;
+        };
         let group = chat.ends_with("@g.us");
         let mut by_sender = std::collections::BTreeMap::<&str, Vec<&str>>::new();
         for (sender, id) in &read {
@@ -517,16 +460,15 @@ impl Sender {
         }
     }
 
-    /// Tells the test number its status update `id` was viewed; nobody
-    /// else is ever told (the caller checks the poster).
-    pub async fn send_status_receipt(&self, id: String) {
+    /// Tells `poster` their status update `id` was viewed.
+    pub async fn send_status_receipt(&self, poster: Jid, id: String) {
         let status: Jid = match nimqo_whatsapp::inbox::STATUS.parse() {
             Ok(j) => j,
             Err(_) => return,
         };
         if let Err(e) = self
             .client
-            .mark_as_read(&status, Some(&self.peer), &[id.as_str()])
+            .mark_as_read(&status, Some(&poster), &[id.as_str()])
             .await
         {
             log::warn!("status view receipt not sent: {}", e.root_cause());
@@ -589,10 +531,8 @@ mod tests {
         assert!(chat_jid("status@broadcast").is_none());
         assert!(chat_jid("1203@newsletter").is_none());
         assert!(chat_jid("123@broadcast").is_none());
-        assert_eq!(check("  hi ", 0), Ok("hi"));
-        assert_eq!(check("hi", MAX_QUEUED - 1), Ok("hi"));
-        assert!(check("   ", 0).is_err());
-        assert!(check(&"x".repeat(MAX_CHARS + 1), 0).is_err());
-        assert!(check("hi", MAX_QUEUED).is_err(), "queue cap");
+        assert_eq!(check("  hi "), Ok("hi"));
+        assert!(check("   ").is_err());
+        assert!(check(&"x".repeat(MAX_CHARS + 1)).is_err());
     }
 }

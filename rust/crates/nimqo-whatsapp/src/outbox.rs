@@ -214,25 +214,6 @@ impl Inbox {
             == 1)
     }
 
-    /// Whether `chat` has anything stored: messages go only to chats that
-    /// are already here, never to a number typed in.
-    ///
-    /// # Errors
-    /// The query fails.
-    pub fn knows_chat(&self, chat: &str) -> Result<bool> {
-        #[derive(diesel::QueryableByName)]
-        struct N {
-            #[diesel(sql_type = diesel::sql_types::Bool)]
-            known: bool,
-        }
-        let mut conn = self.lock()?;
-        let n: N =
-            diesel::sql_query("SELECT EXISTS (SELECT 1 FROM messages WHERE chat = ?) AS known")
-                .bind::<Text, _>(chat)
-                .get_result(&mut *conn)?;
-        Ok(n.known)
-    }
-
     /// Records a failed send; after [`MAX_ATTEMPTS`] the message is failed.
     /// Returns its chat.
     ///

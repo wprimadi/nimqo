@@ -109,15 +109,10 @@ final class CoreModel {
     func start() {
         // Unit tests host the app; never connect a real account from a test.
         guard core == nil, hasAcceptedDisclosure, NSClassFromString("XCTestCase") == nil else { return }
-        // Development talks to one allowlisted number only, given at launch.
-        guard let peer = ProcessInfo.processInfo.environment["NIMQO_TEST_PEER"] else {
-            failure = "Set NIMQO_TEST_PEER before launching."
-            return
-        }
         let listener = Listener(model: self)
         Task.detached {
             do {
-                let core = try Core.start(testPeer: peer, listener: listener)
+                let core = try Core.start(listener: listener)
                 await MainActor.run { self.attach(core) }
             } catch {
                 await MainActor.run { self.fail(error) }

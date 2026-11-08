@@ -25,13 +25,14 @@ To try the Phase 0 app (macOS 14+, Rust, Xcode):
 
 ```sh
 brew install xcodegen
-NIMQO_TEST_PEER=+<number> ./scripts/run-app.sh
+./scripts/run-app.sh
 ```
 
 `./scripts/build-app.sh` only builds; `./scripts/build-app.sh test` also runs
 the tests. The Xcode project is generated from `app/project.yml`.
 
-Only the test number may be stored or messaged. Do not run the app and
+The app works with every chat, like WhatsApp itself; `nimqo-poc` still
+talks only to `NIMQO_TEST_PEER`. Do not run the app and
 `nimqo-poc` at the same time: they share one linked device.
 
 ## Principles

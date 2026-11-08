@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 
 /// Writes a status update the way it will be seen: a phone-shaped card over
 /// a glow of its own colour, words on colour or a photo with a caption, and
-/// one bar of tools under it. During development only the test number can
-/// see what is posted (the core sends it to nobody else).
+/// one bar of tools under it. It goes to the audience set in the phone's
+/// status privacy.
 struct StatusComposer: View {
     let core: Core?
     @State private var text = ""
@@ -206,8 +206,8 @@ struct StatusComposer: View {
     }
 
     private var note: some View {
-        Label(problem ?? "Only the test number can see it during development.",
-              systemImage: problem == nil ? "lock.fill" : "exclamationmark.triangle.fill")
+        Label(problem ?? "Shared with the audience set in WhatsApp's status privacy on your phone.",
+              systemImage: problem == nil ? "person.2.fill" : "exclamationmark.triangle.fill")
             .font(.callout)
             .foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
     }
