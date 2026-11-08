@@ -17,15 +17,15 @@ struct ConversationView: View {
     let sendFile: @MainActor (URL, String?) async -> String?
     /// A message to scroll to and mark (from search); `revealed` clears it.
     var reveal: Int64?
-    var revealed: @MainActor () -> Void = { /* nothing to clear */ }
+    let revealed: @MainActor () -> Void
     /// Sends a failed message (seq) again.
-    var retry: @MainActor (Int64) -> Void = { _ in /* read-only: no sends */ }
+    let retry: @MainActor (Int64) -> Void
     /// Reacts to a message (seq); an empty emoji removes the reaction.
-    var react: @MainActor (Int64, String) -> Void = { _, _ in /* read-only: no reactions */ }
+    let react: @MainActor (Int64, String) -> Void
     /// Scrolls to a message (seq), loading older pages if needed.
-    var show: @MainActor (Int64) -> Void = { _ in /* nowhere to scroll */ }
+    let show: @MainActor (Int64) -> Void
     /// Star, edit, delete, and forward.
-    var commands = MessageCommands()
+    let commands: MessageCommands
     @State private var marked: Int64?
     @State private var pulsing: Int64?
     /// The message the full emoji list is open for.
