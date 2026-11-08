@@ -18,7 +18,8 @@ struct MessageActions {
 }
 
 /// Beside a bubble while the pointer is over its row: React, then a menu
-/// with everything the context menu has. Stays while the reactions are open.
+/// with everything the context menu has. Stays while the reactions are open,
+/// but not for the full emoji list, which may close without telling.
 struct MessageHoverBar: View {
     let actions: MessageActions
     let mine: String?
@@ -43,8 +44,6 @@ struct MessageHoverBar: View {
                             actions.moreReactions()
                         }
                     }
-                    .modifier(EmojiField(active: actions.picking, request: actions.pickRequest,
-                                         pick: react, end: actions.endPicking))
             }
             if !mirrored {
                 more
@@ -55,9 +54,13 @@ struct MessageHoverBar: View {
         .foregroundStyle(.secondary)
         .imageScale(.large)
         // Kept in the layout while hidden, so rows don't shift on hover.
-        .opacity(shown || reacting || actions.picking ? 1 : 0)
-        .allowsHitTesting(shown || reacting || actions.picking)
+        .opacity(shown || reacting ? 1 : 0)
+        .allowsHitTesting(shown || reacting)
         .animation(.easeOut(duration: 0.12), value: shown)
+        // Outside the fade: the hidden field must stay usable while the bar
+        // hides, since macOS never says when the viewer closes unpicked.
+        .modifier(EmojiField(active: actions.picking, request: actions.pickRequest,
+                             pick: actions.react ?? { _ in }, end: actions.endPicking))
         .accessibilityHidden(true)
     }
 
