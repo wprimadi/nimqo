@@ -40,8 +40,6 @@ final class CoreModel {
     nonisolated static let pageSize: UInt32 = 200
     /// A message (seq) of `messages` to scroll to and mark, then cleared.
     var revealing: Int64?
-    /// The only chat with a composer during development.
-    private(set) var sendableChatId: String?
     var selectedChat: ChatSummary.ID? {
         didSet { loadMessages() }
     }
@@ -313,7 +311,6 @@ final class CoreModel {
 
     private func attach(_ core: Core) {
         self.core = core
-        sendableChatId = core.sendableChatId()
         reloadChats()
         observers.start(
             networkChanged: { [weak self] available in self?.networkReported(available) },
@@ -377,4 +374,11 @@ extension CoreModel {
 
     /// How long the phone gets to answer a history request.
     static let phoneHistoryWait = Duration.seconds(10)
+}
+
+extension CoreModel {
+    /// A person or group already here: it gets a composer, reactions, mute.
+    func canSend(_ chatId: String) -> Bool {
+        core?.canSend(chatId: chatId) ?? false
+    }
 }

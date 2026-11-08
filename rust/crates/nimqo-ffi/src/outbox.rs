@@ -1,5 +1,6 @@
-//! Sending (plan 10.5). During development only the allowlisted test chat
-//! may be sent to; everything else is refused before it reaches the store.
+//! Sending (plan 10.5). Messages, reactions, mutes, and read receipts go
+//! only to a person or group already stored here; statuses, channels, and
+//! broadcast lists are refused before anything reaches the store.
 //!
 //! A successful `send` only means the stanza was written to the socket; on a
 //! dead connection that succeeds and the message is lost. So a message stays
@@ -38,16 +39,18 @@ const MIN_INTERVAL: Duration = Duration::from_secs(1);
 /// Unsent messages allowed at once; stops runaway repeats, not typing.
 const MAX_QUEUED: usize = 10;
 
-/// The allowlist and queue cap. Returns the trimmed text to send.
-fn check<'a>(
-    chat_id: &str,
-    peer_chat: &str,
-    text: &'a str,
-    queued: usize,
-) -> Result<&'a str, &'static str> {
-    if chat_id != peer_chat {
-        return Err("During development NIMQO only sends to the test number.");
-    }
+/// A person (by number or LID) or a group; never a status, channel, or
+/// broadcast list.
+fn chat_jid(chat_id: &str) -> Option<Jid> {
+    ["@s.whatsapp.net", "@lid", "@g.us"]
+        .iter()
+        .any(|s| chat_id.ends_with(s))
+        .then(|| chat_id.parse::<Jid>().ok())
+        .flatten()
+}
+
+/// Text and queue cap. Returns the trimmed text to send.
+fn check(text: &str, queued: usize) -> Result<&str, &'static str> {
     let text = text.trim();
     if text.is_empty() {
         return Err("The message is empty.");
@@ -107,6 +110,22 @@ impl Sender {
         self.peer.to_non_ad_string()
     }
 
+    /// The chat's address, if NIMQO may act in it: a person or group that
+    /// is already stored here.
+    pub fn may_send(&self, chat_id: &str) -> Result<Jid, CoreError> {
+        let refused = || CoreError::SendRefused {
+            reason: "NIMQO only sends to people and groups already in your chats.".into(),
+        };
+        let jid = chat_jid(chat_id).ok_or_else(refused)?;
+        let known = self
+            .inbox
+            .knows_chat(chat_id)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?;
+        known.then_some(jid).ok_or_else(refused)
+    }
+
     /// Validates and stores the message as pending. The caller then flushes.
     pub fn enqueue(
         &self,
@@ -128,7 +147,8 @@ impl Sender {
                 detail: format!("{e:#}"),
             })?
             .len();
-        let text = check(chat_id, &self.peer_chat(), text, queued).map_err(refused)?;
+        self.may_send(chat_id)?;
+        let text = check(text, queued).map_err(refused)?;
         let quote = match reply_to {
             Some(seq) => Some(
                 self.inbox
@@ -170,18 +190,18 @@ impl Sender {
             Ok(p) => p,
             Err(e) => return log::warn!("outbox unreadable: {e:#}"),
         };
-        let peer_chat = self.peer_chat();
         let mut changed = Vec::new();
         for p in pending {
             if self.in_flight().is_some_and(|f| f.contains(&p.id)) {
                 continue; // written already; waiting for the ack
             }
-            let outcome = if p.chat == peer_chat {
-                self.pace().await;
-                self.send(&p).await
-            } else {
-                // Defense in depth: never send to anyone else, whatever is stored.
-                Err("not the test chat".to_owned())
+            let outcome = match chat_jid(&p.chat) {
+                Some(to) => {
+                    self.pace().await;
+                    self.send(&p, &to).await
+                }
+                // Defense in depth: never a status or channel, whatever is stored.
+                None => Err("not a person or group".to_owned()),
             };
             match outcome {
                 Ok(()) => {
@@ -204,7 +224,7 @@ impl Sender {
         }
     }
 
-    async fn send(&self, p: &Pending) -> Result<(), String> {
+    async fn send(&self, p: &Pending, to: &Jid) -> Result<(), String> {
         let id = MessageId::try_from(p.id.clone()).map_err(|e| format!("{e:?}"))?;
         let mut options = SendOptions::default().with_message_id(id);
         // A chat with disappearing messages on: ours disappear too.
@@ -220,7 +240,7 @@ impl Sender {
         } else {
             self.file_message(p).await?
         };
-        let request = SendRequest::new(&self.peer, message.clone()).with_options(options);
+        let request = SendRequest::new(to, message.clone()).with_options(options);
         // Only the error kind is logged; it can carry the recipient.
         self.client
             .send(request)
@@ -293,9 +313,7 @@ impl Sender {
             None => self.inbox.advance(&ack.id, Status::Sent),
             Some(code) => {
                 log::warn!("server refused a message: {code}");
-                self.inbox
-                    .attempt_failed(&ack.id)
-                    .map(|()| Some(self.peer_chat()))
+                self.inbox.attempt_failed(&ack.id)
             }
         };
         match result {
@@ -360,20 +378,14 @@ impl Sender {
         }
     }
 
-    /// Mutes or unmutes `chat` on every device of the account. Only the
-    /// test chat while testing on a real account.
-    /// ponytail: lift the limit once mutes are proven harmless.
+    /// Mutes or unmutes `chat` on every device of the account.
     pub async fn set_muted(&self, chat: &str, muted: bool) -> Result<(), CoreError> {
-        if chat != self.peer_chat() {
-            return Err(CoreError::SendRefused {
-                reason: "only the test chat can be muted from here for now".into(),
-            });
-        }
+        let jid = self.may_send(chat)?;
         let actions = self.client.chat_actions();
         let done = if muted {
-            actions.mute_chat(&self.peer).await
+            actions.mute_chat(&jid).await
         } else {
-            actions.unmute_chat(&self.peer).await
+            actions.unmute_chat(&jid).await
         };
         done.map_err(|e| CoreError::SendRefused {
             reason: format!("mute not changed: {e}"),
@@ -393,22 +405,18 @@ impl Sender {
     }
 
     /// Reacts to message `seq` with `emoji`; an empty one removes this
-    /// account's reaction. The test chat only, like sending.
+    /// account's reaction. Only where sending is allowed.
     pub async fn react(&self, chat: &str, seq: i64, emoji: &str) -> Result<(), CoreError> {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
         };
-        if chat != self.peer_chat() {
-            return Err(refused(
-                "During development NIMQO only reacts in the test chat.",
-            ));
-        }
+        let jid = self.may_send(chat)?;
         // One emoji (a flag or a family is several characters, so count
         // bytes generously); anything longer is not a reaction.
         if emoji.len() > 32 || emoji.chars().any(char::is_whitespace) {
             return Err(refused("A reaction is one emoji."));
         }
-        let (id, from_me) = self
+        let (id, from_me, sender) = self
             .inbox
             .message_key(chat, seq)
             .map_err(|e| CoreError::Storage {
@@ -419,8 +427,12 @@ impl Sender {
         key.remote_jid = Some(chat.to_owned());
         key.from_me = Some(from_me);
         key.id = Some(id.clone());
+        // In a group, whose message it is.
+        if !from_me && chat.ends_with("@g.us") {
+            key.participant = Some(sender);
+        }
         self.client
-            .send_reaction_raw(self.peer.clone(), key, emoji)
+            .send_reaction_raw(jid, key, emoji)
             .await
             .map_err(|e| refused(&format!("reaction not sent: {e}")))?;
         let emoji = Some(emoji).filter(|e| !e.is_empty());
@@ -480,12 +492,28 @@ impl Sender {
         }
     }
 
-    /// Read receipts to the test chat only (the caller checks the chat).
+    /// Read receipts for `read` (sender, id) in `chat`; in a group, one per
+    /// sender. Only where sending is allowed.
     /// ponytail: lost when offline; queue them like messages if that matters.
-    pub async fn send_read_receipts(&self, ids: Vec<String>) {
-        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-        if let Err(e) = self.client.mark_as_read(&self.peer, None, &ids).await {
-            log::warn!("read receipts not sent: {}", e.root_cause());
+    pub async fn send_read_receipts(&self, chat: &str, read: Vec<(String, String)>) {
+        let Ok(jid) = self.may_send(chat) else { return };
+        let group = chat.ends_with("@g.us");
+        let mut by_sender = std::collections::BTreeMap::<&str, Vec<&str>>::new();
+        for (sender, id) in &read {
+            by_sender
+                .entry(if group { sender.as_str() } else { "" })
+                .or_default()
+                .push(id.as_str());
+        }
+        for (sender, ids) in by_sender {
+            let participant = sender.parse::<Jid>().ok().filter(|_| group);
+            if let Err(e) = self
+                .client
+                .mark_as_read(&jid, participant.as_ref(), &ids)
+                .await
+            {
+                log::warn!("read receipts not sent: {}", e.root_cause());
+            }
         }
     }
 
@@ -554,14 +582,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_the_test_chat_and_sane_messages_pass() {
-        let peer = "62811@s.whatsapp.net";
-        assert_eq!(check(peer, peer, "  hi ", 0), Ok("hi"));
-        assert_eq!(check(peer, peer, "hi", MAX_QUEUED - 1), Ok("hi"));
-        assert!(check("62999@s.whatsapp.net", peer, "hi", 0).is_err());
-        assert!(check("1-2@g.us", peer, "hi", 0).is_err());
-        assert!(check(peer, peer, "   ", 0).is_err());
-        assert!(check(peer, peer, &"x".repeat(MAX_CHARS + 1), 0).is_err());
-        assert!(check(peer, peer, "hi", MAX_QUEUED).is_err(), "queue cap");
+    fn people_and_groups_only_and_sane_messages() {
+        assert!(chat_jid("62811@s.whatsapp.net").is_some());
+        assert!(chat_jid("1203@g.us").is_some());
+        assert!(chat_jid("178@lid").is_some());
+        assert!(chat_jid("status@broadcast").is_none());
+        assert!(chat_jid("1203@newsletter").is_none());
+        assert!(chat_jid("123@broadcast").is_none());
+        assert_eq!(check("  hi ", 0), Ok("hi"));
+        assert_eq!(check("hi", MAX_QUEUED - 1), Ok("hi"));
+        assert!(check("   ", 0).is_err());
+        assert!(check(&"x".repeat(MAX_CHARS + 1), 0).is_err());
+        assert!(check("hi", MAX_QUEUED).is_err(), "queue cap");
     }
 }

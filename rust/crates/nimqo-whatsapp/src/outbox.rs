@@ -214,22 +214,47 @@ impl Inbox {
             == 1)
     }
 
+    /// Whether `chat` has anything stored: messages go only to chats that
+    /// are already here, never to a number typed in.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn knows_chat(&self, chat: &str) -> Result<bool> {
+        #[derive(diesel::QueryableByName)]
+        struct N {
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            known: bool,
+        }
+        let mut conn = self.lock()?;
+        let n: N =
+            diesel::sql_query("SELECT EXISTS (SELECT 1 FROM messages WHERE chat = ?) AS known")
+                .bind::<Text, _>(chat)
+                .get_result(&mut *conn)?;
+        Ok(n.known)
+    }
+
     /// Records a failed send; after [`MAX_ATTEMPTS`] the message is failed.
+    /// Returns its chat.
     ///
     /// # Errors
     /// The store cannot be written.
-    pub fn attempt_failed(&self, id: &str) -> Result<()> {
+    pub fn attempt_failed(&self, id: &str) -> Result<Option<String>> {
+        #[derive(diesel::QueryableByName)]
+        struct Chat {
+            #[diesel(sql_type = Text)]
+            chat: String,
+        }
         let mut conn = self.lock()?;
-        diesel::sql_query(
+        let rows: Vec<Chat> = diesel::sql_query(
             "UPDATE messages SET attempts = attempts + 1,
                status = CASE WHEN attempts + 1 >= ? THEN 'failed' ELSE status END
-             WHERE sender = ? AND id = ? AND status = 'pending'",
+             WHERE sender = ? AND id = ? AND status = 'pending' RETURNING chat",
         )
         .bind::<BigInt, _>(MAX_ATTEMPTS)
         .bind::<Text, _>(ME)
         .bind::<Text, _>(id)
-        .execute(&mut *conn)?;
-        Ok(())
+        .load(&mut *conn)?;
+        Ok(rows.into_iter().next().map(|r| r.chat))
     }
 
     /// Advances an own message's state; never moves it backwards, so a late

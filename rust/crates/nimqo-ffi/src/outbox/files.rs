@@ -47,15 +47,7 @@ pub struct OutgoingFile {
     pub duration_secs: Option<u32>,
 }
 
-pub(super) fn check_file(
-    chat_id: &str,
-    peer_chat: &str,
-    file: &OutgoingFile,
-    queued: usize,
-) -> Result<(), &'static str> {
-    if chat_id != peer_chat {
-        return Err("During development NIMQO only sends to the test number.");
-    }
+pub(super) fn check_file(file: &OutgoingFile, queued: usize) -> Result<(), &'static str> {
     if file.bytes.is_empty() {
         return Err("The file is empty.");
     }
@@ -116,7 +108,8 @@ impl Sender {
             .lock()
             .map_err(|_| refused("internal lock poisoned"))?;
         let queued = self.inbox.pending().map_err(storage)?.len();
-        check_file(chat_id, &self.peer_chat(), file, queued).map_err(refused)?;
+        self.may_send(chat_id)?;
+        check_file(file, queued).map_err(refused)?;
         let caption = file
             .caption
             .as_deref()
@@ -263,49 +256,22 @@ mod tests {
 
     #[test]
     fn videos_are_mp4_and_audio_has_no_caption() {
-        let peer = "62811@s.whatsapp.net";
-        assert!(check_file(peer, peer, &of(FileKind::Video, 10, "video/mp4"), 0).is_ok());
-        assert!(check_file(peer, peer, &of(FileKind::Video, 10, "video/quicktime"), 0).is_err());
-        assert!(check_file(peer, peer, &of(FileKind::Audio, 10, "audio/mpeg"), 0).is_ok());
-        assert!(
-            check_file(
-                peer,
-                peer,
-                &of(FileKind::Audio, MAX_PHOTO_BYTES + 1, "audio/mpeg"),
-                0
-            )
-            .is_err()
-        );
+        assert!(check_file(&of(FileKind::Video, 10, "video/mp4"), 0).is_ok());
+        assert!(check_file(&of(FileKind::Video, 10, "video/quicktime"), 0).is_err());
+        assert!(check_file(&of(FileKind::Audio, 10, "audio/mpeg"), 0).is_ok());
+        assert!(check_file(&of(FileKind::Audio, MAX_PHOTO_BYTES + 1, "audio/mpeg"), 0).is_err());
         let mut captioned = of(FileKind::Audio, 10, "audio/mpeg");
         captioned.caption = Some("hi".into());
-        assert!(check_file(peer, peer, &captioned, 0).is_err());
+        assert!(check_file(&captioned, 0).is_err());
     }
 
     #[test]
-    fn files_go_to_the_test_chat_only_and_within_limits() {
-        let peer = "62811@s.whatsapp.net";
-        assert!(check_file(peer, peer, &file(true, 10, "image/jpeg"), 0).is_ok());
-        assert!(check_file(peer, peer, &file(false, 10, "application/pdf"), 0).is_ok());
-        assert!(
-            check_file(
-                "other@s.whatsapp.net",
-                peer,
-                &file(true, 10, "image/jpeg"),
-                0
-            )
-            .is_err()
-        );
-        assert!(check_file(peer, peer, &file(true, 0, "image/jpeg"), 0).is_err());
-        assert!(
-            check_file(
-                peer,
-                peer,
-                &file(true, MAX_PHOTO_BYTES + 1, "image/jpeg"),
-                0
-            )
-            .is_err()
-        );
-        assert!(check_file(peer, peer, &file(true, 10, "image/png"), 0).is_err());
-        assert!(check_file(peer, peer, &file(false, 10, "x"), MAX_QUEUED).is_err());
+    fn files_stay_within_limits() {
+        assert!(check_file(&file(true, 10, "image/jpeg"), 0).is_ok());
+        assert!(check_file(&file(false, 10, "application/pdf"), 0).is_ok());
+        assert!(check_file(&file(true, 0, "image/jpeg"), 0).is_err());
+        assert!(check_file(&file(true, MAX_PHOTO_BYTES + 1, "image/jpeg"), 0).is_err());
+        assert!(check_file(&file(true, 10, "image/png"), 0).is_err());
+        assert!(check_file(&file(false, 10, "x"), MAX_QUEUED).is_err());
     }
 }

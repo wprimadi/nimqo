@@ -317,10 +317,11 @@ impl Core {
             .collect())
     }
 
-    /// The one chat the app may send to during development.
+    /// Whether the app may write, react, and mute in `chat_id`: a person
+    /// or group already stored here.
     #[must_use]
-    pub fn sendable_chat_id(&self) -> String {
-        self.sender.peer_chat()
+    pub fn can_send(&self, chat_id: &str) -> bool {
+        self.sender.may_send(chat_id).is_ok()
     }
 
     /// The picture of message `seq`: the full image once downloaded, else
@@ -344,9 +345,13 @@ impl Core {
     /// or gone from WhatsApp's servers); it may be asked for again.
     pub async fn download_media(&self, chat_id: String, seq: i64) -> bool {
         let (store, client) = (Arc::clone(&self.attachments), Arc::clone(&self.client));
-        // Asking for old media again reaches the sender's phone: the test
-        // peer only, as with everything that contacts other people.
-        let reupload_chat = self.sender.peer_chat();
+        // Asking for old media again reaches the sender's phone: only in a
+        // person's or group's chat, not a channel.
+        let reupload_chat = if self.sender.may_send(&chat_id).is_ok() {
+            chat_id.clone()
+        } else {
+            String::new()
+        };
         let done = self
             .runtime
             .spawn(async move { store.download(&client, &chat_id, seq, &reupload_chat).await })
@@ -470,9 +475,6 @@ impl Core {
         if !chat_id.ends_with("@s.whatsapp.net") {
             return;
         }
-        // ponytail: presence of the test chat only, like sending; open it
-        // to all chats once the test phase ends.
-        let follow = chat_id == self.sender.peer_chat();
         let (client, presences, inbox) = (
             Arc::clone(&self.client),
             Arc::clone(&self.presences),
@@ -493,7 +495,7 @@ impl Core {
                     Err(e) => log::info!("about not fetched: {e}"),
                 }
             }
-            if follow && let Err(e) = client.presence().subscribe(jid).await {
+            if let Err(e) = client.presence().subscribe(jid).await {
                 log::info!("presence not followed: {e}");
             }
         });
@@ -573,12 +575,11 @@ impl Core {
         self.sender
             .listener
             .on_chats_changed(vec![chat_id.to_owned()]);
-        if chat_id == self.sender.peer_chat() {
-            let sender = Arc::clone(&self.sender);
-            let ids: Vec<String> = read.into_iter().map(|u| u.id).collect();
-            self.runtime
-                .spawn(async move { sender.send_read_receipts(ids).await });
-        }
+        let sender = Arc::clone(&self.sender);
+        let chat = chat_id.to_owned();
+        let read: Vec<(String, String)> = read.into_iter().map(|u| (u.sender, u.id)).collect();
+        self.runtime
+            .spawn(async move { sender.send_read_receipts(&chat, read).await });
         Ok(())
     }
 

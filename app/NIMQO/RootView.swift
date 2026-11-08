@@ -108,7 +108,7 @@ struct MainView: View {
             loadOlder: { await model.loadOlderMessages() },
             // Bound to this chat: a send still running after
             // switching chats goes where it was started.
-            send: chat.id == model.sendableChatId
+            send: model.canSend(chat.id)
                 ? { await model.send($0, replyTo: $1, to: chat.id) } : nil,
             sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
             reveal: model.revealing,
@@ -192,8 +192,7 @@ struct MainView: View {
             ChatRow(chat: chat, avatars: model.avatars)
                 .listRowSeparator(.visible)
                 .contextMenu {
-                    // ponytail: the test chat only, like sending.
-                    if chat.id == model.sendableChatId {
+                    if model.canSend(chat.id) {
                         Button(chat.muted ? "Unmute" : "Mute") {
                             Task { await model.setMuted(chat.id, !chat.muted) }
                         }

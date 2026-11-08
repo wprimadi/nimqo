@@ -43,8 +43,7 @@ fn check_status(text: &str, photo: Option<&OutgoingFile>) -> Result<(), &'static
     }
     match photo {
         Some(p) if p.kind != FileKind::Photo => Err("Only photos can be posted as a status here."),
-        // Same chat on both sides: only the file's own checks apply.
-        Some(p) => check_file("", "", p, 0),
+        Some(p) => check_file(p, 0),
         None if text.trim().is_empty() => Err("The status is empty."),
         None => Ok(()),
     }

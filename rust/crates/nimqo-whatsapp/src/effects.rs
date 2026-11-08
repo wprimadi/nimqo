@@ -172,27 +172,34 @@ impl Effect {
 }
 
 impl crate::inbox::Inbox {
-    /// The id of message `seq` in `chat` and whether it is own, to react to.
+    /// The id of message `seq` in `chat`, whether it is own, and its sender
+    /// (a group reaction names it), to react to.
     ///
     /// # Errors
     /// The store cannot be read.
-    pub fn message_key(&self, chat: &str, seq: i64) -> anyhow::Result<Option<(String, bool)>> {
+    pub fn message_key(
+        &self,
+        chat: &str,
+        seq: i64,
+    ) -> anyhow::Result<Option<(String, bool, String)>> {
         #[derive(diesel::QueryableByName)]
         struct Key {
             #[diesel(sql_type = Text)]
             id: String,
             #[diesel(sql_type = diesel::sql_types::Bool)]
             from_me: bool,
+            #[diesel(sql_type = Text)]
+            sender: String,
         }
         let mut conn = self.lock()?;
         let key: Option<Key> = diesel::sql_query(
-            "SELECT id, from_me FROM messages WHERE rowid = ? AND chat = ? AND kind <> 'deleted'",
+            "SELECT id, from_me, sender FROM messages WHERE rowid = ? AND chat = ? AND kind <> 'deleted'",
         )
         .bind::<diesel::sql_types::BigInt, _>(seq)
         .bind::<Text, _>(chat)
         .get_result(&mut *conn)
         .optional()?;
-        Ok(key.map(|k| (k.id, k.from_me)))
+        Ok(key.map(|k| (k.id, k.from_me, k.sender)))
     }
 
     /// Stores this account's reaction to `target`; None removes it.
@@ -235,7 +242,7 @@ mod tests {
         let seq = row().seq;
         assert_eq!(
             inbox.message_key(chat, seq).unwrap(),
-            Some(("m1".into(), false))
+            Some(("m1".into(), false, chat.into()))
         );
         assert_eq!(inbox.message_key("x@s.whatsapp.net", seq).unwrap(), None);
         inbox.apply_for_test(&[Effect::React {
