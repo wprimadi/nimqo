@@ -34,13 +34,23 @@ struct NimqoApp: App {
         }
 
         .commands {
-            CommandGroup(after: .appInfo) { ResetCommand(model: model) }
+            CommandGroup(replacing: .appInfo) {
+                AboutCommand()
+                ResetCommand(model: model)
+            }
             ChatCommands(model: model)
         }
 
         Settings {
             SettingsView(core: model.core)
         }
+
+        Window("About NIMQO", id: AboutCommand.window) {
+            AboutView()
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
 
         MenuBarExtra {
             StatusMenu(model: model)
@@ -72,6 +82,19 @@ private struct ShowsWindowOnRequest: ViewModifier {
     func body(content: Content) -> some View {
         content.onReceive(DistributedNotificationCenter.default().publisher(for: MainWindow.show)) { _ in
             openWindow(id: MainWindow.id)
+            NSApp.activate()
+        }
+    }
+}
+
+/// App menu > About NIMQO: NIMQO's own window, not the standard panel.
+struct AboutCommand: View {
+    static let window = "about"
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About NIMQO") {
+            openWindow(id: Self.window)
             NSApp.activate()
         }
     }
