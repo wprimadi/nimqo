@@ -126,6 +126,13 @@ pub struct ChatMessage {
     pub mentions: Vec<Mention>,
 }
 
+/// Someone in the address book.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Contact {
+    pub id: String,
+    pub name: String,
+}
+
 /// "@`user`" in a message body stands for `name`.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Mention {

@@ -1,4 +1,5 @@
-//! Test-peer allowlist.
+//! International phone numbers (pairing by code, a new chat), and the
+//! one-number allowlist of the `nimqo-poc` tool.
 //!
 //! The proof of concept runs on a real account, so it may only exchange
 //! messages with one explicitly configured number. The number is supplied at

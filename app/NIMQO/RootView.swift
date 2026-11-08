@@ -30,9 +30,17 @@ struct MainView: View {
     @FocusState private var searching: Bool
     @State private var findRequested = false
     @State private var section = Pane.chats
+    @State private var newChat = false
+    /// A chat opened from New Chat that has no messages yet.
+    @State private var draft: ChatSummary?
 
     private enum Pane {
         case chats, status, channels
+    }
+
+    /// The selected chat, or the one just started from New Chat.
+    private var openChat: ChatSummary? {
+        model.chats.first { $0.id == model.selectedChat } ?? draft.flatMap { $0.id == model.selectedChat ? $0 : nil }
     }
 
     var body: some View {
@@ -49,13 +57,21 @@ struct MainView: View {
                 }
             }
             .safeAreaInset(edge: .top) {
-                Picker("Show", selection: $section) {
-                    Text("Chats").tag(Pane.chats)
-                    Text("Status").tag(Pane.status)
-                    Text("Channels").tag(Pane.channels)
+                HStack(spacing: Theme.Spacing.small) {
+                    Picker("Show", selection: $section) {
+                        Text("Chats").tag(Pane.chats)
+                        Text("Status").tag(Pane.status)
+                        Text("Channels").tag(Pane.channels)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    Button("New Chat", systemImage: "square.and.pencil") { newChat = true }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .keyboardShortcut("n", modifiers: .command)
+                        .help("New Chat (⌘N)")
+                        .disabled(model.core == nil)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 .padding(.horizontal, Theme.Spacing.medium)
                 .padding(.vertical, Theme.Spacing.small)
             }
@@ -67,7 +83,7 @@ struct MainView: View {
                 channelDetail
             } else if section == .status {
                 statusDetail
-            } else if let chat = model.chats.first(where: { $0.id == model.selectedChat }) {
+            } else if let chat = openChat {
                 if model.messagesChat != chat.id {
                     // Never show another chat's messages while this one loads.
                     ProgressView()
@@ -90,6 +106,14 @@ struct MainView: View {
             }
         }
         .toolbar(model.statuses.playing == nil ? .automatic : .hidden, for: .windowToolbar)
+        .sheet(isPresented: $newChat) {
+            NewChatView(core: model.core, avatars: model.avatars) { chat in
+                query = ""
+                section = .chats
+                draft = model.chats.contains { $0.id == chat.id } ? nil : chat
+                model.selectedChat = chat.id
+            }
+        }
         .focusedSceneValue(\.findMessages, $findRequested)
         .onChange(of: findRequested) {
             guard findRequested else { return }

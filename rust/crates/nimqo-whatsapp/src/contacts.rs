@@ -50,6 +50,28 @@ impl Inbox {
         Ok(k.known)
     }
 
+    /// People in the address book as (id, name), by name.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn address_book(&self) -> Result<Vec<(String, String)>> {
+        #[derive(diesel::QueryableByName)]
+        struct C {
+            #[diesel(sql_type = Text)]
+            jid: String,
+            #[diesel(sql_type = Text)]
+            name: String,
+        }
+        let mut conn = self.lock()?;
+        let rows: Vec<C> = diesel::sql_query(
+            "SELECT jid, name FROM contacts
+             WHERE jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@lid'
+             ORDER BY name COLLATE NOCASE",
+        )
+        .load(&mut *conn)?;
+        Ok(rows.into_iter().map(|c| (c.jid, c.name)).collect())
+    }
+
     /// Everyone in the address book, as stored (by number, or by LID when
     /// the number is unknown).
     ///

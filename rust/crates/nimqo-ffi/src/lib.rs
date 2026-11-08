@@ -31,7 +31,7 @@ mod outbox;
 mod privacy;
 mod state;
 
-pub use chats::{Chat, ChatMessage, Delivery, Mention, MessageKind, SearchHit};
+pub use chats::{Chat, ChatMessage, Contact, Delivery, Mention, MessageKind, SearchHit};
 
 /// A group as the server describes it, for the group's info card.
 #[derive(Debug, uniffi::Record)]
@@ -632,7 +632,8 @@ impl Core {
     }
 
     /// Posts a status update: `text` alone on `background` (RGB) in `font`,
-    /// or a JPEG photo with `text` as its caption. During development only the test number can see it.
+    /// or a JPEG photo with `text` as its caption, to the audience in the
+    /// phone's status privacy.
     ///
     /// # Errors
     /// `SendRefused` for an empty or too long status, a photo that is not
@@ -746,6 +747,50 @@ impl Core {
         self.runtime
             .spawn(async move { request_code(&client, digits).await });
         Ok(())
+    }
+
+    /// People in the address book, by name, to start a chat with.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read.
+    pub fn address_book(&self) -> Result<Vec<Contact>, CoreError> {
+        Ok(self
+            .inbox
+            .address_book()
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(|(id, name)| Contact { id, name })
+            .collect())
+    }
+
+    /// The chat id of `phone_number`, once WhatsApp confirms the number has
+    /// an account.
+    ///
+    /// # Errors
+    /// `InvalidPhoneNumber` for anything but an international number;
+    /// `SendRefused` when it isn't on WhatsApp or the check fails.
+    pub async fn find_number(&self, phone_number: String) -> Result<String, CoreError> {
+        let jid = Peer::parse(&phone_number)
+            .map_err(|_| CoreError::InvalidPhoneNumber)?
+            .jid();
+        let client = Arc::clone(&self.client);
+        let found = self
+            .runtime
+            .spawn(async move { client.contacts().is_on_whatsapp(&[jid]).await })
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+            .map_err(|_| CoreError::SendRefused {
+                reason: "Couldn't check the number. Check the connection and try again.".into(),
+            })?;
+        found
+            .into_iter()
+            .find(|r| r.is_registered)
+            .map(|r| r.jid.to_non_ad_string())
+            .ok_or_else(|| CoreError::SendRefused {
+                reason: "This number isn't on WhatsApp.".into(),
+            })
     }
 
     /// Drops the socket and reconnects without backoff, e.g. after wake from
