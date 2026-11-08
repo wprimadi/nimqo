@@ -151,11 +151,13 @@ impl Sender {
         Ok(())
     }
 
-    /// Deletes own message `seq` for everyone, within WhatsApp's window.
+    /// Deletes message `seq` for everyone, within WhatsApp's window: an
+    /// own one, or in a group a member's (the server checks the account is
+    /// an admin there).
     pub async fn revoke(&self, chat: &str, seq: i64) -> Result<(), CoreError> {
         let jid = Self::may_send(chat)?;
         let m = self.original(chat, seq)?;
-        if !m.from_me {
+        if !m.from_me && jid.server != whatsapp_rust::Server::Group {
             return Err(refused(
                 "Only your own messages can be deleted for everyone.",
             ));
@@ -163,16 +165,17 @@ impl Sender {
         if crate::unix_now() - m.ts > REVOKE_WINDOW_SECS {
             return Err(refused("This message is too old to delete for everyone."));
         }
+        let sender = Self::author(&jid, &m)?;
         let id = MessageId::new(&m.id).map_err(|e| refused(format!("{e:?}")))?;
-        let target =
-            MessageRef::new(&jid, id, None, true).map_err(|e| refused(format!("{e:?}")))?;
+        let target = MessageRef::new(&jid, id, sender.as_ref(), m.from_me)
+            .map_err(|e| refused(format!("{e:?}")))?;
         self.client
             .revoke_message(&target)
             .await
             .map_err(|e| refused(format!("not deleted: {:?}", std::mem::discriminant(&e))))?;
         self.inbox
-            .revoke_own(chat, &m.id)
-            .map_err(|e| storage(&e))?;
+            .revoke_local(chat, &m.sender, &m.id)
+            .map_err(storage)?;
         self.listener.on_chats_changed(vec![chat.to_owned()]);
         Ok(())
     }

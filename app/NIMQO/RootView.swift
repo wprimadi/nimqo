@@ -166,7 +166,8 @@ struct MainView: View {
                 star: { seq, starred in Task { await model.setStarred(seq, in: chat.id, starred) } },
                 edit: { seq, text in await model.edit(seq, in: chat.id, to: text) },
                 delete: { seq in Task { await model.deleteForEveryone(seq, in: chat.id) } },
-                forward: { forwarding = ($0, chat.id) }
+                forward: { forwarding = ($0, chat.id) },
+                isAdmin: { [contacts = model.contacts] in contacts.isAdmin(of: chat.id) }
             )
         )
         // A new view per chat: it opens at the latest message.

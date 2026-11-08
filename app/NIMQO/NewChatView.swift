@@ -12,6 +12,7 @@ struct NewChatView: View {
     @State private var contacts: [Contact] = []
     @State private var checking = false
     @State private var problem: String?
+    @State private var makingGroup = false
     @FocusState private var focused: Bool
 
     /// Digits, "+", spaces, and dashes, with enough digits for a number.
@@ -32,6 +33,25 @@ struct NewChatView: View {
     }
 
     var body: some View {
+        Group {
+            if makingGroup {
+                NewGroup(core: core, avatars: avatars) { makingGroup = false } created: { group in
+                    open(group)
+                    dismiss()
+                }
+            } else {
+                finder
+            }
+        }
+        .frame(width: 400, height: 480)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+        }
+    }
+
+    private var finder: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -55,6 +75,14 @@ struct NewChatView: View {
                     .padding(.top, 8)
             }
             List {
+                if query.isEmpty {
+                    Button { makingGroup = true } label: {
+                        Label("New Group", systemImage: "person.3.fill")
+                            .font(.body.weight(.medium))
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
                 if let number {
                     Button { Task { await openNumber(number) } } label: {
                         Label("Chat with \(number)", systemImage: "phone.bubble.fill")
@@ -91,12 +119,6 @@ struct NewChatView: View {
                                            systemImage: "person.crop.circle.badge.questionmark",
                                            description: Text("Type a phone number with its country code."))
                 }
-            }
-        }
-        .frame(width: 400, height: 480)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
             }
         }
         .onChange(of: query) { problem = nil }

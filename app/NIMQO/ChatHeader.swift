@@ -35,6 +35,19 @@ final class ContactStore {
     func invalidate() {
         generation += 1
     }
+
+    /// Reads a group's info again, after a change to it.
+    func refresh(_ chat: String) async {
+        if let info = await core?.groupInfo(chatId: chat) {
+            groups[chat] = info
+        }
+    }
+
+    /// The account can manage `chat`: it is one of the group's admins.
+    func isAdmin(of chat: String) -> Bool {
+        guard let role = groups[chat]?.myRole else { return false }
+        return role != .member
+    }
 }
 
 extension View {
@@ -320,6 +333,8 @@ private struct GroupCardOf: View {
     let avatars: AvatarStore
 
     var body: some View {
-        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars)
+        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars, contacts: contacts)
+            // Members and settings change from other phones too.
+            .task { await contacts.refresh(chat.id) }
     }
 }

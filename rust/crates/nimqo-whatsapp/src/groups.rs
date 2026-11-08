@@ -1,5 +1,5 @@
 //! A group's members, admins and description, asked of the server when the
-//! user opens the group's info. Read-only; nothing is stored.
+//! user opens the group's info. Not stored, except the group's name.
 
 use anyhow::{Result, anyhow};
 use diesel::RunQueryDsl;
@@ -18,6 +18,10 @@ pub enum Role {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
+    /// The member as the server addresses them, for admin actions.
+    pub id: String,
+    /// The account's own membership.
+    pub is_me: bool,
     /// `+<digits>`, when the server or history disclosed it.
     pub phone: Option<String>,
     /// From the user's address book.
@@ -37,6 +41,8 @@ pub struct Info {
     /// Only admins can edit the group's info.
     pub locked: bool,
     pub members: Vec<Member>,
+    /// The account's own role; None when it is no longer a member.
+    pub my_role: Option<Role>,
 }
 
 /// Fetches the group's metadata and names its members from local contacts.
@@ -49,6 +55,8 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
         return Err(anyhow!("not a group"));
     }
     let meta = client.groups().fetch_metadata(&jid).await?;
+    // Own number and LID, to find the account among the members.
+    let me: Vec<Jid> = [client.pn(), client.lid()].into_iter().flatten().collect();
     let mut members = Vec::with_capacity(meta.participants.len());
     for p in &meta.participants {
         let id = match &p.phone_number {
@@ -57,7 +65,13 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
         };
         let lid = p.lid.as_ref().map(Jid::to_non_ad_string);
         let (saved_name, push_name) = inbox.member_names(&id, lid.as_deref())?;
+        let is_me = [Some(&p.jid), p.phone_number.as_ref(), p.lid.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|j| me.iter().any(|m| m.user == j.user));
         members.push(Member {
+            id: p.jid.to_non_ad_string(),
+            is_me,
             phone: id.strip_suffix("@s.whatsapp.net").map(|n| format!("+{n}")),
             saved_name,
             push_name,
@@ -69,7 +83,12 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
         });
     }
     sort(&mut members);
+    let my_role = members.iter().find(|m| m.is_me).map(|m| m.role);
+    if let Some(subject) = meta.subject.as_deref().filter(|s| !s.is_empty()) {
+        inbox.set_chat_name(chat, subject)?;
+    }
     Ok(Info {
+        my_role,
         subject: meta.subject,
         description: meta.description.filter(|d| !d.trim().is_empty()),
         created_secs: meta.creation_time.and_then(|t| i64::try_from(t).ok()),
@@ -96,6 +115,19 @@ fn sort(members: &mut [Member]) {
 }
 
 impl Inbox {
+    /// The name the chat list shows for `chat` (a group's subject).
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn set_chat_name(&self, chat: &str, name: &str) -> Result<()> {
+        let mut conn = self.lock()?;
+        diesel::sql_query("INSERT OR REPLACE INTO chat_names (chat, name) VALUES (?, ?)")
+            .bind::<Text, _>(chat)
+            .bind::<Text, _>(name)
+            .execute(&mut *conn)?;
+        Ok(())
+    }
+
     /// A member's saved name and push name, looked up by number and by LID.
     fn member_names(
         &self,
@@ -134,6 +166,8 @@ mod tests {
 
     fn member(role: Role, saved: Option<&str>, phone: &str) -> Member {
         Member {
+            id: phone.into(),
+            is_me: false,
             phone: Some(phone.into()),
             saved_name: saved.map(Into::into),
             push_name: None,

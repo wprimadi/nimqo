@@ -75,6 +75,12 @@ extension ChatMessage {
             && Int64(Date.now.timeIntervalSince1970) - timestampSecs < deleteWindowSecs()
     }
 
+    /// A member's message an admin may delete for everyone, within the window.
+    var canAdminDelete: Bool {
+        !fromMe && kind != .deleted
+            && Int64(Date.now.timeIntervalSince1970) - timestampSecs < deleteWindowSecs()
+    }
+
     /// A copy can be sent on: text, or media stored here.
     var isForwardable: Bool {
         switch kind {

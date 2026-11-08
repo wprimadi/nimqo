@@ -236,14 +236,15 @@ impl crate::inbox::Inbox {
         self.commit(Vec::new(), &[edit])
     }
 
-    /// Own message `id` was deleted for everyone from this Mac.
+    /// Message `id` by `sender` (as stored) was deleted for everyone from
+    /// this Mac: an own one, or a member's by a group admin.
     ///
     /// # Errors
     /// The store cannot be written.
-    pub fn revoke_own(&self, chat: &str, id: &str) -> anyhow::Result<()> {
+    pub fn revoke_local(&self, chat: &str, sender: &str, id: &str) -> anyhow::Result<()> {
         let revoke = Effect::Revoke {
             chat: chat.to_owned(),
-            sender: crate::inbox::ME.to_owned(),
+            sender: sender.to_owned(),
             target: id.to_owned(),
         };
         self.commit(Vec::new(), &[revoke])

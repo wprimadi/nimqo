@@ -16,6 +16,7 @@ use nimqo_whatsapp::peer::Peer;
 use nimqo_whatsapp::presence::Presences;
 use nimqo_whatsapp::stores::{self, AlreadyRunning};
 use nimqo_whatsapp::{history, lids};
+pub use outbox::{GroupSetting, MemberChange};
 use outbox::{OutgoingFile, StatusFont};
 use whatsapp_rust::bot::BotHandle;
 use whatsapp_rust::pair_code::{PairCodeOptions, PairCodeRejection};
@@ -45,10 +46,16 @@ pub struct GroupInfo {
     pub locked: bool,
     /// Owner, then admins, then members.
     pub members: Vec<GroupMember>,
+    /// The account's own role; None when it is no longer a member.
+    pub my_role: Option<MemberRole>,
 }
 
 #[derive(Debug, uniffi::Record)]
 pub struct GroupMember {
+    /// The member as the server addresses them, for admin actions.
+    pub id: String,
+    /// The account itself.
+    pub is_me: bool,
     pub phone: Option<String>,
     /// From the user's address book.
     pub saved_name: Option<String>,
@@ -62,6 +69,16 @@ pub enum MemberRole {
     Owner,
     Admin,
     Member,
+}
+
+impl From<Role> for MemberRole {
+    fn from(r: Role) -> Self {
+        match r {
+            Role::Owner => Self::Owner,
+            Role::Admin => Self::Admin,
+            Role::Member => Self::Member,
+        }
+    }
 }
 
 /// The person in a chat, as last heard: for the chat header.
@@ -470,18 +487,17 @@ impl Core {
             created_secs: info.created_secs,
             announce_only: info.announce_only,
             locked: info.locked,
+            my_role: info.my_role.map(MemberRole::from),
             members: info
                 .members
                 .into_iter()
                 .map(|m| GroupMember {
+                    id: m.id,
+                    is_me: m.is_me,
                     phone: m.phone,
                     saved_name: m.saved_name,
                     push_name: m.push_name,
-                    role: match m.role {
-                        Role::Owner => MemberRole::Owner,
-                        Role::Admin => MemberRole::Admin,
-                        Role::Member => MemberRole::Member,
-                    },
+                    role: m.role.into(),
                 })
                 .collect(),
         })
@@ -784,6 +800,105 @@ impl Core {
         let sender = Arc::clone(&self.sender);
         self.runtime.spawn(async move { sender.flush(false).await });
         Ok(())
+    }
+
+    /// Renames a group.
+    ///
+    /// # Errors
+    /// `SendRefused` for an empty or too long name, or when the server does
+    /// not allow it (only admins, in a locked group).
+    pub async fn set_group_subject(
+        &self,
+        chat_id: String,
+        subject: String,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_group_subject(&chat_id, &subject).await })
+            .await
+    }
+
+    /// Sets a group's description; an empty one removes it.
+    ///
+    /// # Errors
+    /// As `set_group_subject`.
+    pub async fn set_group_description(
+        &self,
+        chat_id: String,
+        text: String,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_group_description(&chat_id, &text).await })
+            .await
+    }
+
+    /// Turns a group setting on or off. Admins only.
+    ///
+    /// # Errors
+    /// `SendRefused` when the server does not allow it.
+    pub async fn set_group_setting(
+        &self,
+        chat_id: String,
+        setting: GroupSetting,
+        on: bool,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_group_setting(&chat_id, setting, on).await })
+            .await
+    }
+
+    /// Adds, removes, promotes, or demotes members (person ids). Returns how
+    /// many the server turned down.
+    ///
+    /// # Errors
+    /// `SendRefused` for an id that is not a person, or when the server does
+    /// not allow it at all.
+    pub async fn change_group_members(
+        &self,
+        chat_id: String,
+        members: Vec<String>,
+        change: MemberChange,
+    ) -> Result<u32, CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.change_members(&chat_id, &members, change).await })
+            .await
+    }
+
+    /// The group's invite link; `reset` replaces it with a new one.
+    ///
+    /// # Errors
+    /// `SendRefused` when the server does not allow it.
+    pub async fn group_invite_link(
+        &self,
+        chat_id: String,
+        reset: bool,
+    ) -> Result<String, CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.group_invite_link(&chat_id, reset).await })
+            .await
+    }
+
+    /// Leaves a group. Its messages stay here.
+    ///
+    /// # Errors
+    /// `SendRefused` when the server does not take it.
+    pub async fn leave_group(&self, chat_id: String) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.leave_group(&chat_id).await })
+            .await
+    }
+
+    /// Creates a group and returns its chat id.
+    ///
+    /// # Errors
+    /// `SendRefused` for no name, no members, or when the server refuses.
+    pub async fn create_group(
+        &self,
+        subject: String,
+        members: Vec<String>,
+    ) -> Result<String, CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.create_group(&subject, &members).await })
+            .await
     }
 
     /// Queues a photo or document and starts sending it, like `send_text`.
@@ -1256,6 +1371,7 @@ fn message_handlers<B, T, H, R>(
                 EventKind::PinUpdate,
                 EventKind::ArchiveUpdate,
                 EventKind::StarUpdate,
+                EventKind::GroupUpdate,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
@@ -1333,6 +1449,7 @@ async fn on_account_event(sender: Arc<outbox::Sender>, event: &Event) {
                 )
                 .await;
         }
+        Event::GroupUpdate(g) => sender.on_group_update(&g.group_jid, &g.action),
         Event::MarkChatAsReadUpdate(update) => {
             let range = update.action.message_range.as_option();
             sender

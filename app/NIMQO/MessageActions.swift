@@ -10,6 +10,24 @@ struct MessageCommands {
     var delete: @MainActor (Int64) -> Void = { _ in }
     /// Opens the chat picker for it.
     var forward: @MainActor (ChatMessage) -> Void = { _ in }
+    /// The account is an admin of this group, so it may delete members'
+    /// messages too. Read inside the menu only: see `AdminDelete`.
+    var isAdmin: @MainActor () -> Bool = { false }
+}
+
+/// "Delete for Everyone…" on a member's message, for group admins. Its own
+/// view, so reading the group's info does not rebuild the timeline.
+struct AdminDelete: View {
+    let message: ChatMessage
+    let isAdmin: @MainActor () -> Bool
+    let delete: () -> Void
+
+    var body: some View {
+        if isAdmin() {
+            Divider()
+            Button("Delete for Everyone…", systemImage: "trash", role: .destructive, action: delete)
+        }
+    }
 }
 
 /// Asks before a message is deleted for everyone; it cannot be undone.
@@ -245,6 +263,8 @@ extension ConversationView {
         if send != nil, message.canDeleteForEveryone {
             Divider()
             Button("Delete for Everyone…", systemImage: "trash", role: .destructive) { deleting = message }
+        } else if send != nil, chat.isGroup, message.canAdminDelete {
+            AdminDelete(message: message, isAdmin: commands.isAdmin) { deleting = message }
         }
     }
 
