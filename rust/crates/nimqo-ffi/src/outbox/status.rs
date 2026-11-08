@@ -83,7 +83,14 @@ impl Sender {
                 "NIMQO doesn't know your status privacy yet. Open Settings > Privacy > Status on your phone once.",
             ));
         };
-        let mode = a.mode.or_else(|| a.modes.first().copied());
+        // One clear mode or nothing goes out: several listed could mean a
+        // deny list applies too.
+        let mode = match (a.mode, a.modes.as_slice()) {
+            (Some(m), []) => Some(m),
+            (Some(m), [only]) if *only == m => Some(m),
+            (None, [only]) => Some(*only),
+            _ => None,
+        };
         let is = |m: Mode| mode == Some(m.into());
         let (setting, jids) = if is(Mode::CONTACTS) {
             (
@@ -112,7 +119,7 @@ impl Sender {
             (StatusPrivacySetting::AllowList, chosen)
         } else {
             return Err(refused(
-                "This status audience (close friends) isn't supported yet.",
+                "This status privacy setting isn't supported here yet, so nothing was posted.",
             ));
         };
         let jids: Vec<Jid> = jids.iter().filter_map(|j| j.parse().ok()).collect();

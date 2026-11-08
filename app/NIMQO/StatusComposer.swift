@@ -206,7 +206,7 @@ struct StatusComposer: View {
     }
 
     private var note: some View {
-        Label(problem ?? "Shared with the audience set in WhatsApp's status privacy on your phone.",
+        Label(problem ?? "Goes to your phone's status audience, including contacts who haven't saved your number.",
               systemImage: problem == nil ? "person.2.fill" : "exclamationmark.triangle.fill")
             .font(.callout)
             .foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
