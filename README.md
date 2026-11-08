@@ -215,6 +215,35 @@ scripts:
 | `scripts/run-app.sh` | Builds and opens the app |
 | `scripts/make-icon.swift` | Rebuilds the app icon from `Logo/nimqo.png` |
 
+### Code signing
+
+NIMQO releases are signed with the maintainer's own self-signed certificate,
+not an Apple Developer ID, so macOS does not recognise the developer.
+
+**Installing a release.** After you move NIMQO to Applications, run this once:
+
+```sh
+xattr -cr /Applications/NIMQO.app
+```
+
+It removes the download quarantine, so Gatekeeper lets the app open. Updates
+keep the same signature, so macOS remembers your Keychain and microphone and
+camera answers across updates.
+
+**Checking a release.** A genuine release reports this certificate:
+
+```sh
+codesign -dr - /Applications/NIMQO.app
+# … certificate leaf = H"17bd502dbbdca6685eae53608e3113d4f13a4bc5"
+```
+
+**Building it yourself.** Your build is signed ad hoc. That runs fine on your
+Mac, but every rebuild is a new app to macOS, which asks for Keychain access
+again. The maintainer keeps the certificate in `Secret/`, which is
+git-ignored; `build-app.sh` signs with it when it is there.
+
+### Logs
+
 To follow the app's logs:
 
 ```sh

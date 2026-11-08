@@ -33,3 +33,6 @@ app/build/
 .claude/
 evidence/
 .scannerwork/
+
+# Code-signing certificate, private key and keychain: never commit
+Secret/
