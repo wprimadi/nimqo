@@ -125,7 +125,7 @@ works with every chat and group.
 
 - **Voice and video calls** with one person, from the phone and camera
   buttons in the chat header. Incoming calls ring in a small window that
-  floats over other apps until you answer or decline (Return / Esc).
+  floats over other apps until you click Accept or Decline (Esc declines).
 - Mute, camera on and off mid-call (the other side can ask to switch to
   video too), and the running time. Closing the window hangs up.
 - Echo cancellation from macOS's own voice processing; video is H.264

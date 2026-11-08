@@ -79,15 +79,16 @@ final class CallStore {
         current = call
         Task {
             let camera = await startMedia(video: video)
-            guard current?.started == call.started, !(current?.isOver ?? true) else { return }
+            // Hung up while the microphone was being asked for.
+            guard isLive(call) else { return stopMedia() }
             guard let camera else { return finish(.failed) }
             current?.camera = camera
             do {
                 let id = try await core.placeCall(chatId: chat, video: camera)
                 // Hung up while it was being placed.
-                guard current?.started == call.started, current?.isOver == false else {
+                guard isLive(call) else {
                     await core.endCall()
-                    return
+                    return stopMedia()
                 }
                 current?.id = id
             } catch {
@@ -104,13 +105,21 @@ final class CallStore {
         call.phase = .connecting
         current = call
         Task {
-            guard let camera = await startMedia(video: video) else {
+            let camera = await startMedia(video: video)
+            // The caller gave up while the microphone was being asked for.
+            guard isLive(call) else { return stopMedia() }
+            guard let camera else {
                 await core.declineCall(callId: id)
                 return finish(.failed)
             }
             current?.camera = camera
             do {
                 try await core.answerCall(callId: id, video: camera)
+                // Hung up while it was connecting: the core had no call to end yet.
+                if !isLive(call) {
+                    await core.endCall()
+                    stopMedia()
+                }
             } catch {
                 problem = CoreModel.message(for: error)
                 finish(.failed)
@@ -248,6 +257,17 @@ final class CallStore {
         }
     }
 
+    /// Still the call that `call` started, and not over.
+    private func isLive(_ call: Call) -> Bool {
+        current?.started == call.started && current?.isOver == false
+    }
+
+    /// Never leaves the microphone or camera on after a call is gone.
+    private func stopMedia() {
+        audio.stop()
+        stopCamera()
+    }
+
     private func stopCamera() {
         let camera = camera
         Task.detached { camera.stop() }
@@ -256,8 +276,7 @@ final class CallStore {
     private func finish(_ reason: CallEnd) {
         guard let call = current, !call.isOver else { return }
         ring(false)
-        audio.stop()
-        stopCamera()
+        stopMedia()
         remote.reset()
         current?.phase = .ended(reason)
         log.info("call ended: \(String(describing: reason))")

@@ -201,7 +201,8 @@ private struct CallControls: View {
                 RoundButton(title: "Accept", symbol: call.video ? "video.fill" : "phone.fill", tint: .green) {
                     store.answer(video: call.video)
                 }
-                .keyboardShortcut(.defaultAction)
+                // No Return shortcut: the ringing window can take focus
+                // mid-typing, and a keystroke must never turn on the mic.
             } else {
                 if call.peerAsks {
                     VideoAsk(store: store)
