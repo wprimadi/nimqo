@@ -109,12 +109,20 @@ struct CharacterRing: View {
         Double(count) / Double(StatusPalette.maxCharacters)
     }
 
+    /// Red past the limit, orange near it.
+    private func color(left: Int) -> Color {
+        if left < 0 {
+            return .red
+        }
+        return used > 0.9 ? .orange : .accentColor
+    }
+
     var body: some View {
         let left = StatusPalette.maxCharacters - count
         ZStack {
             Circle().stroke(.quaternary, lineWidth: 3)
             Circle().trim(from: 0, to: min(used, 1))
-                .stroke(left < 0 ? Color.red : used > 0.9 ? .orange : .accentColor,
+                .stroke(color(left: left),
                         style: StrokeStyle(lineWidth: 3, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             if left < 50 {

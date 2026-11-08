@@ -29,6 +29,17 @@ extension Contact {
     }
 }
 
+extension Optional where Wrapped: Equatable {
+    /// The hovered row: `id` on entering; leaving clears it only if no
+    /// other row was entered first.
+    func hovering(_ id: Wrapped, _ inside: Bool) -> Self {
+        if inside {
+            return id
+        }
+        return self == id ? nil : self
+    }
+}
+
 /// The search field at the top of the people sheets.
 struct SearchField: View {
     let prompt: LocalizedStringKey
@@ -199,7 +210,7 @@ struct PeoplePicker: View {
             }
         }
         .buttonStyle(.plain)
-        .onHover { hovered = $0 ? contact.id : (hovered == contact.id ? nil : hovered) }
+        .onHover { hovered = hovered.hovering(contact.id, $0) }
         .accessibilityAddTraits(isPicked ? .isSelected : [])
     }
 

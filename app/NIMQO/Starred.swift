@@ -73,7 +73,7 @@ struct StarredView: View {
                     ForEach(day.hits, id: \.seq) { hit in
                         StarredRow(hit: hit, chat: model.summary(of: hit.chatId), avatars: model.avatars,
                                    hovered: hovered == hit.seq) { unstar(hit) }
-                            .onHover { hovered = $0 ? hit.seq : (hovered == hit.seq ? nil : hovered) }
+                            .onHover { hovered = hovered.hovering(hit.seq, $0) }
                             .listRowSeparator(.hidden)
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }

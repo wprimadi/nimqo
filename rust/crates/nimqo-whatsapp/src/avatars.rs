@@ -117,7 +117,7 @@ impl Avatars {
                 true
             }
             ProfilePictureLookup::NotFound | ProfilePictureLookup::NotAuthorized => {
-                let had = std::fs::remove_file(self.file(chat)).is_ok();
+                let had = tokio::fs::remove_file(self.file(chat)).await.is_ok();
                 self.record(chat, None, now)?;
                 had
             }
@@ -156,7 +156,7 @@ impl Avatars {
                 true
             }
             None => {
-                let had = std::fs::remove_file(self.file(chat)).is_ok();
+                let had = tokio::fs::remove_file(self.file(chat)).await.is_ok();
                 self.record(chat, None, now)?;
                 had
             }

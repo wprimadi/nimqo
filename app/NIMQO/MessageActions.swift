@@ -4,12 +4,12 @@ import SwiftUI
 
 /// What the conversation asks of the app for a message (by seq).
 struct MessageCommands {
-    var star: @MainActor (Int64, Bool) -> Void = { _, _ in }
+    var star: @MainActor (Int64, Bool) -> Void = { _, _ in /* read-only: nothing to star */ }
     /// Returns why the edit was refused.
     var edit: @MainActor (Int64, String) async -> String? = { _, _ in nil }
-    var delete: @MainActor (Int64) -> Void = { _ in }
+    var delete: @MainActor (Int64) -> Void = { _ in /* read-only: nothing to delete */ }
     /// Opens the chat picker for it.
-    var forward: @MainActor (ChatMessage) -> Void = { _ in }
+    var forward: @MainActor (ChatMessage) -> Void = { _ in /* read-only: no picker */ }
     /// The account is an admin of this group, so it may delete members'
     /// messages too. Read inside the menu only: see `AdminDelete`.
     var isAdmin: @MainActor () -> Bool = { false }
@@ -109,7 +109,7 @@ struct MessageHoverBar: View {
         // Outside the fade: the hidden field must stay usable while the bar
         // hides, since macOS never says when the viewer closes unpicked.
         .modifier(EmojiField(active: actions.picking, request: actions.pickRequest,
-                             pick: actions.react ?? { _ in }, end: actions.endPicking))
+                             pick: actions.react ?? { _ in /* no reacting here */ }, end: actions.endPicking))
         .accessibilityHidden(true)
     }
 

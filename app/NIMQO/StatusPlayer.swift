@@ -225,6 +225,14 @@ struct StatusPlayer: View {
         .padding(.bottom, Theme.Spacing.medium)
     }
 
+    /// Seen in full, playing now, or still to come.
+    private func filled(_ index: Int, current: Int) -> Double {
+        if index < current {
+            return 1
+        }
+        return index == current ? progress : 0
+    }
+
     private var bar: some View {
         let current = siblings.firstIndex { $0.seq == update.seq } ?? 0
         return HStack(spacing: 4) {
@@ -233,7 +241,7 @@ struct StatusPlayer: View {
                     .overlay(alignment: .leading) {
                         GeometryReader { geo in
                             Capsule().fill(.white)
-                                .frame(width: geo.size.width * (index < current ? 1 : index == current ? progress : 0))
+                                .frame(width: geo.size.width * filled(index, current: current))
                         }
                     }
                     .frame(height: 3)

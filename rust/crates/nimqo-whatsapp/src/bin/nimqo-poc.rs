@@ -121,8 +121,8 @@ async fn run(peer_number: &str) -> Result<()> {
         }
     }
     info!("shutting down: {:?}", handle.shutdown().await);
-    let _ = std::fs::remove_file(&qr_page);
-    let _ = std::fs::remove_dir_all(&view_dir);
+    let _ = tokio::fs::remove_file(&qr_page).await;
+    let _ = tokio::fs::remove_dir_all(&view_dir).await;
     Ok(())
 }
 
@@ -225,7 +225,7 @@ async fn save_image(
 async fn upload_image(client: &Client, path: &Path) -> Result<wa::Message> {
     let mimetype = match path
         .extension()
-        .and_then(|e| e.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
@@ -234,11 +234,15 @@ async fn upload_image(client: &Client, path: &Path) -> Result<wa::Message> {
         _ => bail!("only .jpg, .jpeg, and .png are supported"),
     };
     anyhow::ensure!(
-        std::fs::metadata(path)?.len() <= MAX_MEDIA_BYTES,
+        tokio::fs::metadata(path).await?.len() <= MAX_MEDIA_BYTES,
         "larger than 16 MiB"
     );
     let upload = client
-        .upload(std::fs::read(path)?, MediaType::Image, UploadOptions::new())
+        .upload(
+            tokio::fs::read(path).await?,
+            MediaType::Image,
+            UploadOptions::new(),
+        )
         .await?;
     Ok(image_message(
         upload,

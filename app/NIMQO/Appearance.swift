@@ -221,7 +221,9 @@ private struct BehindWindowBlur: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_: NSVisualEffectView, context _: Context) {}
+    func updateNSView(_: NSVisualEffectView, context _: Context) {
+        // Set once in makeNSView; nothing changes afterwards.
+    }
 }
 
 extension View {

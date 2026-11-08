@@ -48,7 +48,12 @@ final class StatusStore {
     }
 
     nonisolated static func order(_ lhs: Poster, _ rhs: Poster) -> Bool {
-        let rank = { (poster: Poster) in poster.id == "me" ? 0 : poster.unviewed ? 1 : 2 }
+        let rank = { (poster: Poster) -> Int in
+            if poster.id == "me" {
+                return 0
+            }
+            return poster.unviewed ? 1 : 2
+        }
         return rank(lhs) == rank(rhs) ? lhs.latest > rhs.latest : rank(lhs) < rank(rhs)
     }
 
