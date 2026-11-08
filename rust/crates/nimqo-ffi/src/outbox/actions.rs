@@ -183,7 +183,9 @@ impl Sender {
         if to.is_empty() || to.len() > MAX_FORWARD_TO {
             return Err(refused("Forward to one to five chats at a time."));
         }
-        // Every target is checked before anything is queued.
+        // From a person or group only (not a status), and every target is
+        // checked before anything is queued.
+        Self::may_send(from)?;
         for chat in &to {
             Self::may_send(chat)?;
         }

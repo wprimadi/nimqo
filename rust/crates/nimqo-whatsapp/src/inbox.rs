@@ -826,6 +826,11 @@ pub(crate) fn chat_key(src: &MessageSource) -> String {
 #[must_use]
 pub fn media_of(message: &wa::Message) -> Option<Vec<u8>> {
     use whatsapp_rust::buffa::Message as _;
+    // View once: shown on the phone only, so never kept here, where it
+    // could be opened again or forwarded.
+    if message.is_view_once() {
+        return None;
+    }
     let base = message.get_base_message();
     if let Some(image) = base.image_message.as_option() {
         return Some(image.encode_to_vec());
