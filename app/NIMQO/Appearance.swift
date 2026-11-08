@@ -301,6 +301,10 @@ struct SettingsView: View {
                     Text("Solid")
                 }
                 .accessibilityValue("\(Int(opacity * 100)) percent")
+                Button("Reset Opacity") { opacity = 0.5 }
+                    .disabled(opacity == 0.5)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .help("Back to the look as designed")
             } header: {
                 Text("Glass")
             } footer: {
