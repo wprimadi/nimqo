@@ -259,7 +259,8 @@ extension View {
     }
 }
 
-/// Settings (⌘,): the glass look, each shown as a small sample.
+/// Settings (⌘,), a sheet on the main window (see `Panels`): privacy,
+/// status, and the glass look, each shown as a small sample.
 struct SettingsView: View {
     let core: Core?
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
@@ -319,7 +320,6 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
-        .windowLook()
     }
 }
 

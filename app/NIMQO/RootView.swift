@@ -4,6 +4,7 @@ import SwiftUI
 /// Pairing and status until the core connects, then the main window.
 struct RootView: View {
     let model: CoreModel
+    @Environment(Panels.self) private var panels
 
     var body: some View {
         Group {
@@ -15,6 +16,7 @@ struct RootView: View {
                 PairingView(model: model)
             }
         }
+        .sheet(item: Bindable(panels).shown) { PanelSheet(panel: $0, core: model.core) }
         .confirmationDialog("Log out and remove all data?", isPresented: Bindable(model).confirmingReset) {
             Button("Log Out and Remove Data", role: .destructive) { model.logOutAndReset() }
         } message: {

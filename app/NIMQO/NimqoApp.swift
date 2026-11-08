@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct NimqoApp: App {
     @State private var model = CoreModel()
+    @State private var panels = Panels()
 
     init() {
         // A second launch brings the running NIMQO forward instead. The
@@ -28,6 +29,7 @@ struct NimqoApp: App {
         // the Dock icon or the menu bar reopens it, Quit ends both (plan 7.6).
         Window("NIMQO", id: MainWindow.id) {
             RootView(model: model)
+                .environment(panels)
                 .frame(minWidth: 720, minHeight: 480)
                 .windowLook()
                 .task { model.start() }
@@ -35,25 +37,18 @@ struct NimqoApp: App {
 
         .commands {
             CommandGroup(replacing: .appInfo) {
-                AboutCommand()
+                PanelCommand(title: "About NIMQO", panel: .about, panels: panels)
                 ResetCommand(model: model)
+            }
+            CommandGroup(replacing: .appSettings) {
+                PanelCommand(title: "Settings…", panel: .settings, panels: panels)
+                    .keyboardShortcut(",")
             }
             ChatCommands(model: model)
         }
 
-        Settings {
-            SettingsView(core: model.core)
-        }
-
-        Window("About NIMQO", id: AboutCommand.window) {
-            AboutView()
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-
         MenuBarExtra {
-            StatusMenu(model: model)
+            StatusMenu(model: model, panels: panels)
         } label: {
             let unread = model.chats.filter { !$0.muted }.reduce(0) { $0 + $1.unread }
             Label("NIMQO", systemImage: model.statusSymbol)
@@ -87,19 +82,6 @@ private struct ShowsWindowOnRequest: ViewModifier {
     }
 }
 
-/// App menu > About NIMQO: NIMQO's own window, not the standard panel.
-struct AboutCommand: View {
-    static let window = "about"
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Button("About NIMQO") {
-            openWindow(id: Self.window)
-            NSApp.activate()
-        }
-    }
-}
-
 /// App menu > Log Out. Opens the window, where the confirmation is shown.
 struct ResetCommand: View {
     let model: CoreModel
@@ -118,6 +100,7 @@ struct ResetCommand: View {
 /// Settings, quit. Not a second app.
 struct StatusMenu: View {
     let model: CoreModel
+    let panels: Panels
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -135,10 +118,8 @@ struct StatusMenu: View {
         }
         Button("Open NIMQO") { open(nil) }
             .keyboardShortcut("o")
-        SettingsLink {
-            Text("Settings…")
-        }
-        .keyboardShortcut(",")
+        PanelCommand(title: "Settings…", panel: .settings, panels: panels)
+            .keyboardShortcut(",")
         Button("Quit NIMQO") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
