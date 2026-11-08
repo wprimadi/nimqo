@@ -1877,7 +1877,10 @@ after the proof of concept reveals integration complexity.
 -   Dependency audit.
 -   Performance baseline.
 -   Crash/recovery testing.
--   Signed beta build.
+-   Signed beta build. Turning on the hardened runtime for notarization
+    needs the `com.apple.security.device.audio-input` and
+    `com.apple.security.device.camera` entitlements; without them calls
+    get silence and no camera, with no error.
 -   User-facing disclaimer and privacy documentation.
 
 **Exit criteria**
