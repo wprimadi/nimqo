@@ -233,7 +233,7 @@ final class CallStore {
         do {
             try audio.start { [core] samples in core?.pushCallAudio(samples: samples) }
         } catch {
-            log.error("microphone not started: \(error.localizedDescription)")
+            log.error("microphone not started: \(error, privacy: .public)")
             problem = String(localized: "The microphone could not be started.")
             return nil
         }

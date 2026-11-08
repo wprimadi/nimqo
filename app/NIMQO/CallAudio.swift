@@ -24,11 +24,25 @@ final class CallAudio: @unchecked Sendable {
     private let log = Logger(subsystem: "app.nimqo", category: "call-audio")
 
     /// Starts the microphone; `send` gets each full frame.
+    /// Voice processing fails to start on some audio setups (macOS builds
+    /// an aggregate of the default input and output, and virtual devices
+    /// can break it); the call then goes on without echo cancellation.
     func start(send: @escaping @Sendable ([Int16]) -> Void) throws {
         stop()
+        do {
+            try start(voiceProcessing: true, send: send)
+        } catch {
+            log.error("voice processing unavailable, no echo cancellation: \(error, privacy: .public)")
+            try start(voiceProcessing: false, send: send)
+        }
+    }
+
+    private func start(voiceProcessing: Bool, send: @escaping @Sendable ([Int16]) -> Void) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        try input.setVoiceProcessingEnabled(true)
+        if voiceProcessing {
+            try input.setVoiceProcessingEnabled(true)
+        }
         let format = input.outputFormat(forBus: 0)
         guard let converter = AVAudioConverter(from: format, to: wire) else {
             throw CocoaError(.featureUnsupported)
@@ -40,7 +54,12 @@ final class CallAudio: @unchecked Sendable {
         let player = AVAudioPlayerNode()
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: playback)
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
         player.play()
         lock.withLock {
             self.engine = engine
