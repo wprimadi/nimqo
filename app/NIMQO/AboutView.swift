@@ -225,15 +225,15 @@ private struct VersionChip: View {
 private struct Maker: View {
     @State private var hovered: String?
     private static let profiles: [Profile] = [
-        Profile(name: "GitHub", symbol: "chevron.left.forwardslash.chevron.right",
+        Profile(name: "GitHub", logo: "github",
                 url: "https://github.com/wprimadi"),
-        Profile(name: "LinkedIn", symbol: "briefcase.fill", url: "https://www.linkedin.com/in/wahyuprimadi"),
-        Profile(name: "Hack The Box", symbol: "cube.fill",
+        Profile(name: "LinkedIn", logo: "linkedin", url: "https://www.linkedin.com/in/wahyuprimadi"),
+        Profile(name: "Hack The Box", logo: "hackthebox",
                 url: "https://profile.hackthebox.com/profile/019f859a-988d-70d0-9355-d307aef7aa95"),
-        Profile(name: "X", symbol: "at", url: "https://x.com/wprimadi"),
-        Profile(name: "Instagram", symbol: "camera.fill", url: "https://www.instagram.com/wprimadi"),
-        Profile(name: "YouTube", symbol: "play.rectangle.fill", url: "https://www.youtube.com/@wprimadi"),
-        Profile(name: "Facebook", symbol: "person.2.fill", url: "https://www.facebook.com/wahyuprimadi"),
+        Profile(name: "X", logo: "x", url: "https://x.com/wprimadi"),
+        Profile(name: "Instagram", logo: "instagram", url: "https://www.instagram.com/wprimadi"),
+        Profile(name: "YouTube", logo: "youtube", url: "https://www.youtube.com/@wprimadi"),
+        Profile(name: "Facebook", logo: "facebook", url: "https://www.facebook.com/wahyuprimadi"),
     ]
 
     var body: some View {
@@ -250,8 +250,8 @@ private struct Maker: View {
             HStack(spacing: 8) {
                 ForEach(Self.profiles) { ProfileButton(profile: $0, hovered: $hovered) }
             }
-            // The icons are generic symbols, so the one under the pointer
-            // says whose profile it is.
+            // The one under the pointer is named, for those who don't know
+            // every mark.
             Text(hovered ?? "Find me elsewhere")
                 .font(.caption)
                 .foregroundStyle(hovered == nil ? .tertiary : .secondary)
@@ -272,7 +272,8 @@ private struct Maker: View {
 
 private struct Profile: Identifiable {
     let name: String
-    let symbol: String
+    /// The brand's own mark, from Simple Icons (CC0), in Brands/.
+    let logo: String
     let url: String
     var id: String {
         name
@@ -321,8 +322,10 @@ private struct ProfileButton: View {
     var body: some View {
         if let target = URL(string: profile.url) {
             Link(destination: target) {
-                Image(systemName: profile.symbol)
-                    .font(.system(size: 15, weight: .medium))
+                Image("Brands/\(profile.logo)")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
                     .frame(width: 38, height: 38)
                     .background(
                         hovering ? AnyShapeStyle(Brand.green.opacity(0.25)) : AnyShapeStyle(.white.opacity(0.07)),

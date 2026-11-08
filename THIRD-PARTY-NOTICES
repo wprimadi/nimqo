@@ -4,3 +4,8 @@ No third-party code is bundled yet. Every dependency added to a release build
 must be listed here with its license text before it ships, including
 whatsapp-rust (MIT), SQLCipher Community Edition (BSD-style), and UniFFI
 (MPL-2.0, used unmodified; its source is available from crates.io).
+
+Brand marks in the About window (app/NIMQO/Assets.xcassets/Brands) are SVGs
+from Simple Icons 13.21.0 (https://simpleicons.org), released under CC0 1.0.
+The marks themselves remain trademarks of their owners and are used only to
+link to the author's profiles on those services.
