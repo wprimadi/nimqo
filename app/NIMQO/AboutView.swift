@@ -221,7 +221,7 @@ private struct VersionChip: View {
     }
 }
 
-/// Who made it: name, role, mail and web, then every profile.
+/// Who made it: name, mail and web, then every profile.
 private struct Maker: View {
     @State private var hovered: String?
     private static let profiles: [Profile] = [
@@ -241,7 +241,6 @@ private struct Maker: View {
             VStack(spacing: 2) {
                 Text("Crafted by").font(.caption).foregroundStyle(.secondary).textCase(.uppercase).tracking(1.2)
                 Text("Wahyu Primadi").font(.title2.weight(.semibold))
-                Text("CTO at Lumoshive").font(.callout).foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
                 LinkPill(title: "wahyuprimadi.com", symbol: "globe", url: "https://wahyuprimadi.com", prominent: true)
