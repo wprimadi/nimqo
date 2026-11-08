@@ -10,6 +10,9 @@ struct MessageActions {
     let react: ((String) -> Void)?
     /// Opens the full emoji list for this message.
     let moreReactions: () -> Void
+    /// The full emoji list is open for this message.
+    let picking: Bool
+    let endPicking: () -> Void
 }
 
 /// Beside a bubble while the pointer is over its row: React, then a menu
@@ -38,6 +41,7 @@ struct MessageHoverBar: View {
                             actions.moreReactions()
                         }
                     }
+                    .modifier(EmojiField(active: actions.picking, pick: react, end: actions.endPicking))
             }
             if !mirrored {
                 more
@@ -48,8 +52,8 @@ struct MessageHoverBar: View {
         .foregroundStyle(.secondary)
         .imageScale(.large)
         // Kept in the layout while hidden, so rows don't shift on hover.
-        .opacity(shown || reacting ? 1 : 0)
-        .allowsHitTesting(shown || reacting)
+        .opacity(shown || reacting || actions.picking ? 1 : 0)
+        .allowsHitTesting(shown || reacting || actions.picking)
         .animation(.easeOut(duration: 0.12), value: shown)
         .accessibilityHidden(true)
     }
@@ -105,12 +109,14 @@ struct ReactPicker: View {
 }
 
 /// The full emoji list is the macOS Character Viewer. It types into the
-/// focused field, so a hidden one takes the pick for message `picking`.
-/// Anything that isn't an emoji (the viewer closed and a key was typed)
-/// ends picking instead of reacting.
-struct EmojiPickerHost: ViewModifier {
-    @Binding var picking: Int64?
-    let react: (Int64, String) -> Void
+/// focused field and points at it, so a hidden field under the React
+/// button takes the pick. Anything that isn't an emoji (the viewer closed
+/// and a key was typed) ends picking instead of reacting, as does focus
+/// moving anywhere else.
+private struct EmojiField: ViewModifier {
+    let active: Bool
+    let pick: (String) -> Void
+    let end: () -> Void
     @State private var typed = ""
     @FocusState private var focused: Bool
 
@@ -118,29 +124,32 @@ struct EmojiPickerHost: ViewModifier {
         content
             .background {
                 TextField("", text: $typed)
+                    .textFieldStyle(.plain)
+                    // Its focus ring was the blue outline left on screen.
+                    .focusEffectDisabled()
                     .focused($focused)
                     .frame(width: 1, height: 1)
                     .opacity(0.01)
                     .accessibilityHidden(true)
             }
-            .onChange(of: picking) {
-                guard picking != nil else { return }
+            .onChange(of: active, initial: true) {
+                guard active else { return }
                 focused = true
                 // After the field takes focus, or the viewer has no target.
                 DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
             }
             .onChange(of: typed) {
                 guard !typed.isEmpty else { return }
-                if let seq = picking, let emoji = typed.first, Self.isEmoji(emoji) {
-                    react(seq, String(emoji))
+                if active, let emoji = typed.first, Self.isEmoji(emoji) {
+                    pick(String(emoji))
                 }
                 typed = ""
-                picking = nil
                 focused = false
+                end()
             }
             .onChange(of: focused) {
-                if !focused {
-                    picking = nil
+                if !focused, active {
+                    end()
                 }
             }
     }
@@ -157,5 +166,21 @@ extension MessageBubble {
         if let actions {
             MessageHoverBar(actions: actions, mine: message.myReaction, shown: hovering, mirrored: message.fromMe)
         }
+    }
+}
+
+extension ConversationView {
+    func actions(for message: ChatMessage) -> MessageActions {
+        MessageActions(
+            menu: AnyView(menu(for: message)),
+            react: send != nil && message.kind != .deleted ? { react(message.seq, $0) } : nil,
+            moreReactions: { pickingEmoji = message.seq },
+            picking: pickingEmoji == message.seq,
+            endPicking: {
+                if pickingEmoji == message.seq {
+                    pickingEmoji = nil
+                }
+            }
+        )
     }
 }

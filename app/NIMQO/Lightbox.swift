@@ -7,13 +7,13 @@ import SwiftUI
 @MainActor
 @Observable
 final class Lightbox {
-    nonisolated static let space = "conversation"
-
     private(set) var message: ChatMessage?
     /// False while growing out of or shrinking back into the bubble.
     private(set) var expanded = false
-    /// Bubble frames by seq, in the conversation's coordinate space; not
-    /// observed, so scrolling redraws nothing.
+    /// Bubble frames by seq, in window coordinates: the lightbox sits in an
+    /// overlay, outside any coordinate space named on the conversation, so
+    /// both sides measure in the one space they share. Not observed, so
+    /// scrolling redraws nothing.
     @ObservationIgnored var frames: [Int64: CGRect] = [:]
 
     func open(_ message: ChatMessage, reduceMotion: Bool) {
@@ -54,7 +54,7 @@ final class Lightbox {
 extension View {
     /// Tells the lightbox where this message's bubble media is.
     func lightboxSource(_ message: ChatMessage, _ lightbox: Lightbox?) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Lightbox.space)) } action: {
+        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
             lightbox?.frames[message.seq] = $0
         }
         // Hidden while it is open, so the photo seems to leave the bubble.
@@ -98,7 +98,7 @@ struct LightboxView: View {
             // photo is held to twice its own size.
             let target = Self.fit(size, in: bounds.insetBy(dx: 48, dy: 76),
                                   maxScale: isVideo || picture?.full != true ? .infinity : 2)
-            let origin = geo.frame(in: .named(Lightbox.space)).origin
+            let origin = geo.frame(in: .global).origin
             let start = lightbox.frames[message.seq].map { $0.offsetBy(dx: -origin.x, dy: -origin.y) }
                 ?? target.insetBy(dx: target.width * 0.3, dy: target.height * 0.3)
             let rect = lightbox.expanded ? target : start

@@ -27,7 +27,7 @@ struct ConversationView: View {
     @State private var marked: Int64?
     @State private var pulsing: Int64?
     /// The message the full emoji list is open for.
-    @State private var pickingEmoji: Int64?
+    @State var pickingEmoji: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
@@ -75,7 +75,6 @@ struct ConversationView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .coordinateSpace(.named(Lightbox.space))
             .overlay {
                 if let open = lightbox.message {
                     LightboxView(lightbox: lightbox, message: open, chat: chat.id, store: pictures)
@@ -135,7 +134,6 @@ struct ConversationView: View {
                 .scrollTargetLayout()
                 .padding(Theme.Spacing.medium)
             }
-            .modifier(EmojiPickerHost(picking: $pickingEmoji, react: react))
             .modifier(TimelinePaging(topSeq: $topSeq) { top in
                 // Near the oldest loaded message: load the page before it.
                 if hasOlder, top.map({ top in messages.prefix(5).contains { $0.seq == top } }) ?? true {
@@ -188,7 +186,7 @@ struct ConversationView: View {
 
     /// The context menu, also behind the button shown on hover.
     @ViewBuilder
-    private func menu(for message: ChatMessage) -> some View {
+    func menu(for message: ChatMessage) -> some View {
         if send != nil, message.kind != .deleted {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
             ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickingEmoji = message.seq }
@@ -199,14 +197,6 @@ struct ConversationView: View {
         if send != nil, message.delivery == .failed {
             Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
         }
-    }
-
-    private func actions(for message: ChatMessage) -> MessageActions {
-        MessageActions(
-            menu: AnyView(menu(for: message)),
-            react: send != nil && message.kind != .deleted ? { react(message.seq, $0) } : nil,
-            moreReactions: { pickingEmoji = message.seq }
-        )
     }
 
     /// One page at a time; the scroll restore above keeps a page coming in

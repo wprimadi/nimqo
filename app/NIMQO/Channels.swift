@@ -152,7 +152,6 @@ struct ChannelView: View {
                 }
             }
         }
-        .coordinateSpace(.named(Lightbox.space))
         .overlay {
             if let open = lightbox.message {
                 LightboxView(lightbox: lightbox, message: open, chat: channel.id, store: pictures)
