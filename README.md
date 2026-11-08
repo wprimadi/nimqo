@@ -17,6 +17,13 @@
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-3B82F6"></a>
 </p>
 
+<p align="center">
+  <a href="https://sonarcloud.io/summary/overall?id=wprimadi_nimqo"><img alt="Quality Gate" src="https://sonarcloud.io/api/project_badges/measure?project=wprimadi_nimqo&metric=alert_status"></a>
+  <a href="https://sonarcloud.io/summary/overall?id=wprimadi_nimqo"><img alt="Security" src="https://sonarcloud.io/api/project_badges/measure?project=wprimadi_nimqo&metric=security_rating"></a>
+  <a href="https://sonarcloud.io/summary/overall?id=wprimadi_nimqo"><img alt="Reliability" src="https://sonarcloud.io/api/project_badges/measure?project=wprimadi_nimqo&metric=reliability_rating"></a>
+  <a href="https://sonarcloud.io/summary/overall?id=wprimadi_nimqo"><img alt="Maintainability" src="https://sonarcloud.io/api/project_badges/measure?project=wprimadi_nimqo&metric=sqale_rating"></a>
+</p>
+
 > [!WARNING]
 > **NIMQO is unofficial.** It is an independent, open-source app that is not
 > affiliated with, endorsed by, or sponsored by WhatsApp or Meta. It speaks the
