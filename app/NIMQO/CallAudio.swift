@@ -16,7 +16,8 @@ final class CallAudio: @unchecked Sendable {
     private let playback = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 1)!
     // swiftlint:enable force_unwrapping
     private let lock = NSLock()
-    private var engine: AVAudioEngine?
+    private var mic: AVAudioEngine?
+    private var speaker: AVAudioEngine?
     private var player: AVAudioPlayerNode?
     private var pending: [Int16] = []
     private var queued = 0
@@ -24,22 +25,30 @@ final class CallAudio: @unchecked Sendable {
     private let log = Logger(subsystem: "app.nimqo", category: "call-audio")
 
     /// Starts the microphone; `send` gets each full frame.
-    /// Voice processing fails to start on some audio setups (macOS builds
-    /// an aggregate of the default input and output, and virtual devices
-    /// can break it); the call then goes on without echo cancellation.
+    /// Voice processing with the speaker in the same engine cancels the echo
+    /// best, but on some audio setups the output side fails to start
+    /// (-10875). Then voice processing goes on the microphone alone with the
+    /// speaker on its own engine, and last without voice processing.
     func start(send: @escaping @Sendable ([Int16]) -> Void) throws {
         stop()
-        do {
-            try start(voiceProcessing: true, send: send)
-        } catch {
-            log.error("voice processing unavailable, no echo cancellation: \(error, privacy: .public)")
-            try start(voiceProcessing: false, send: send)
+        var failure: Error = CocoaError(.featureUnsupported)
+        for (voiceProcessing, together) in [(true, true), (true, false), (false, false)] {
+            do {
+                return try start(voiceProcessing: voiceProcessing, together: together, send: send)
+            } catch {
+                log.error("""
+                audio start failed (voice processing \(voiceProcessing), one engine \(together)): \
+                \(error, privacy: .public)
+                """)
+                failure = error
+            }
         }
+        throw failure
     }
 
-    private func start(voiceProcessing: Bool, send: @escaping @Sendable ([Int16]) -> Void) throws {
-        let engine = AVAudioEngine()
-        let input = engine.inputNode
+    private func start(voiceProcessing: Bool, together: Bool, send: @escaping @Sendable ([Int16]) -> Void) throws {
+        let mic = AVAudioEngine()
+        let input = mic.inputNode
         if voiceProcessing {
             try input.setVoiceProcessingEnabled(true)
         }
@@ -47,22 +56,33 @@ final class CallAudio: @unchecked Sendable {
         guard let converter = AVAudioConverter(from: format, to: wire) else {
             throw CocoaError(.featureUnsupported)
         }
-        converter.downmix = true
+        // Voice processing reports several channels; the first is the cleaned voice.
+        converter.channelMap = [0]
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.capture(buffer, with: converter).forEach(send)
         }
+        let speaker = together ? mic : AVAudioEngine()
         let player = AVAudioPlayerNode()
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: playback)
+        speaker.attach(player)
+        speaker.connect(player, to: speaker.mainMixerNode, format: playback)
         do {
-            try engine.start()
+            try mic.start()
+            if !together {
+                try speaker.start()
+            }
         } catch {
             input.removeTap(onBus: 0)
+            mic.stop()
+            speaker.stop()
+            if voiceProcessing {
+                try? input.setVoiceProcessingEnabled(false)
+            }
             throw error
         }
         player.play()
         lock.withLock {
-            self.engine = engine
+            self.mic = mic
+            self.speaker = speaker
             self.player = player
             pending = []
             queued = 0
@@ -71,15 +91,18 @@ final class CallAudio: @unchecked Sendable {
     }
 
     func stop() {
-        let engine = lock.withLock {
+        let (mic, speaker) = lock.withLock {
             defer {
-                self.engine = nil
+                self.mic = nil
+                self.speaker = nil
                 player = nil
             }
-            return self.engine
+            return (self.mic, self.speaker)
         }
-        engine?.inputNode.removeTap(onBus: 0)
-        engine?.stop()
+        mic?.inputNode.removeTap(onBus: 0)
+        mic?.stop()
+        speaker?.stop()
+        try? mic?.inputNode.setVoiceProcessingEnabled(false)
     }
 
     /// Muted, the microphone sends silence, so the call keeps its timing.
