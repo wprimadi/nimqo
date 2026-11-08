@@ -52,6 +52,20 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// A call that rang while NIMQO could not answer it.
+    func missedCall(from name: String, chat: String) {
+        authorize()
+        let content = UNMutableNotificationContent()
+        content.title = name
+        content.body = String(localized: "Missed call")
+        content.sound = .default
+        content.threadIdentifier = chat
+        let id = Self.missedPrefix + chat
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    private nonisolated static let missedPrefix = "missed-call:"
+
     /// Asked the first time there is something to show.
     private func authorize() {
         guard !authorized else { return }
@@ -82,7 +96,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         _: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        let chat = response.notification.request.identifier
+        let id = response.notification.request.identifier
+        let chat = id.hasPrefix(Self.missedPrefix) ? String(id.dropFirst(Self.missedPrefix.count)) : id
         await MainActor.run {
             // Only chats of the current session.
             guard unread?[chat] != nil else { return }

@@ -15,12 +15,13 @@ name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
+async-channel = "2.5"
 log = "0.4"
 nimqo-whatsapp = { path = "../nimqo-whatsapp" }
 oslog = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 uniffi = { version = "0.32", features = ["cli"] }
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client", "voip-libopus", "voip-relay-native"] }
 
 [lints]
 workspace = true

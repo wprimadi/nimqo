@@ -51,6 +51,7 @@ final class CoreModel {
             contacts.core = core
             channels.core = core
             statuses.core = core
+            calls.core = core
             notifier.reset()
         }
     }
@@ -60,6 +61,7 @@ final class CoreModel {
     let contacts = ContactStore()
     let channels = ChannelStore()
     let statuses = StatusStore()
+    let calls = CallStore()
     let notifier = Notifier()
     private var observers = SystemObservers()
     private var lastNetworkAvailable: Bool?
@@ -84,6 +86,10 @@ final class CoreModel {
         self.defaults = defaults
         hasAcceptedDisclosure = defaults.bool(forKey: Self.disclosureKey)
         notifier.open = { [weak self] chat in self?.selectedChat = chat }
+        calls.missed = { [weak self] chat in
+            guard let self else { return }
+            notifier.missedCall(from: title(of: chat), chat: chat)
+        }
         // Quit is the only path that ends the session (plan 7.6); closing the
         // window does not. Disconnect cleanly before the process exits.
         NotificationCenter.default.addObserver(

@@ -61,8 +61,8 @@ final class ContactStore {
 extension View {
     /// Replaces the plain window title with the chat's picture, name,
     /// number and status; clicking it shows the contact card.
-    func chatHeader(chat: ChatSummary, avatars: AvatarStore, contacts: ContactStore) -> some View {
-        modifier(ChatHeader(chat: chat, avatars: avatars, contacts: contacts))
+    func chatHeader(chat: ChatSummary, avatars: AvatarStore, contacts: ContactStore, calls: CallStore) -> some View {
+        modifier(ChatHeader(chat: chat, avatars: avatars, contacts: contacts, calls: calls))
     }
 }
 
@@ -70,13 +70,19 @@ private struct ChatHeader: ViewModifier {
     let chat: ChatSummary
     let avatars: AvatarStore
     let contacts: ContactStore
+    let calls: CallStore
     @State private var showsCard = false
 
     func body(content: Content) -> some View {
         let status = chat.isGroup ? nil : contacts.status(for: chat.id)
         content
             .hidesWindowTitle()
-            .toolbar { headerItem(status: status) }
+            .toolbar {
+                headerItem(status: status)
+                if !chat.isGroup {
+                    ToolbarItemGroup(placement: .primaryAction) { callButtons }
+                }
+            }
             .task(id: chat.id) { await contacts.watch(chat) }
             // Typing ends without a signal when the "paused" one is lost.
             .task(id: status?.typing) {
@@ -97,6 +103,17 @@ private struct ChatHeader: ViewModifier {
         } else {
             ToolbarItem(placement: .navigation) { header(status: status) }
         }
+    }
+
+    // ponytail: 1:1 only; group calls are not supported yet.
+    @ViewBuilder
+    private var callButtons: some View {
+        Button("Voice Call", systemImage: "phone") { calls.place(chat.id, video: false) }
+            .help("Voice call")
+            .disabled(calls.current != nil || calls.core == nil)
+        Button("Video Call", systemImage: "video") { calls.place(chat.id, video: true) }
+            .help("Video call")
+            .disabled(calls.current != nil || calls.core == nil)
     }
 
     private func header(status: ContactStatus?) -> some View {

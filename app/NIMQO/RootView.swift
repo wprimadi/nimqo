@@ -165,7 +165,7 @@ struct MainView: View {
         )
         // A new view per chat: it opens at the latest message.
         .id(chat.id)
-        .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts)
+        .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts, calls: model.calls)
     }
 
     @ViewBuilder

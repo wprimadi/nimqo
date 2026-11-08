@@ -35,6 +35,13 @@ struct NimqoApp: App {
                 .task { model.start() }
         }
 
+        // Opened by the menu bar label when a call starts or rings.
+        Window("Call", id: CallWindow.id) {
+            CallWindow(model: model)
+        }
+        .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
+        .defaultPosition(.topTrailing)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 PanelCommand(title: "About NIMQO", panel: .about, panels: panels)
@@ -54,6 +61,7 @@ struct NimqoApp: App {
             Label("NIMQO", systemImage: model.statusSymbol)
                 .labelStyle(.iconOnly)
                 .modifier(ShowsWindowOnRequest())
+                .modifier(OpensCallWindow(calls: model.calls))
                 .accessibilityValue(unread > 0 ? "\(model.statusText), \(unread) unread" : model.statusText)
             if unread > 0 {
                 Text("\(unread)")
@@ -78,6 +86,21 @@ private struct ShowsWindowOnRequest: ViewModifier {
         content.onReceive(DistributedNotificationCenter.default().publisher(for: MainWindow.show)) { _ in
             openWindow(id: MainWindow.id)
             NSApp.activate()
+        }
+    }
+}
+
+/// Shows the call window whenever a call starts, from the menu bar label,
+/// which lives as long as the app.
+private struct OpensCallWindow: ViewModifier {
+    let calls: CallStore
+    @Environment(\.openWindow) private var openWindow
+
+    func body(content: Content) -> some View {
+        content.onChange(of: calls.current?.started) { _, started in
+            if started != nil {
+                openWindow(id: CallWindow.id)
+            }
         }
     }
 }

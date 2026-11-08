@@ -26,12 +26,14 @@ use whatsapp_rust::{ChatActivity, Client, PresenceStatus};
 
 uniffi::setup_scaffolding!();
 
+mod calls;
 mod channels;
 mod chats;
 mod outbox;
 mod privacy;
 mod state;
 
+pub use calls::{CallEnd, CallListener, PeerVideo};
 pub use chats::{Chat, ChatMessage, Contact, Delivery, Mention, MessageKind, SearchHit};
 
 /// A group as the server describes it, for the group's info card.
@@ -194,6 +196,7 @@ pub struct Core {
     avatars: Arc<Avatars>,
     attachments: Arc<Attachments>,
     presences: Arc<Presences>,
+    calls: Arc<calls::Calls>,
     /// Data-directory lock; released on drop or after a reset.
     lock: Mutex<Option<File>>,
 }
@@ -267,6 +270,7 @@ impl Core {
             avatars: session.avatars,
             attachments: session.attachments,
             presences: session.presences,
+            calls: session.calls,
             lock: Mutex::new(Some(session.lock)),
         }))
     }
@@ -1145,6 +1149,7 @@ struct Session {
     avatars: Arc<Avatars>,
     attachments: Arc<Attachments>,
     presences: Arc<Presences>,
+    calls: Arc<calls::Calls>,
 }
 
 async fn open_stores() -> Result<stores::Stores, CoreError> {
@@ -1190,12 +1195,9 @@ async fn connect(
         stores.media_key.clone(),
     ));
     let presences = Arc::<Presences>::default();
-    let builder = message_handlers(
-        Bot::builder(),
-        history_inbox.clone(),
-        &sender_cell,
-        &avatars,
-    );
+    let calls = Arc::<calls::Calls>::default();
+    let builder = call_handlers(Bot::builder(), inbox.clone(), Arc::clone(&calls));
+    let builder = message_handlers(builder, history_inbox.clone(), &sender_cell, &avatars);
     let builder = presence_handlers(builder, history_inbox, Arc::clone(&presences));
     let bot = state_handlers(builder, machine)
         .with_backend(stores.protocol)
@@ -1249,6 +1251,7 @@ async fn connect(
         avatars,
         attachments,
         presences,
+        calls,
     })
 }
 
@@ -1275,6 +1278,25 @@ fn state_handlers<B, T, H, R>(
                 machine.feed(input);
             }
             async {}
+        },
+    )
+}
+
+/// Ringing, answers, and hang-ups for 1:1 calls.
+fn call_handlers<B, T, H, R>(
+    builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
+    inbox: Inbox,
+    calls: Arc<calls::Calls>,
+) -> whatsapp_rust::bot::BotBuilder<B, T, H, R> {
+    builder.on_event_for(
+        &[
+            EventKind::IncomingCall,
+            EventKind::MissedCall,
+            EventKind::CallEndedElsewhere,
+        ],
+        move |event, client| {
+            let (inbox, calls) = (inbox.clone(), Arc::clone(&calls));
+            async move { calls.on_event(&client, &inbox, &event).await }
         },
     )
 }

@@ -121,6 +121,17 @@ works with every chat and group.
   photo with a caption to the audience set in your phone's status privacy.
   A Settings switch decides whether posters see you in their viewers.
 
+### Calls
+
+- **Voice and video calls** with one person, from the phone and camera
+  buttons in the chat header. Incoming calls ring in a small window that
+  floats over other apps until you answer or decline (Return / Esc).
+- Mute, camera on and off mid-call (the other side can ask to switch to
+  video too), and the running time. Closing the window hangs up.
+- Echo cancellation from macOS's own voice processing; video is H.264
+  encoded and decoded in hardware.
+- A notification for calls missed while NIMQO could not answer.
+
 ### The Mac around it
 
 - **Menu bar extra** with connection status, unread count, and recent chats.
@@ -148,6 +159,7 @@ works with every chat and group.
 | ⌘↓ | Jump to the latest message |
 | ⌘S | Save the open photo or video |
 | Esc | Close the viewer, a sheet, or a menu |
+| ⌘⇧M / ⌘⇧V | Mute / camera, during a call |
 | ⌘, | Settings |
 
 ## Privacy and security
@@ -313,16 +325,13 @@ Never bypass it with `--no-verify`. Conventions:
 
 **Next**
 
-- Chat actions: pin and archive chats, star messages (with a starred list),
-  delete for everyone, edit, and forward.
-- Group administration: create groups, add and remove members, roles, and
-  group settings.
-- Calls, after a feasibility check of voice and video over the protocol.
+- Group calls, and calls in the chat history.
 
 **Known limits today**
 
 - Not signed or notarized yet; builds are ad hoc and for development.
 - Channels are read-only; you cannot post to or create one.
+- Calls are one-to-one; group calls keep ringing on your phone only.
 - Status: no video posts, no deleting your own update, and the "close
   friends" audience is not supported (NIMQO refuses rather than guess).
 - History is what your phone sends at linking; older messages load from it
