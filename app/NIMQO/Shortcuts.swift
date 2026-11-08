@@ -83,6 +83,8 @@ struct ReactMenu: View {
     static let choices = ["👍", "❤️", "😂", "😮", "😢", "🙏"]
     let mine: String?
     let choose: (String) -> Void
+    /// Opens the full emoji list.
+    var more: (() -> Void)?
 
     var body: some View {
         Menu("React", systemImage: "face.smiling") {
@@ -92,6 +94,10 @@ struct ReactMenu: View {
             if mine != nil {
                 Divider()
                 Button("Remove Reaction") { choose("") }
+            }
+            if let more {
+                Divider()
+                Button("More Reactions…", action: more)
             }
         }
     }

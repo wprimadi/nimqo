@@ -26,6 +26,8 @@ struct ConversationView: View {
     var show: @MainActor (Int64) -> Void = { _ in }
     @State private var marked: Int64?
     @State private var pulsing: Int64?
+    /// The message the full emoji list is open for.
+    @State private var pickingEmoji: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
@@ -110,7 +112,7 @@ struct ConversationView: View {
                             DayChip(date: Date(timeIntervalSince1970: TimeInterval(message.timestampSecs)))
                         }
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures,
-                                      openQuote: show)
+                                      openQuote: show, actions: actions(for: message))
                             // A shown message pops once, on a band across the
                             // whole row that fades away, like on the phone.
                             .scaleEffect(pulsing == message.seq ? 1.06 : 1,
@@ -125,20 +127,7 @@ struct ConversationView: View {
                             }
                             // Messages in a row from one sender sit close together.
                             .padding(.top, breaks.runs.contains(message.seq) ? Theme.Spacing.small : 0)
-                            .contextMenu {
-                                if send != nil, message.kind != .deleted {
-                                    Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
-                                    ReactMenu(mine: message.myReaction) { react(message.seq, $0) }
-                                }
-                                if message.canSave {
-                                    Button("Save As…", systemImage: "square.and.arrow.down") {
-                                        pictures.save(chat: chat.id, message: message)
-                                    }
-                                }
-                                if send != nil, message.delivery == .failed {
-                                    Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
-                                }
-                            }
+                            .contextMenu { menu(for: message) }
                     }
                     Color.clear.frame(height: 1)
                         .onShownChange { atBottom = $0 }
@@ -146,6 +135,7 @@ struct ConversationView: View {
                 .scrollTargetLayout()
                 .padding(Theme.Spacing.medium)
             }
+            .modifier(EmojiPickerHost(picking: $pickingEmoji, react: react))
             .modifier(TimelinePaging(topSeq: $topSeq) { top in
                 // Near the oldest loaded message: load the page before it.
                 if hasOlder, top.map({ top in messages.prefix(5).contains { $0.seq == top } }) ?? true {
@@ -196,6 +186,29 @@ struct ConversationView: View {
         }
     }
 
+    /// The context menu, also behind the button shown on hover.
+    @ViewBuilder
+    private func menu(for message: ChatMessage) -> some View {
+        if send != nil, message.kind != .deleted {
+            Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
+            ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickingEmoji = message.seq }
+        }
+        if message.canSave {
+            Button("Save As…", systemImage: "square.and.arrow.down") { pictures.save(chat: chat.id, message: message) }
+        }
+        if send != nil, message.delivery == .failed {
+            Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
+        }
+    }
+
+    private func actions(for message: ChatMessage) -> MessageActions {
+        MessageActions(
+            menu: AnyView(menu(for: message)),
+            react: send != nil && message.kind != .deleted ? { react(message.seq, $0) } : nil,
+            moreReactions: { pickingEmoji = message.seq }
+        )
+    }
+
     /// One page at a time; the scroll restore above keeps a page coming in
     /// from triggering the next one by itself.
     private func showOlder() {
@@ -215,6 +228,9 @@ struct MessageBubble: View {
     let pictures: PictureStore
     /// Jumps to the quoted message of a reply.
     var openQuote: ((Int64) -> Void)?
+    /// Buttons shown on hover; none for read-only posts.
+    var actions: MessageActions?
+    @State var hovering = false
 
     private var text: String {
         ChatMessage.describe(kind: message.kind, body: message.body)
@@ -304,6 +320,7 @@ struct MessageBubble: View {
         HStack {
             if message.fromMe {
                 Spacer(minLength: Theme.Spacing.large)
+                hoverBar
             }
             VStack(alignment: .leading, spacing: isVisual ? 4 : 2) {
                 Group {
@@ -362,9 +379,11 @@ struct MessageBubble: View {
             }
             .padding(.bottom, message.reactions == nil ? 0 : 10)
             if !message.fromMe {
+                hoverBar
                 Spacer(minLength: Theme.Spacing.large)
             }
         }
+        .onHover { hovering = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(sender), \(String(rich.characters)), \(time.formatted(date: .omitted, time: .shortened))"
