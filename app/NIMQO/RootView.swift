@@ -138,7 +138,8 @@ struct MainView: View {
             reveal: model.revealing,
             revealed: { model.revealing = nil },
             retry: { model.retry($0, in: chat.id) },
-            react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } }
+            react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } },
+            show: { seq in Task { await model.reveal(seq, in: chat.id) } }
         )
         // A new view per chat: it opens at the latest message.
         .id(chat.id)

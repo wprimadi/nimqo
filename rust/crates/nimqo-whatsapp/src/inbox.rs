@@ -120,6 +120,9 @@ pub struct MessageRow {
     pub quote_from_me: Option<bool>,
     #[diesel(sql_type = Nullable<Text>)]
     pub quote_name: Option<String>,
+    /// The quoted message's seq, when it is stored here.
+    #[diesel(sql_type = Nullable<BigInt>)]
+    pub quote_seq: Option<i64>,
 }
 
 impl Inbox {
@@ -238,7 +241,7 @@ impl Inbox {
                  -- stored, show it instead, so author and content always match.
                  CASE WHEN q.rowid IS NULL THEN m.quote_kind ELSE q.kind END AS quote_kind,
                  CASE WHEN q.rowid IS NULL THEN m.quote_body ELSE q.body END AS quote_body,
-                 q.from_me AS quote_from_me,
+                 q.from_me AS quote_from_me, q.rowid AS quote_seq,
                  coalesce((SELECT name FROM contacts WHERE jid = q.sender),
                           (SELECT name FROM chat_names WHERE chat = q.sender),
                           nullif(q.sender_name, '')) AS quote_name,

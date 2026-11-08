@@ -166,6 +166,8 @@ pub struct Reply {
     /// None when the quoted message is not stored here.
     pub from_me: Option<bool>,
     pub sender_name: Option<String>,
+    /// The quoted message's seq, to jump to it; None when not stored here.
+    pub seq: Option<i64>,
 }
 
 impl From<MessageRow> for ChatMessage {
@@ -190,6 +192,7 @@ impl From<MessageRow> for ChatMessage {
                 body: r.quote_body,
                 from_me: r.quote_from_me,
                 sender_name: r.quote_name,
+                seq: r.quote_seq,
             }),
             mentions: Vec::new(),
         }

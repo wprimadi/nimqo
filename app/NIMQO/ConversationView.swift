@@ -22,6 +22,8 @@ struct ConversationView: View {
     var retry: @MainActor (Int64) -> Void = { _ in }
     /// Reacts to a message (seq); an empty emoji removes the reaction.
     var react: @MainActor (Int64, String) -> Void = { _, _ in }
+    /// Scrolls to a message (seq), loading older pages if needed.
+    var show: @MainActor (Int64) -> Void = { _ in }
     @State private var marked: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
@@ -106,7 +108,8 @@ struct ConversationView: View {
                         if breaks.days.contains(message.seq) {
                             DayChip(date: Date(timeIntervalSince1970: TimeInterval(message.timestampSecs)))
                         }
-                        MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures)
+                        MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures,
+                                      openQuote: show)
                             .background(
                                 .tint.opacity(marked == message.seq ? 0.2 : 0),
                                 in: RoundedRectangle(cornerRadius: 8)
@@ -193,6 +196,8 @@ struct MessageBubble: View {
     let showsSender: Bool
     let chat: String
     let pictures: PictureStore
+    /// Jumps to the quoted message of a reply.
+    var openQuote: ((Int64) -> Void)?
 
     private var text: String {
         ChatMessage.describe(kind: message.kind, body: message.body)
@@ -289,7 +294,14 @@ struct MessageBubble: View {
                         Text(sender).font(.caption.bold()).foregroundStyle(.tint)
                     }
                     if let reply = message.reply {
-                        QuoteView(reply: reply)
+                        if let seq = reply.seq, let openQuote {
+                            Button { openQuote(seq) } label: { QuoteView(reply: reply) }
+                                .buttonStyle(.plain)
+                                .contentShape(.rect)
+                                .help("Show the original message")
+                        } else {
+                            QuoteView(reply: reply)
+                        }
                     }
                 }
                 .padding(.horizontal, isVisual ? 8 : 0)
@@ -343,6 +355,11 @@ struct MessageBubble: View {
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
         )
+        .accessibilityAction(named: "Show the original message") {
+            if let seq = message.reply?.seq {
+                openQuote?(seq)
+            }
+        }
     }
 }
 

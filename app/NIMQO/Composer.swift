@@ -28,7 +28,8 @@ struct Composer: View {
                                 kind: replyingTo.kind,
                                 body: replyingTo.body,
                                 fromMe: replyingTo.fromMe,
-                                senderName: replyingTo.contactName ?? replyingTo.senderName
+                                senderName: replyingTo.contactName ?? replyingTo.senderName,
+                                seq: nil
                             ))
                             Spacer()
                             Button("Cancel reply", systemImage: "xmark.circle.fill") { self.replyingTo = nil }
