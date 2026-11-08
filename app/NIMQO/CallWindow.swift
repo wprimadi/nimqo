@@ -55,7 +55,7 @@ private struct CallScreen: View {
                 portrait.transition(.opacity)
             }
         }
-        .frame(width: call.showsVideo ? 720 : 340, height: call.showsVideo ? 480 : 480)
+        .frame(width: call.showsVideo ? 720 : 340, height: 480)
         .environment(\.colorScheme, .dark)
     }
 
