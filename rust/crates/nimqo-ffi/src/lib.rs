@@ -271,6 +271,10 @@ impl Core {
             .into_iter()
             .map(ChatMessage::from)
             .collect();
+        // As on the phone, a status shows only when its poster is saved.
+        if chat_id == nimqo_whatsapp::inbox::STATUS {
+            messages.retain(|m| m.from_me || self.inbox.is_contact(&m.sender).unwrap_or(false));
+        }
         let mut names = std::collections::HashMap::new();
         for m in &mut messages {
             let Some(body) = &m.body else { continue };

@@ -27,6 +27,29 @@ impl Inbox {
         Ok(())
     }
 
+    /// Whether `jid` (by number or LID) is in the address book, or named in
+    /// a 1:1 chat from history, which is the phone's saved name.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn is_contact(&self, jid: &str) -> Result<bool> {
+        #[derive(diesel::QueryableByName)]
+        struct Known {
+            #[diesel(sql_type = diesel::sql_types::Bool)]
+            known: bool,
+        }
+        let mut conn = self.lock()?;
+        let k: Known = diesel::sql_query(
+            "WITH ids(j) AS (SELECT ?1 UNION SELECT pn FROM lid_map WHERE lid = ?1
+               UNION SELECT lid FROM lid_map WHERE pn = ?1)
+             SELECT EXISTS (SELECT 1 FROM contacts WHERE jid IN (SELECT j FROM ids))
+                 OR EXISTS (SELECT 1 FROM chat_names WHERE chat IN (SELECT j FROM ids)) AS known",
+        )
+        .bind::<Text, _>(jid)
+        .get_result(&mut *conn)?;
+        Ok(k.known)
+    }
+
     /// Everyone in the address book, as stored (by number, or by LID when
     /// the number is unknown).
     ///
@@ -224,6 +247,11 @@ mod tests {
         inbox.save_contact("62811@s.whatsapp.net", "Bob").unwrap();
         assert_eq!(inbox.mention_name("178").unwrap().as_deref(), Some("Bob"));
         assert_eq!(inbox.mention_name("62811").unwrap().as_deref(), Some("Bob"));
+        assert!(
+            inbox.is_contact("178@lid").unwrap(),
+            "saved under the number"
+        );
+        assert!(!inbox.is_contact("179@lid").unwrap());
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }

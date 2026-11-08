@@ -206,7 +206,7 @@ struct StatusComposer: View {
     }
 
     private var note: some View {
-        Label(problem ?? "Goes to your phone's status audience, including contacts who haven't saved your number.",
+        Label(problem ?? "Goes to the audience in your phone's status privacy, as the phone sends it.",
               systemImage: problem == nil ? "person.2.fill" : "exclamationmark.triangle.fill")
             .font(.callout)
             .foregroundStyle(problem == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
