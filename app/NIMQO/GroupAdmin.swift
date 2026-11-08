@@ -104,86 +104,6 @@ struct EditableText: View {
     }
 }
 
-/// People from the address book, several at a time: for new members and
-/// new groups.
-struct PeoplePicker: View {
-    let core: Core?
-    let avatars: AvatarStore
-    /// Numbers ("+digits") already in the group.
-    var excluded: Set<String> = []
-    @Binding var picked: [Contact]
-    @State private var query = ""
-    @State private var contacts: [Contact]?
-    @FocusState private var focused: Bool
-
-    private var shown: [Contact] {
-        let all = (contacts ?? []).filter { !excluded.contains(Self.phone($0.id) ?? "") }
-        let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return all }
-        let digits = text.filter(\.isNumber)
-        return all.filter {
-            $0.name.localizedCaseInsensitiveContains(text) || (!digits.isEmpty && $0.id.hasPrefix(digits))
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search contacts", text: $query)
-                    .textFieldStyle(.plain)
-                    .focused($focused)
-            }
-            .padding(8)
-            .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 8, style: .continuous))
-            List(shown, id: \.id) { contact in
-                row(contact)
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .overlay {
-                if contacts == nil {
-                    ProgressView()
-                } else if shown.isEmpty {
-                    ContentUnavailableView("No contacts to add", systemImage: "person.crop.circle.badge.questionmark")
-                }
-            }
-        }
-        .task {
-            focused = true
-            contacts = await Task.detached { [core] in (try? core?.addressBook()) ?? [] }.value
-        }
-    }
-
-    private func row(_ contact: Contact) -> some View {
-        let isPicked = picked.contains { $0.id == contact.id }
-        return Button {
-            if isPicked {
-                picked.removeAll { $0.id == contact.id }
-            } else {
-                picked.append(contact)
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: isPicked ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundStyle(isPicked ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                    .contentTransition(.symbolEffect(.replace))
-                Avatar(chat: NewChatView.summary(contact.id, contact.name), store: avatars, size: 28)
-                Text(contact.name).lineLimit(1)
-                Spacer()
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isPicked ? .isSelected : [])
-    }
-
-    static func phone(_ id: String) -> String? {
-        id.hasSuffix("@s.whatsapp.net") ? "+" + id.prefix { $0 != "@" } : nil
-    }
-}
-
 /// Inside the group card: pick people, then add them.
 struct AddMembers: View {
     let chat: String
@@ -213,13 +133,11 @@ struct AddMembers: View {
             }
             if let problem {
                 Text(problem).font(.caption).foregroundStyle(.red)
-            } else if !picked.isEmpty {
-                Text(picked.map(\.name).formatted(.list(type: .and)))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             PeoplePicker(core: contacts.core, avatars: avatars,
                          excluded: Set(info.members.compactMap(\.phone)), picked: $picked)
-                .frame(height: 360)
+                .frame(height: 400)
         }
     }
 
@@ -260,87 +178,5 @@ struct MemberMenu: View {
         }
         Divider()
         Button("Remove from Group…", systemImage: "person.badge.minus", role: .destructive, action: remove)
-    }
-}
-
-/// A new group: pick people, then name it. Opens the group once made.
-struct NewGroup: View {
-    let core: Core?
-    let avatars: AvatarStore
-    let back: () -> Void
-    let created: (ChatSummary) -> Void
-    @State private var picked: [Contact] = []
-    @State private var naming = false
-    @State private var name = ""
-    @State private var problem: String?
-    @State private var creating = false
-    @FocusState private var nameFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.small) {
-            HStack {
-                Button("Back", systemImage: "chevron.backward") {
-                    if naming {
-                        naming = false
-                    } else {
-                        back()
-                    }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .keyboardShortcut(.cancelAction)
-                Text(naming ? "Name the Group" : "New Group").font(.headline)
-                Spacer()
-                if creating {
-                    ProgressView().controlSize(.small)
-                }
-                if naming {
-                    Button("Create", action: create)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || creating)
-                } else {
-                    Button("Next") { naming = true }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(picked.isEmpty)
-                }
-            }
-            if let problem {
-                Text(problem).font(.caption).foregroundStyle(.red)
-            } else if !picked.isEmpty {
-                Text(picked.map(\.name).formatted(.list(type: .and)))
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
-            if naming {
-                TextField("Group name", text: $name)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($nameFocused)
-                    .onSubmit(create)
-                    .disabled(creating)
-                    .onAppear { nameFocused = true }
-                Spacer()
-            } else {
-                PeoplePicker(core: core, avatars: avatars, picked: $picked)
-            }
-        }
-        .padding(14)
-        .onChange(of: name) { problem = nil }
-    }
-
-    private func create() {
-        let subject = name.trimmingCharacters(in: .whitespaces)
-        guard let core, !subject.isEmpty, !creating else { return }
-        creating = true
-        problem = nil
-        let ids = picked.map(\.id)
-        Task {
-            do {
-                let id = try await core.createGroup(subject: subject, members: ids)
-                created(ChatSummary(id: id, title: subject, isGroup: true, phone: nil, preview: "",
-                                    lastActivity: .now, unread: 0, timer: nil, muted: false))
-            } catch {
-                problem = CoreModel.message(for: error)
-            }
-            creating = false
-        }
     }
 }

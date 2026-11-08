@@ -4,6 +4,8 @@ import SwiftUI
 extension FocusedValues {
     @Entry var findMessages: Binding<Bool>?
     @Entry var attachFile: Binding<Bool>?
+    @Entry var composing: Binding<NewChatView.Start?>?
+    @Entry var showStarred: Binding<Bool>?
 }
 
 /// The Chat menu: keyboard shortcuts, listed where they can be found.
@@ -11,9 +13,23 @@ struct ChatCommands: Commands {
     let model: CoreModel
     @FocusedValue(\.findMessages) private var findMessages
     @FocusedValue(\.attachFile) private var attachFile
+    @FocusedValue(\.composing) private var composing
+    @FocusedValue(\.showStarred) private var showStarred
 
     var body: some Commands {
+        CommandGroup(replacing: .newItem) {
+            Button("New Chat") { composing?.wrappedValue = .chat }
+                .keyboardShortcut("n")
+                .disabled(composing == nil)
+            Button("New Group") { composing?.wrappedValue = .group }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(composing == nil)
+        }
         CommandMenu("Chat") {
+            Button("Starred Messages") { showStarred?.wrappedValue = true }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(showStarred == nil)
+            Divider()
             Button("Search Messages") { findMessages?.wrappedValue = true }
                 .keyboardShortcut("f")
                 .disabled(findMessages == nil)

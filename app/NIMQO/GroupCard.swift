@@ -52,7 +52,7 @@ struct GroupCard: View {
             Button("Remove", role: .destructive) { change([member.id], .remove) }
         }
         .confirmationDialog("Leave “\(info?.subject ?? chat.title)”?", isPresented: $leaving) {
-            Button("Leave Group", role: .destructive) { run { try await $0.leaveGroup(chatId: chat.id) } }
+            Button("Leave Group", role: .destructive) { leave() }
         } message: {
             Text("You'll stop getting its messages. The chat stays here.")
         }
@@ -82,8 +82,14 @@ struct GroupCard: View {
     private var card: some View {
         VStack(spacing: Theme.Spacing.small) {
             Avatar(chat: chat, store: avatars, size: 96)
-            if let info {
-                EditableText(text: info.subject, placeholder: "Group name", editable: canEditInfo(info)) { name in
+            if let info, !isMember {
+                Text(info.subject ?? chat.title).font(.title2.bold()).multilineTextAlignment(.center)
+                Label("You're no longer a member of this group.", systemImage: "person.crop.circle.badge.xmark")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let info {
+                let subject = info.subject ?? chat.title
+                EditableText(text: subject, placeholder: "Group name", editable: canEditInfo(info)) { name in
                     await save { try await $0.setGroupSubject(chatId: chat.id, subject: name) }
                 }
                 .font(.title2.bold())
@@ -92,7 +98,10 @@ struct GroupCard: View {
                 if let problem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
+                        // Wraps: a refusal can be longer than the card.
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .transition(.opacity)
                 }
                 details(info)
                 memberList
@@ -195,30 +204,35 @@ struct GroupCard: View {
     @ViewBuilder
     private var footer: some View {
         Divider()
-        if isMember {
-            HStack {
-                if isAdmin {
-                    Button(copied ? "Copied" : "Copy Invite Link",
-                           systemImage: copied ? "checkmark" : "link") { copyLink(reset: false) }
-                        .contentTransition(.symbolEffect(.replace))
-                    Menu {
-                        Button("Reset Link…", systemImage: "arrow.clockwise") { resetting = true }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .help("More link options")
+        HStack {
+            if isAdmin {
+                Button(copied ? "Copied" : "Copy Invite Link",
+                       systemImage: copied ? "checkmark" : "link") { copyLink(reset: false) }
+                    .contentTransition(.symbolEffect(.replace))
+                Menu {
+                    Button("Reset Link…", systemImage: "arrow.clockwise") { resetting = true }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                Spacer()
-                Button("Leave Group", role: .destructive) { leaving = true }
-                    .foregroundStyle(.red)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("More link options")
             }
-            .buttonStyle(.borderless)
-        } else {
-            Text("You're no longer a member of this group.")
-                .font(.callout).foregroundStyle(.secondary)
+            Spacer()
+            Button("Leave Group", role: .destructive) { leaving = true }
+                .foregroundStyle(.red)
+        }
+        .buttonStyle(.borderless)
+    }
+
+    /// The card shows the group as left at once, whatever the server's
+    /// copy of it says a moment later.
+    private func leave() {
+        Task {
+            if await save({ try await $0.leaveGroup(chatId: chat.id) }) {
+                contacts.left(chat.id)
+            }
         }
     }
 

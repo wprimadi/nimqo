@@ -32,7 +32,7 @@ struct MainView: View {
     @FocusState private var searching: Bool
     @State private var findRequested = false
     @State private var section = Pane.chats
-    @State private var newChat = false
+    @State private var composing: NewChatView.Start?
     /// A chat opened from New Chat that has no messages yet.
     @State private var draft: ChatSummary?
     /// The list shows archived chats instead of the others.
@@ -73,16 +73,7 @@ struct MainView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    Button("Starred Messages", systemImage: "star") { starred = true }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .help("Starred Messages")
-                        .disabled(model.core == nil)
-                    Button("New Chat", systemImage: "square.and.pencil") { newChat = true }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut("n", modifiers: .command)
-                        .help("New Chat (⌘N)")
+                    MoreMenu(composing: $composing, starred: $starred)
                         .disabled(model.core == nil)
                 }
                 .padding(.horizontal, Theme.Spacing.medium)
@@ -119,8 +110,8 @@ struct MainView: View {
             }
         }
         .toolbar(model.statuses.playing == nil ? .automatic : .hidden, for: .windowToolbar)
-        .sheet(isPresented: $newChat) {
-            NewChatView(core: model.core, avatars: model.avatars) { chat in
+        .sheet(item: $composing) { start in
+            NewChatView(core: model.core, avatars: model.avatars, start: start) { chat in
                 query = ""
                 section = .chats
                 draft = model.chats.contains { $0.id == chat.id } ? nil : chat
@@ -137,6 +128,8 @@ struct MainView: View {
             }
         }
         .focusedSceneValue(\.findMessages, $findRequested)
+        .focusedSceneValue(\.composing, model.core == nil ? nil : $composing)
+        .focusedSceneValue(\.showStarred, model.core == nil ? nil : $starred)
         .onChange(of: findRequested) {
             guard findRequested else { return }
             findRequested = false
@@ -379,5 +372,27 @@ struct ChatRow: View {
             return date.formatted(.dateTime.weekday(.wide))
         }
         return date.formatted(date: .numeric, time: .omitted)
+    }
+}
+
+/// New chat, new group, and starred messages, behind one button.
+private struct MoreMenu: View {
+    @Binding var composing: NewChatView.Start?
+    @Binding var starred: Bool
+
+    var body: some View {
+        Menu {
+            Button("New Chat", systemImage: "square.and.pencil") { composing = .chat }
+            Button("New Group", systemImage: "person.2") { composing = .group }
+            Divider()
+            Button("Starred Messages", systemImage: "star") { starred = true }
+        } label: {
+            Image(systemName: "ellipsis.circle").font(.title3)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("New chat, new group, starred messages")
+        .accessibilityLabel("More")
     }
 }

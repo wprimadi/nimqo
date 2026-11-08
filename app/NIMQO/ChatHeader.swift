@@ -43,6 +43,14 @@ final class ContactStore {
         }
     }
 
+    /// The account left `chat`: no longer among its members.
+    func left(_ chat: String) {
+        guard var info = groups[chat] else { return }
+        info.members.removeAll(where: \.isMe)
+        info.myRole = nil
+        groups[chat] = info
+    }
+
     /// The account can manage `chat`: it is one of the group's admins.
     func isAdmin(of chat: String) -> Bool {
         guard let role = groups[chat]?.myRole else { return false }

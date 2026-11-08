@@ -4,7 +4,8 @@
 use anyhow::{Result, anyhow};
 use diesel::RunQueryDsl;
 use diesel::sql_types::{Nullable, Text};
-use whatsapp_rust::{Client, Jid, ParticipantType};
+use whatsapp_rust::request::IqError;
+use whatsapp_rust::{Client, GroupError, Jid, ParticipantType};
 
 use crate::inbox::Inbox;
 use crate::lids;
@@ -54,7 +55,25 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
     if !chat.ends_with("@g.us") {
         return Err(anyhow!("not a group"));
     }
-    let meta = client.groups().fetch_metadata(&jid).await?;
+    let meta = match client.groups().fetch_metadata(&jid).await {
+        Ok(meta) => meta,
+        // The server keeps a group's info from those who left or were
+        // removed: show it as a group the account is no longer in.
+        Err(GroupError::Iq(IqError::ServerError { code, .. }))
+            if [401, 403, 404].contains(&code) =>
+        {
+            return Ok(Info {
+                subject: None,
+                description: None,
+                created_secs: None,
+                announce_only: false,
+                locked: false,
+                members: Vec::new(),
+                my_role: None,
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
     // Own number and LID, to find the account among the members.
     let me: Vec<Jid> = [client.pn(), client.lid()].into_iter().flatten().collect();
     let mut members = Vec::with_capacity(meta.participants.len());
