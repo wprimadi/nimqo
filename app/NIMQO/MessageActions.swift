@@ -12,6 +12,8 @@ struct MessageActions {
     let moreReactions: () -> Void
     /// The full emoji list is open for this message.
     let picking: Bool
+    /// Bumped on every request, so asking again reopens the viewer.
+    let pickRequest: Int
     let endPicking: () -> Void
 }
 
@@ -41,7 +43,8 @@ struct MessageHoverBar: View {
                             actions.moreReactions()
                         }
                     }
-                    .modifier(EmojiField(active: actions.picking, pick: react, end: actions.endPicking))
+                    .modifier(EmojiField(active: actions.picking, request: actions.pickRequest,
+                                         pick: react, end: actions.endPicking))
             }
             if !mirrored {
                 more
@@ -115,6 +118,7 @@ struct ReactPicker: View {
 /// moving anywhere else.
 private struct EmojiField: ViewModifier {
     let active: Bool
+    let request: Int
     let pick: (String) -> Void
     let end: () -> Void
     @State private var typed = ""
@@ -132,7 +136,7 @@ private struct EmojiField: ViewModifier {
                     .opacity(0.01)
                     .accessibilityHidden(true)
             }
-            .onChange(of: active, initial: true) {
+            .onChange(of: [active ? 1 : 0, request], initial: true) {
                 guard active else { return }
                 focused = true
                 // After the field takes focus, or the viewer has no target.
@@ -174,13 +178,22 @@ extension ConversationView {
         MessageActions(
             menu: AnyView(menu(for: message)),
             react: send != nil && message.kind != .deleted ? { react(message.seq, $0) } : nil,
-            moreReactions: { pickingEmoji = message.seq },
+            moreReactions: { pickEmoji(for: message.seq) },
             picking: pickingEmoji == message.seq,
+            pickRequest: emojiRequests,
             endPicking: {
                 if pickingEmoji == message.seq {
                     pickingEmoji = nil
                 }
             }
         )
+    }
+
+    /// Closing the viewer without a pick leaves this message picking, and
+    /// setting the same value again changes nothing: the request count
+    /// makes every ask focus the field and open the viewer anew.
+    func pickEmoji(for seq: Int64) {
+        pickingEmoji = seq
+        emojiRequests += 1
     }
 }

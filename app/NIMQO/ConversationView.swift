@@ -28,6 +28,7 @@ struct ConversationView: View {
     @State private var pulsing: Int64?
     /// The message the full emoji list is open for.
     @State var pickingEmoji: Int64?
+    @State var emojiRequests = 0
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
@@ -189,7 +190,7 @@ struct ConversationView: View {
     func menu(for message: ChatMessage) -> some View {
         if send != nil, message.kind != .deleted {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
-            ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickingEmoji = message.seq }
+            ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickEmoji(for: message.seq) }
         }
         if message.canSave {
             Button("Save As…", systemImage: "square.and.arrow.down") { pictures.save(chat: chat.id, message: message) }
