@@ -156,8 +156,8 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     }
 }
 
-/// The other side's camera. The layer decodes on its own; frames arrive on
-/// Rust threads and are handed to it on the main thread.
+/// The other side's camera: what the call window shows. Decoding happens
+/// in `RemoteDecoder`, off the main thread.
 @MainActor
 @Observable
 final class RemoteVideo {
@@ -165,28 +165,69 @@ final class RemoteVideo {
     /// Quarter turns the picture needs, counterclockwise, to stand upright.
     private(set) var turns = 0
     private(set) var hasPicture = false
-    @ObservationIgnored private var format: CMVideoFormatDescription?
-    @ObservationIgnored private var sps: Data?
-    @ObservationIgnored private var pps: Data?
     /// Asks the other side for a fresh keyframe.
     @ObservationIgnored var onLoss: (() -> Void)?
+    @ObservationIgnored private let decoder: RemoteDecoder
 
     init() {
         layer.videoGravity = .resizeAspectFill
+        decoder = RemoteDecoder(renderer: layer.sampleBufferRenderer)
+        decoder.shown = { [weak self] turns in Task { @MainActor in self?.shown(turns) } }
+        decoder.lost = { [weak self] in Task { @MainActor in self?.onLoss?() } }
     }
 
     nonisolated func show(_ frame: Data, orientation: UInt8) {
-        Task { @MainActor in self.enqueue(frame, orientation: orientation) }
+        decoder.decode(frame, orientation: orientation)
     }
 
     func reset() {
-        layer.flushAndRemoveImage()
-        format = nil
+        decoder.reset()
         hasPicture = false
         turns = 0
     }
 
-    private func enqueue(_ frame: Data, orientation: UInt8) {
+    private func shown(_ turns: Int) {
+        hasPicture = true
+        self.turns = turns
+    }
+}
+
+/// Feeds the layer's renderer on one queue, in arrival order: H.264 only
+/// decodes in order, and after a loss or a decoder failure only from the
+/// next IDR picture, so frames until then are dropped and one is asked for.
+final class RemoteDecoder: @unchecked Sendable {
+    /// Set once, before the first frame.
+    var shown: (@Sendable (Int) -> Void)?
+    var lost: (@Sendable () -> Void)?
+    private let queue = DispatchQueue(label: "app.nimqo.remote-video")
+    private let renderer: AVSampleBufferVideoRenderer
+    private var format: CMVideoFormatDescription?
+    private var sps: Data?
+    private var pps: Data?
+    private var waiting = true
+    private var reported: Int?
+    private var asked = Date.distantPast
+
+    init(renderer: AVSampleBufferVideoRenderer) {
+        self.renderer = renderer
+    }
+
+    func decode(_ frame: Data, orientation: UInt8) {
+        queue.async { self.enqueue(frame, turns: Int(orientation & 3)) }
+    }
+
+    func reset() {
+        queue.async {
+            self.renderer.flush(removingDisplayedImage: true, completionHandler: nil)
+            self.format = nil
+            self.sps = nil
+            self.pps = nil
+            self.waiting = true
+            self.reported = nil
+        }
+    }
+
+    private func enqueue(_ frame: Data, turns: Int) {
         var slices: [Data] = []
         for unit in H264.units(annexB: frame) {
             switch H264.type(of: unit) {
@@ -200,21 +241,32 @@ final class RemoteVideo {
             default: slices.append(unit)
             }
         }
+        // Parameter sets alone: they come just before the picture.
+        guard !slices.isEmpty else { return }
         if format == nil, let sps, let pps {
             format = Self.format(sps: sps, pps: pps)
         }
-        guard let format, !slices.isEmpty, let sample = Self.sample(H264.avcc(slices), format: format) else { return }
-        if layer.status == .failed {
-            layer.flush()
-            onLoss?()
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            renderer.flush()
+            waiting = true
         }
-        layer.enqueue(sample)
-        if !hasPicture {
-            hasPicture = true
+        let idr = slices.contains { H264.type(of: $0) == 5 }
+        guard !waiting || idr, let format, let sample = Self.sample(H264.avcc(slices), format: format) else {
+            return ask()
         }
-        if turns != Int(orientation & 3) {
-            turns = Int(orientation & 3)
+        renderer.enqueue(sample)
+        waiting = false
+        if reported != turns {
+            reported = turns
+            shown?(turns)
         }
+    }
+
+    /// At most once a second; the call engine paces it further.
+    private func ask() {
+        guard Date.now.timeIntervalSince(asked) > 1 else { return }
+        asked = .now
+        lost?()
     }
 
     private static func format(sps: Data, pps: Data) -> CMVideoFormatDescription? {
