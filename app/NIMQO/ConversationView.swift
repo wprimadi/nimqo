@@ -25,6 +25,7 @@ struct ConversationView: View {
     /// Scrolls to a message (seq), loading older pages if needed.
     var show: @MainActor (Int64) -> Void = { _ in }
     @State private var marked: Int64?
+    @State private var pulsing: Int64?
     @State private var replyingTo: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
@@ -110,10 +111,18 @@ struct ConversationView: View {
                         }
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures,
                                       openQuote: show)
-                            .background(
-                                .tint.opacity(marked == message.seq ? 0.2 : 0),
-                                in: RoundedRectangle(cornerRadius: 8)
-                            )
+                            // A shown message pops once, on a band across the
+                            // whole row that fades away, like on the phone.
+                            .scaleEffect(pulsing == message.seq ? 1.04 : 1,
+                                         anchor: message.fromMe ? .trailing : .leading)
+                            .background {
+                                if marked == message.seq {
+                                    Rectangle().fill(.tint.opacity(0.25))
+                                        .padding(.horizontal, -Theme.Spacing.medium)
+                                        .padding(.vertical, -4)
+                                        .transition(.opacity)
+                                }
+                            }
                             // Messages in a row from one sender sit close together.
                             .padding(.top, breaks.runs.contains(message.seq) ? Theme.Spacing.small : 0)
                             .contextMenu {
@@ -162,11 +171,17 @@ struct ConversationView: View {
                 guard let reveal, messages.contains(where: { $0.seq == reveal }) else { return }
                 // After the scroll kept by a page coming in above.
                 try? await Task.sleep(for: .milliseconds(150))
-                proxy.scrollTo(reveal, anchor: .center)
-                withAnimation(motion) { marked = reveal }
+                withAnimation(motion) { proxy.scrollTo(reveal, anchor: .center) }
                 revealed()
-                try? await Task.sleep(for: .seconds(2))
-                withAnimation(motion) { marked = nil }
+                try? await Task.sleep(for: .milliseconds(reduceMotion ? 0 : 350))
+                withAnimation(.easeOut(duration: 0.15)) { marked = reveal }
+                if !reduceMotion {
+                    withAnimation(.spring(duration: 0.25, bounce: 0.5)) { pulsing = reveal }
+                    try? await Task.sleep(for: .milliseconds(250))
+                    withAnimation(.spring(duration: 0.35, bounce: 0.4)) { pulsing = nil }
+                }
+                try? await Task.sleep(for: .seconds(1.5))
+                withAnimation(.easeOut(duration: 0.8)) { marked = nil }
             }
             .onChange(of: messages.first?.seq) { old, _ in
                 // Older messages went in above (a page, or the phone's
@@ -360,34 +375,5 @@ struct MessageBubble: View {
                 openQuote?(seq)
             }
         }
-    }
-}
-
-/// The quoted message of a reply: who wrote it and what it said.
-struct QuoteView: View {
-    let reply: Reply
-
-    private var name: String? {
-        reply.fromMe == true ? "You" : reply.senderName
-    }
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.small) {
-            RoundedRectangle(cornerRadius: 1.5).fill(.tint).frame(width: 3)
-            VStack(alignment: .leading, spacing: 1) {
-                if let name {
-                    Text(name).font(.caption.bold()).foregroundStyle(.tint)
-                }
-                Text(ChatMessage.describe(kind: reply.kind, body: reply.body))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
-        )
     }
 }

@@ -137,3 +137,32 @@ struct Composer: View {
         }
     }
 }
+
+/// The quoted message of a reply: who wrote it and what it said.
+struct QuoteView: View {
+    let reply: Reply
+
+    private var name: String? {
+        reply.fromMe == true ? "You" : reply.senderName
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.small) {
+            RoundedRectangle(cornerRadius: 1.5).fill(.tint).frame(width: 3)
+            VStack(alignment: .leading, spacing: 1) {
+                if let name {
+                    Text(name).font(.caption.bold()).foregroundStyle(.tint)
+                }
+                Text(ChatMessage.describe(kind: reply.kind, body: reply.body))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Reply to \(name ?? "a message"): \(ChatMessage.describe(kind: reply.kind, body: reply.body))"
+        )
+    }
+}
