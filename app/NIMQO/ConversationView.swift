@@ -24,12 +24,17 @@ struct ConversationView: View {
     var react: @MainActor (Int64, String) -> Void = { _, _ in }
     /// Scrolls to a message (seq), loading older pages if needed.
     var show: @MainActor (Int64) -> Void = { _ in }
+    /// Star, edit, delete, and forward.
+    var commands = MessageCommands()
     @State private var marked: Int64?
     @State private var pulsing: Int64?
     /// The message the full emoji list is open for.
     @State var pickingEmoji: Int64?
     @State var emojiRequests = 0
-    @State private var replyingTo: ChatMessage?
+    @State var replyingTo: ChatMessage?
+    @State var editing: ChatMessage?
+    /// Waiting for the user to confirm deleting it for everyone.
+    @State var deleting: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
     @State private var isDropTarget = false
@@ -56,7 +61,9 @@ struct ConversationView: View {
                             .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
                     }
                     if let send {
-                        Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped)
+                        Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped,
+                                 editing: $editing, edit: commands.edit,
+                                 lastEditable: messages.last { $0.isEditable })
                     }
                 }
                 .padding([.horizontal, .bottom], Theme.Spacing.medium)
@@ -83,6 +90,7 @@ struct ConversationView: View {
                 }
             }
             .environment(lightbox)
+            .modifier(DeleteConfirmation(deleting: $deleting, delete: commands.delete))
             .navigationTitle(chat.title)
     }
 
@@ -185,21 +193,6 @@ struct ConversationView: View {
         }
     }
 
-    /// The context menu, also behind the button shown on hover.
-    @ViewBuilder
-    func menu(for message: ChatMessage) -> some View {
-        if send != nil, message.kind != .deleted {
-            Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
-            ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickEmoji(for: message.seq) }
-        }
-        if message.canSave {
-            Button("Save As…", systemImage: "square.and.arrow.down") { pictures.save(chat: chat.id, message: message) }
-        }
-        if send != nil, message.delivery == .failed {
-            Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
-        }
-    }
-
     /// One page at a time; the scroll restore above keeps a page coming in
     /// from triggering the next one by itself.
     private func showOlder() {
@@ -224,7 +217,9 @@ struct MessageBubble: View {
     @State var hovering = false
 
     private var text: String {
-        ChatMessage.describe(kind: message.kind, body: message.body)
+        message.kind == .deleted && message.fromMe
+            ? String(localized: "You deleted this message")
+            : ChatMessage.describe(kind: message.kind, body: message.body)
     }
 
     /// Mentions by name, links clickable.
@@ -284,6 +279,9 @@ struct MessageBubble: View {
             if message.edited {
                 Text("Edited")
             }
+            if message.starred {
+                Image(systemName: "star.fill").accessibilityLabel("Starred")
+            }
             if let symbol = deliverySymbol {
                 Image(systemName: symbol.name)
                     .foregroundStyle(symbol.tint)
@@ -317,6 +315,11 @@ struct MessageBubble: View {
                 Group {
                     if showsSender, !message.fromMe {
                         Text(sender).font(.caption.bold()).foregroundStyle(.tint)
+                    }
+                    if message.forwarded {
+                        Label("Forwarded", systemImage: "arrowshape.turn.up.right")
+                            .font(.caption.italic())
+                            .foregroundStyle(.secondary)
                     }
                     if let reply = message.reply {
                         if let seq = reply.seq, let openQuote {
@@ -378,7 +381,9 @@ struct MessageBubble: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(sender), \(String(rich.characters)), \(time.formatted(date: .omitted, time: .shortened))"
+                + (message.forwarded ? ", forwarded" : "")
                 + (message.edited ? ", edited" : "")
+                + (message.starred ? ", starred" : "")
                 + (message.reactions.map { ", reactions \($0)" } ?? "")
                 + (deliverySymbol.map { ", \($0.label)" } ?? "")
         )

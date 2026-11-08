@@ -35,6 +35,12 @@ struct MainView: View {
     @State private var newChat = false
     /// A chat opened from New Chat that has no messages yet.
     @State private var draft: ChatSummary?
+    /// The list shows archived chats instead of the others.
+    @State private var showingArchived = false
+    @State private var starred = false
+    /// A message on its way to the chat picker, with the chat it is in.
+    @State private var forwarding: (message: ChatMessage, chat: String)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Pane {
         case chats, status, channels
@@ -67,6 +73,11 @@ struct MainView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
+                    Button("Starred Messages", systemImage: "star") { starred = true }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Starred Messages")
+                        .disabled(model.core == nil)
                     Button("New Chat", systemImage: "square.and.pencil") { newChat = true }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
@@ -116,6 +127,15 @@ struct MainView: View {
                 model.selectedChat = chat.id
             }
         }
+        .sheet(isPresented: $starred) { StarredView(model: model) }
+        .sheet(isPresented: forwardingShown) {
+            if let forwarding {
+                let targets = model.chats.filter { model.canSend($0.id) }
+                ForwardPicker(message: forwarding.message, chats: targets, avatars: model.avatars) { picked in
+                    await model.forward(forwarding.message.seq, from: forwarding.chat, to: picked)
+                }
+            }
+        }
         .focusedSceneValue(\.findMessages, $findRequested)
         .onChange(of: findRequested) {
             guard findRequested else { return }
@@ -141,7 +161,13 @@ struct MainView: View {
             revealed: { model.revealing = nil },
             retry: { model.retry($0, in: chat.id) },
             react: { seq, emoji in Task { await model.react(emoji, to: seq, in: chat.id) } },
-            show: { seq in Task { await model.reveal(seq, in: chat.id) } }
+            show: { seq in Task { await model.reveal(seq, in: chat.id) } },
+            commands: MessageCommands(
+                star: { seq, starred in Task { await model.setStarred(seq, in: chat.id, starred) } },
+                edit: { seq, text in await model.edit(seq, in: chat.id, to: text) },
+                delete: { seq in Task { await model.deleteForEveryone(seq, in: chat.id) } },
+                forward: { forwarding = ($0, chat.id) }
+            )
         )
         // A new view per chat: it opens at the latest message.
         .id(chat.id)
@@ -214,27 +240,66 @@ struct MainView: View {
         .task { await store.load() }
     }
 
-    private var chatList: some View {
-        List(model.chats, selection: Bindable(model).selectedChat) { chat in
-            ChatRow(chat: chat, avatars: model.avatars)
-                .listRowSeparator(.visible)
-                .contextMenu {
-                    if model.canSend(chat.id) {
-                        Button(chat.muted ? "Unmute" : "Mute") {
-                            Task { await model.setMuted(chat.id, !chat.muted) }
-                        }
-                    }
-                }
+    private var forwardingShown: Binding<Bool> {
+        Binding { forwarding != nil } set: {
+            if !$0 {
+                forwarding = nil
+            }
         }
+    }
+
+    private var archivedCount: Int {
+        model.chats.count(where: \.archived)
+    }
+
+    private var chatList: some View {
+        let shown = model.chats.filter { $0.archived == showingArchived }
+        return List(selection: Bindable(model).selectedChat) {
+            if showingArchived || archivedCount > 0 {
+                archivedRow
+            }
+            ForEach(shown) { chat in
+                ChatRow(chat: chat, avatars: model.avatars)
+                    .listRowSeparator(.visible)
+                    .contextMenu { ChatListMenu(chat: chat, model: model) }
+            }
+        }
+        // Pinning moves a chat to the top, archiving takes it away: the
+        // rows slide to their new places instead of jumping.
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0), value: shown.map(\.id))
         .overlay {
-            if model.chats.isEmpty {
+            if shown.isEmpty {
                 ContentUnavailableView(
-                    "No chats yet",
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text("New messages appear here as they arrive.")
+                    showingArchived ? "No archived chats" : "No chats yet",
+                    systemImage: showingArchived ? "archivebox" : "bubble.left.and.bubble.right",
+                    description: Text(showingArchived ? "Archived chats stay here, quiet, until you unarchive them."
+                        : "New messages appear here as they arrive.")
                 )
             }
         }
+    }
+
+    /// "Archived" above the chats, or the way back from them.
+    private var archivedRow: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0)) { showingArchived.toggle() }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: showingArchived ? "chevron.backward" : "archivebox")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44)
+                Text(showingArchived ? "Chats" : "Archived").font(.body.weight(.semibold))
+                Spacer()
+                if !showingArchived {
+                    Text("\(archivedCount)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(showingArchived ? "Back to chats" : "Archived chats, \(archivedCount)")
     }
 }
 
@@ -272,10 +337,16 @@ struct ChatRow: View {
                         .accessibilityLabel("Muted")
                 }
                 Spacer()
+                if chat.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Pinned")
+                }
                 Text(ChatRow.stamp(chat.lastActivity))
                     .font(.caption.monospacedDigit())
                     // Tinted while there is something to read, like WhatsApp.
-                    .foregroundStyle(chat.unread > 0 && !chat.muted ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(chat.unread > 0 && !chat.quiet ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             HStack {
                 Text(chat.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
@@ -286,7 +357,7 @@ struct ChatRow: View {
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
-                        .background(Capsule().fill(chat.muted ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint)))
+                        .background(Capsule().fill(chat.quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tint)))
                         .accessibilityLabel("\(chat.unread) unread")
                 }
             }

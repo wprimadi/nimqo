@@ -42,6 +42,8 @@ pub struct Quoted {
     pub sender: String,
     #[diesel(sql_type = Bool)]
     pub from_me: bool,
+    #[diesel(sql_type = BigInt)]
+    pub ts: i64,
     #[diesel(sql_type = Text)]
     pub kind: String,
     #[diesel(sql_type = Nullable<Text>)]
@@ -80,7 +82,7 @@ impl Quoted {
     }
 }
 
-const QUOTED: &str = "SELECT id, sender, from_me, kind, body, media FROM messages
+const QUOTED: &str = "SELECT id, sender, from_me, ts, kind, body, media FROM messages
                       WHERE chat = ? AND kind <> 'deleted' AND ";
 
 impl Inbox {
@@ -149,6 +151,7 @@ mod spoofing {
             id: "mine".into(),
             sender: chat.into(),
             from_me: false,
+            ts: 0,
             kind: "text".into(),
             body: Some("forged".into()),
             media: None,

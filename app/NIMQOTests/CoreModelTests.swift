@@ -69,9 +69,13 @@ struct CoreModelTests {
             ChatSummary(Chat(
                 id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
                 lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved, timerSecs: 86400,
-                muted: false
+                muted: false, pinned: true, archived: group
             ))
         }
+        // An archived chat is as quiet as a muted one: no count, no alert.
+        #expect(chat(name: "Fam", phone: nil, group: true, kind: .text, body: nil).quiet)
+        #expect(!chat(name: "Ana", phone: "+62", group: false, kind: .text, body: nil).quiet)
+        #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: nil).pinned)
         #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: nil, saved: "Mom").title == "Mom")
         #expect(chat(name: "Fam", phone: nil, group: true, kind: .text, body: nil, saved: "x").title == "Fam")
         #expect(chat(name: "Ana", phone: "+62", group: false, kind: .text, body: "hi").title == "+62 ~Ana")
@@ -94,7 +98,7 @@ struct CoreModelTests {
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil,
                 delivery: .none,
-                reply: nil, mentions: []
+                reply: nil, mentions: [], forwarded: false, starred: false
             )
         }
         let loaded = [msg(1, 1), msg(2, 5), msg(2, 6), msg(3, 2)]

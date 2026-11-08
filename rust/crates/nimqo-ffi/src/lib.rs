@@ -181,6 +181,35 @@ pub struct Core {
     lock: Mutex<Option<File>>,
 }
 
+/// How long WhatsApp lets an own message be edited, in seconds.
+#[uniffi::export]
+#[must_use]
+pub fn edit_window_secs() -> i64 {
+    outbox::EDIT_WINDOW_SECS
+}
+
+/// How long WhatsApp lets an own message be deleted for everyone.
+#[uniffi::export]
+#[must_use]
+pub fn delete_window_secs() -> i64 {
+    outbox::REVOKE_WINDOW_SECS
+}
+
+impl Core {
+    /// Runs `f` on the client's runtime.
+    async fn on_runtime<T: Send + 'static>(
+        &self,
+        f: impl Future<Output = Result<T, CoreError>> + Send + 'static,
+    ) -> Result<T, CoreError> {
+        self.runtime
+            .spawn(f)
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+    }
+}
+
 #[uniffi::export]
 impl Core {
     /// Opens the encrypted stores and connects. Blocks until the connection
@@ -304,13 +333,21 @@ impl Core {
             .search(text, 100)
             .map_err(err(|detail| CoreError::Storage { detail }))?
             .into_iter()
-            .map(|h| SearchHit {
-                chat_id: h.chat,
-                seq: h.seq,
-                timestamp_secs: h.ts,
-                body: h.body.unwrap_or_default(),
-                from_me: h.from_me,
-            })
+            .map(SearchHit::from)
+            .collect())
+    }
+
+    /// Starred messages still stored here, newest first.
+    ///
+    /// # Errors
+    /// `Storage` if the store cannot be read.
+    pub fn starred_messages(&self) -> Result<Vec<SearchHit>, CoreError> {
+        Ok(self
+            .inbox
+            .starred(500)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(SearchHit::from)
             .collect())
     }
 
@@ -671,6 +708,82 @@ impl Core {
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e}"),
             })?
+    }
+
+    /// Pins or unpins a chat on every device of the account.
+    ///
+    /// # Errors
+    /// `SendRefused` when WhatsApp does not take the change; `Storage` if it
+    /// cannot be stored.
+    pub async fn set_pinned(&self, chat_id: String, pinned: bool) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_pinned(&chat_id, pinned).await })
+            .await
+    }
+
+    /// Archives or unarchives a chat on every device of the account.
+    ///
+    /// # Errors
+    /// As `set_pinned`.
+    pub async fn set_archived(&self, chat_id: String, archived: bool) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_archived(&chat_id, archived).await })
+            .await
+    }
+
+    /// Stars or unstars message `seq` on every device of the account.
+    ///
+    /// # Errors
+    /// As `set_pinned`.
+    pub async fn set_starred(
+        &self,
+        chat_id: String,
+        seq: i64,
+        starred: bool,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_starred(&chat_id, seq, starred).await })
+            .await
+    }
+
+    /// Replaces the text of own message `seq` for everyone.
+    ///
+    /// # Errors
+    /// `SendRefused` for someone else's message, a non-text one, one older
+    /// than the edit window, or when WhatsApp does not take it.
+    pub async fn edit_message(
+        &self,
+        chat_id: String,
+        seq: i64,
+        text: String,
+    ) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.edit(&chat_id, seq, &text).await })
+            .await
+    }
+
+    /// Deletes own message `seq` for everyone.
+    ///
+    /// # Errors
+    /// `SendRefused` for someone else's message, one older than the delete
+    /// window, or when WhatsApp does not take it.
+    pub async fn delete_for_everyone(&self, chat_id: String, seq: i64) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.revoke(&chat_id, seq).await })
+            .await
+    }
+
+    /// Queues a forwarded copy of message `seq` in each of `to` (one to
+    /// five chats) and starts sending, like `send_text`.
+    ///
+    /// # Errors
+    /// `SendRefused` for a target that is not a person or group, too many
+    /// targets, or a message that cannot be forwarded.
+    pub fn forward(&self, chat_id: &str, seq: i64, to: Vec<String>) -> Result<(), CoreError> {
+        self.sender.forward(chat_id, seq, to)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
     }
 
     /// Queues a photo or document and starts sending it, like `send_text`.
@@ -1140,6 +1253,9 @@ fn message_handlers<B, T, H, R>(
                 EventKind::DisappearingModeChanged,
                 EventKind::AppStateSyncFailed,
                 EventKind::MuteUpdate,
+                EventKind::PinUpdate,
+                EventKind::ArchiveUpdate,
+                EventKind::StarUpdate,
             ],
             move |event, _| {
                 let sender = on_receipt.get().cloned();
@@ -1161,6 +1277,7 @@ fn message_handlers<B, T, H, R>(
                     lids::resolve(&sender.inbox, &sender.client).await;
                     sender.load_contacts_once().await;
                     sender.load_mutes_once().await;
+                    sender.load_flags_once().await;
                 }
             }
         })
@@ -1194,6 +1311,26 @@ async fn on_account_event(sender: Arc<outbox::Sender>, event: &Event) {
             let a = &m.action;
             sender
                 .on_mute(&m.jid, a.muted.unwrap_or(false), a.mute_end_timestamp)
+                .await;
+        }
+        Event::PinUpdate(p) => {
+            let at = p.timestamp.timestamp_millis();
+            sender
+                .on_pin(&p.jid, p.action.pinned.unwrap_or(false), at)
+                .await;
+        }
+        Event::ArchiveUpdate(a) => {
+            sender
+                .on_archive(&a.jid, a.action.archived.unwrap_or(false))
+                .await;
+        }
+        Event::StarUpdate(s) => {
+            sender
+                .on_star(
+                    &s.chat_jid,
+                    &s.message_id,
+                    s.action.starred.unwrap_or(false),
+                )
                 .await;
         }
         Event::MarkChatAsReadUpdate(update) => {

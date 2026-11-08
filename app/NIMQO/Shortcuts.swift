@@ -23,13 +23,13 @@ struct ChatCommands: Commands {
             Divider()
             Button("Next Chat") { model.selectChat(after: 1) }
                 .keyboardShortcut(.tab, modifiers: .control)
-                .disabled(model.chats.isEmpty)
+                .disabled(model.listed.isEmpty)
             Button("Previous Chat") { model.selectChat(after: -1) }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
-                .disabled(model.chats.isEmpty)
+                .disabled(model.listed.isEmpty)
             Divider()
             // ⌘1 to ⌘9: the chats at the top of the list.
-            ForEach(Array(model.chats.prefix(9).enumerated()), id: \.element.id) { index, chat in
+            ForEach(Array(model.listed.prefix(9).enumerated()), id: \.element.id) { index, chat in
                 Button(chat.title) { model.selectedChat = chat.id }
                     .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
             }
@@ -40,7 +40,7 @@ struct ChatCommands: Commands {
 extension CoreModel {
     /// The chat `offset` places away in the list, wrapping around.
     func selectChat(after offset: Int) {
-        if let next = Self.chat(after: offset, from: selectedChat, in: chats.map(\.id)) {
+        if let next = Self.chat(after: offset, from: selectedChat, in: listed.map(\.id)) {
             selectedChat = next
         }
     }

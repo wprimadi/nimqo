@@ -173,6 +173,6 @@ extension ChannelPost {
         ChatMessage(id: String(serverId), seq: Int64(clamping: serverId), sender: "", senderName: nil,
                     contactName: nil, edited: edited, hasMedia: hasMedia, reactions: nil, myReaction: nil,
                     fromMe: false, timestampSecs: timestampSecs, kind: kind, body: body, delivery: .none,
-                    reply: nil, mentions: [])
+                    reply: nil, mentions: [], forwarded: false, starred: false)
     }
 }

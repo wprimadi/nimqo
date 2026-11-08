@@ -29,7 +29,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func update(_ chats: [ChatSummary], viewing: String?) {
-        let total = chats.filter { !$0.muted }.reduce(0) { $0 + $1.unread }
+        let total = chats.filter { !$0.quiet }.reduce(0) { $0 + $1.unread }
         NSApp?.dockTile.badgeLabel = total > 0 ? "\(total)" : nil
         let center = UNUserNotificationCenter.current()
         let read = chats.filter { $0.unread == 0 }.map(\.id)
@@ -39,7 +39,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         defer { unread = Dictionary(chats.map { ($0.id, $0.unread) }, uniquingKeysWith: max) }
         guard let unread else { return }
         let reading = NSApp?.isActive == true ? viewing : nil
-        let fresh = chats.filter { !$0.muted && $0.unread > (unread[$0.id] ?? 0) && $0.id != reading }
+        let fresh = chats.filter { !$0.quiet && $0.unread > (unread[$0.id] ?? 0) && $0.id != reading }
         guard !fresh.isEmpty else { return }
         authorize()
         for chat in fresh {

@@ -55,6 +55,8 @@ impl Delivery {
 }
 
 /// One row of the chat list: the chat and its latest message.
+// Independent flags, as the app shows them.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Chat {
     pub id: String,
@@ -75,6 +77,10 @@ pub struct Chat {
     pub timer_secs: u32,
     /// No notification or Dock count for it.
     pub muted: bool,
+    /// Pinned to the top of the list.
+    pub pinned: bool,
+    /// Kept out of the list, under Archived.
+    pub archived: bool,
 }
 
 impl From<ChatRow> for Chat {
@@ -92,11 +98,15 @@ impl From<ChatRow> for Chat {
             contact_name: r.contact_name,
             timer_secs: u32::try_from(r.timer).unwrap_or(0),
             muted: r.muted,
+            pinned: r.pinned > 0,
+            archived: r.archived,
             id: r.chat,
         }
     }
 }
 
+// Independent flags, as the app shows them.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ChatMessage {
     pub id: String,
@@ -124,6 +134,9 @@ pub struct ChatMessage {
     pub reply: Option<Reply>,
     /// Who each "@number" in `body` is, where known.
     pub mentions: Vec<Mention>,
+    /// Marked forwarded by whoever sent it.
+    pub forwarded: bool,
+    pub starred: bool,
 }
 
 /// Someone in the address book.
@@ -195,6 +208,8 @@ impl From<MessageRow> for ChatMessage {
                 seq: r.quote_seq,
             }),
             mentions: Vec::new(),
+            forwarded: r.forwarded,
+            starred: r.starred,
         }
     }
 }
@@ -205,8 +220,22 @@ pub struct SearchHit {
     pub chat_id: String,
     pub seq: i64,
     pub timestamp_secs: i64,
+    pub kind: MessageKind,
     pub body: String,
     pub from_me: bool,
+}
+
+impl From<nimqo_whatsapp::search::Hit> for SearchHit {
+    fn from(h: nimqo_whatsapp::search::Hit) -> Self {
+        Self {
+            chat_id: h.chat,
+            seq: h.seq,
+            timestamp_secs: h.ts,
+            kind: MessageKind::parse(&h.kind),
+            body: h.body.unwrap_or_default(),
+            from_me: h.from_me,
+        }
+    }
 }
 
 #[cfg(test)]

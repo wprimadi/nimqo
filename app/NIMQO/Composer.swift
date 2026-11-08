@@ -2,13 +2,22 @@ import NimqoCore
 import SwiftUI
 
 /// The message field with attach and send, floating as glass over the
-/// timeline; above it, a refusal or the message being replied to.
+/// timeline; above it, a refusal, the message being replied to, or the one
+/// being edited.
 struct Composer: View {
     let send: @MainActor (String, Int64?) async -> String?
     let sendFile: @MainActor (URL, String?) async -> String?
     @Binding var replyingTo: ChatMessage?
     @Binding var dropped: [URL]
+    @Binding var editing: ChatMessage?
+    /// Replaces an own message's text; returns why it was refused.
+    var edit: @MainActor (Int64, String) async -> String? = { _, _ in nil }
+    /// Up Arrow in an empty field edits this one, as in WhatsApp.
+    var lastEditable: ChatMessage?
     @State private var text = ""
+    /// What was typed before editing began, put back when it ends.
+    @State private var stash = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var picking = false
     @State private var refusal: String?
     @State private var isSending = false
@@ -17,7 +26,7 @@ struct Composer: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.small) {
             // What sits above the field: a refusal, the message replied to.
-            if refusal != nil || replyingTo != nil {
+            if refusal != nil || replyingTo != nil || editing != nil {
                 VStack(alignment: .leading, spacing: Theme.Spacing.small) {
                     if let refusal {
                         Text(refusal).font(.caption).foregroundStyle(.red)
@@ -38,11 +47,28 @@ struct Composer: View {
                                 .keyboardShortcut(.cancelAction)
                         }
                     }
+                    if let editing {
+                        HStack(spacing: Theme.Spacing.small) {
+                            Image(systemName: "pencil").foregroundStyle(.tint)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Editing").font(.caption.bold()).foregroundStyle(.tint)
+                                Text(editing.body ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer()
+                            Button("Cancel editing", systemImage: "xmark.circle.fill") { self.editing = nil }
+                                .labelStyle(.iconOnly)
+                                .buttonStyle(.borderless)
+                                .keyboardShortcut(.cancelAction)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .glassSurface(in: .rect(cornerRadius: 18))
+                // Rises out of the field it belongs to, and sinks back.
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
             HStack(alignment: .bottom, spacing: Theme.Spacing.small) {
                 Button("Attach a photo or file", systemImage: "plus") { picking = true }
@@ -63,10 +89,18 @@ struct Composer: View {
                         NSApp.sendAction(#selector(NSText.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
                         return .handled
                     }
+                    .onKeyPress(.upArrow) {
+                        guard text.isEmpty, editing == nil, let lastEditable else { return .ignored }
+                        replyingTo = nil
+                        editing = lastEditable
+                        return .handled
+                    }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .glassSurface(in: .rect(cornerRadius: 18))
-                Button("Send", systemImage: "arrow.up", action: submit)
+                Button(editing == nil ? "Send" : "Save Edit", systemImage: editing == nil ? "arrow.up" : "checkmark",
+                       action: submit)
+                    .contentTransition(.symbolEffect(.replace))
                     .labelStyle(.iconOnly)
                     .fontWeight(.semibold)
                     .buttonBorderShape(.circle)
@@ -77,8 +111,26 @@ struct Composer: View {
             }
             .glassGroup(spacing: Theme.Spacing.small)
         }
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0), value: [replyingTo?.seq, editing?.seq])
         .onAppear { focused = true }
-        .onChange(of: replyingTo?.seq) { focused = true }
+        .onChange(of: replyingTo?.seq) {
+            if replyingTo != nil {
+                editing = nil
+            }
+            focused = true
+        }
+        .onChange(of: editing?.seq) { old, new in
+            refusal = nil
+            if old == nil, new != nil {
+                stash = text
+            }
+            // Its own text to change; the draft comes back when it ends.
+            text = editing?.body ?? stash
+            if editing == nil {
+                stash = ""
+            }
+            focused = true
+        }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
             guard case let .success(url) = result else { return }
             sendFiles([url])
@@ -98,7 +150,8 @@ struct Composer: View {
     private func sendFiles(_ urls: [URL]) {
         refusal = nil
         isSending = true
-        let draft = text
+        // While editing, the field holds the edit, not a caption.
+        let draft = editing == nil ? text : ""
         let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         Task {
             for (index, url) in urls.enumerated() {
@@ -127,6 +180,9 @@ struct Composer: View {
     private func submit() {
         // Return on an empty field does nothing, like other chat apps.
         guard !isSending, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let editing {
+            return saveEdit(editing)
+        }
         refusal = nil
         isSending = true
         let draft = text
@@ -139,6 +195,26 @@ struct Composer: View {
                 if replyingTo?.seq == reply?.seq {
                     replyingTo = nil
                 }
+            }
+            isSending = false
+        }
+    }
+}
+
+extension Composer {
+    /// Unchanged text just ends editing; nothing is sent.
+    private func saveEdit(_ message: ChatMessage) {
+        let draft = text
+        guard draft.trimmingCharacters(in: .whitespacesAndNewlines) != message.body else {
+            editing = nil
+            return
+        }
+        refusal = nil
+        isSending = true
+        Task {
+            refusal = await edit(message.seq, draft)
+            if refusal == nil, editing?.seq == message.seq {
+                editing = nil
             }
             isSending = false
         }

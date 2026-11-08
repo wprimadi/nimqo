@@ -7,6 +7,8 @@ pub mod channels;
 pub mod contacts;
 pub mod db;
 mod effects;
+pub mod flags;
+pub mod forward;
 pub mod groups;
 pub mod history;
 pub mod inbox;

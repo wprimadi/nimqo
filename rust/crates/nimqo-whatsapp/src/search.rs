@@ -17,6 +17,8 @@ pub struct Hit {
     pub seq: i64,
     #[diesel(sql_type = BigInt)]
     pub ts: i64,
+    #[diesel(sql_type = Text)]
+    pub kind: String,
     #[diesel(sql_type = Nullable<Text>)]
     pub body: Option<String>,
     #[diesel(sql_type = Bool)]
@@ -47,7 +49,7 @@ impl Inbox {
         }
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, rowid AS seq, ts, body, from_me FROM messages
+            "SELECT chat, rowid AS seq, ts, kind, body, from_me FROM messages
              WHERE body LIKE ? ESCAPE '\\' AND chat <> 'status@broadcast' AND kind NOT IN ('deleted', 'document')
              ORDER BY ts DESC, rowid DESC LIMIT ?",
         )

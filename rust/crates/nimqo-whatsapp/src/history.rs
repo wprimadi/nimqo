@@ -139,6 +139,7 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
         },
         media: crate::inbox::media_of(m.message.as_option()?),
         quote: crate::replies::quote_of(m.message.as_option()?),
+        forwarded: crate::inbox::is_forwarded(m.message.as_option()?),
         // ponytail: history counts as read; the conversation's unread
         // count could mark its newest messages unread instead.
         read: true,

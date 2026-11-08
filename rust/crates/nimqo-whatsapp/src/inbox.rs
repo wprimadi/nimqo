@@ -71,8 +71,15 @@ pub struct ChatRow {
     /// Muted on one of the account's devices, and not ended yet.
     #[diesel(sql_type = Bool)]
     pub muted: bool,
+    /// When it was pinned (milliseconds since 1970); 0 when not pinned.
+    #[diesel(sql_type = BigInt)]
+    pub pinned: i64,
+    #[diesel(sql_type = Bool)]
+    pub archived: bool,
 }
 
+// One field per stored column; the flags are independent.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, diesel::QueryableByName)]
 pub struct MessageRow {
     /// Storage order within a timestamp; the paging cursor with `ts`.
@@ -123,6 +130,10 @@ pub struct MessageRow {
     /// The quoted message's seq, when it is stored here.
     #[diesel(sql_type = Nullable<BigInt>)]
     pub quote_seq: Option<i64>,
+    #[diesel(sql_type = Bool)]
+    pub forwarded: bool,
+    #[diesel(sql_type = Bool)]
+    pub starred: bool,
 }
 
 impl Inbox {
@@ -174,11 +185,14 @@ impl Inbox {
                          AND m.chat NOT LIKE '%@g.us')) AS contact_name,
                COALESCE((SELECT seconds FROM chat_timers WHERE chat = m.chat), 0) AS timer,
                EXISTS (SELECT 1 FROM chat_mutes WHERE chat = m.chat AND (until < 0
-                       OR until > CAST(strftime('%s', 'now') AS INTEGER) * 1000)) AS muted
+                       OR until > CAST(strftime('%s', 'now') AS INTEGER) * 1000)) AS muted,
+               COALESCE((SELECT ts FROM chat_pins WHERE chat = m.chat), 0) AS pinned,
+               EXISTS (SELECT 1 FROM chat_archives WHERE chat = m.chat) AS archived
              FROM messages m
              WHERE m.chat <> 'status@broadcast' AND m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
-             ORDER BY m.ts DESC LIMIT ?",
+             -- Pinned first, the latest pin on top, so no limit hides them.
+             ORDER BY pinned DESC, m.ts DESC LIMIT ?",
         )
         .bind::<BigInt, _>(limit)
         .load(&mut *conn)?)
@@ -235,7 +249,8 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
-                 m.edited, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document', 'sticker') AS has_media,
+                 m.edited, m.forwarded,
+                 EXISTS (SELECT 1 FROM starred s WHERE s.chat = m.chat AND s.id = m.id) AS starred, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document', 'sticker') AS has_media,
                  m.reply_to,
                  -- A quote's copy is the replier's claim: when the original is
                  -- stored, show it instead, so author and content always match.
@@ -353,6 +368,7 @@ impl Inbox {
             expires_at: None,
             media: Some(media),
             quote: None,
+            forwarded: false,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -373,6 +389,7 @@ impl Inbox {
             expires_at: None,
             media: None,
             quote: None,
+            forwarded: false,
         };
         self.commit(vec![row], &[]).unwrap();
     }
@@ -476,8 +493,8 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         diesel::sql_query(
             "INSERT OR IGNORE INTO messages
                (chat, sender, id, ts, body, from_me, kind, sender_name, status, read,
-                expires_at, media, reply_to, quote_kind, quote_body)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                expires_at, media, reply_to, quote_kind, quote_body, forwarded)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind::<Text, _>(r.chat)
         .bind::<Text, _>(r.sender)
@@ -494,6 +511,7 @@ fn insert(c: &mut SqliteConnection, rows: Vec<Row>) -> diesel::QueryResult<()> {
         .bind::<Nullable<Text>, _>(r.quote.as_ref().map(|q| q.id.clone()))
         .bind::<Nullable<Text>, _>(r.quote.as_ref().map(|q| q.kind.clone()))
         .bind::<Nullable<Text>, _>(r.quote.and_then(|q| q.body))
+        .bind::<Bool, _>(r.forwarded)
         .execute(c)?;
     }
     Ok(())
@@ -582,6 +600,16 @@ const LATER: &[(i64, &[&str])] = &[
         &[
             "CREATE TABLE chat_mutes (chat TEXT PRIMARY KEY, until INTEGER NOT NULL)",
             "CREATE TABLE done_once (task TEXT PRIMARY KEY)",
+        ],
+    ),
+    // Pinned and archived chats, starred messages, forwarded messages.
+    (
+        16,
+        &[
+            "CREATE TABLE chat_pins (chat TEXT PRIMARY KEY, ts INTEGER NOT NULL)",
+            "CREATE TABLE chat_archives (chat TEXT PRIMARY KEY)",
+            "CREATE TABLE starred (chat TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (chat, id))",
+            "ALTER TABLE messages ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0",
         ],
     ),
 ];
@@ -702,6 +730,8 @@ pub(crate) struct Row {
     pub media: Option<Vec<u8>>,
     /// The message this one replies to.
     pub quote: Option<crate::replies::Quote>,
+    /// Marked forwarded by its sender.
+    pub forwarded: bool,
 }
 
 impl Row {
@@ -736,8 +766,16 @@ impl Row {
             },
             media: media_of(&m.message),
             quote: crate::replies::quote_of(&m.message),
+            forwarded: is_forwarded(&m.message),
         })
     }
+}
+
+pub(crate) fn is_forwarded(message: &wa::Message) -> bool {
+    use whatsapp_rust::prelude::MessageExt as _;
+    message
+        .context_info()
+        .is_some_and(|c| c.is_forwarded == Some(true))
 }
 
 /// Own messages are "me"; others use the phone number when the message
@@ -898,6 +936,7 @@ mod tests {
             expires_at: None,
             media: None,
             quote: None,
+            forwarded: false,
         }
     }
 

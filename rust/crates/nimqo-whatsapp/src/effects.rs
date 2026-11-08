@@ -220,6 +220,34 @@ impl crate::inbox::Inbox {
         };
         self.commit(Vec::new(), &[react])
     }
+
+    /// Own text message `id` now reads `text`, as edited from this Mac.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn edit_own(&self, chat: &str, id: &str, text: &str) -> anyhow::Result<()> {
+        let edit = Effect::Edit {
+            chat: chat.to_owned(),
+            sender: crate::inbox::ME.to_owned(),
+            target: id.to_owned(),
+            kind: "text",
+            body: Some(text.to_owned()),
+        };
+        self.commit(Vec::new(), &[edit])
+    }
+
+    /// Own message `id` was deleted for everyone from this Mac.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn revoke_own(&self, chat: &str, id: &str) -> anyhow::Result<()> {
+        let revoke = Effect::Revoke {
+            chat: chat.to_owned(),
+            sender: crate::inbox::ME.to_owned(),
+            target: id.to_owned(),
+        };
+        self.commit(Vec::new(), &[revoke])
+    }
 }
 
 #[cfg(test)]

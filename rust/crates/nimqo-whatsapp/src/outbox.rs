@@ -57,6 +57,9 @@ pub struct Pending {
     /// The chat's timer when it was queued, sent with it.
     #[diesel(sql_type = diesel::sql_types::Nullable<BigInt>)]
     pub timer: Option<i64>,
+    /// A copy of a stored message, sent with its original media.
+    #[diesel(sql_type = diesel::sql_types::Bool)]
+    pub forwarded: bool,
 }
 
 impl Inbox {
@@ -164,6 +167,7 @@ impl Inbox {
             expires_at: Some(ts + STATUS_LIFETIME),
             media,
             quote: None,
+            forwarded: false,
         };
         self.commit(vec![row], &[])
     }
@@ -189,7 +193,7 @@ impl Inbox {
     pub fn pending(&self) -> Result<Vec<Pending>> {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
-            "SELECT chat, id, body, kind, media, reply_to, expires_at - ts AS timer FROM messages
+            "SELECT chat, id, body, kind, media, reply_to, expires_at - ts AS timer, forwarded FROM messages
              WHERE status = 'pending' AND sender = ? ORDER BY ts, rowid",
         )
         .bind::<Text, _>(ME)

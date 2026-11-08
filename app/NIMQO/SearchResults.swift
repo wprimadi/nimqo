@@ -22,23 +22,7 @@ struct SearchResults: View {
             Button {
                 Task { await model.reveal(hit.seq, in: hit.chatId) }
             } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack {
-                        Text(title(hit.chatId)).font(.headline).lineLimit(1)
-                        Spacer()
-                        Text(
-                            Date(timeIntervalSince1970: TimeInterval(hit.timestampSecs)),
-                            format: .dateTime.day().month().year(.twoDigits)
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
-                    Text(hit.fromMe ? "You: \(hit.body)" : hit.body)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .contentShape(.rect)
+                HitRow(hit: hit, title: model.title(of: hit.chatId))
             }
             .buttonStyle(.plain)
         }
@@ -55,13 +39,40 @@ struct SearchResults: View {
             searched = true
         }
     }
+}
 
-    private func title(_ chat: String) -> String {
-        model.chats.first { $0.id == chat }?.title ?? "Chat"
+/// A found or starred message: its chat, when, and what it says.
+struct HitRow: View {
+    let hit: SearchHit
+    let title: String
+
+    var body: some View {
+        let text = ChatMessage.describe(kind: hit.kind, body: hit.body.isEmpty ? nil : hit.body)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.headline).lineLimit(1)
+                Spacer()
+                Text(
+                    Date(timeIntervalSince1970: TimeInterval(hit.timestampSecs)),
+                    format: .dateTime.day().month().year(.twoDigits)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Text(hit.fromMe ? "You: \(text)" : text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .contentShape(.rect)
     }
 }
 
 extension CoreModel {
+    func title(of chat: String) -> String {
+        chats.first { $0.id == chat }?.title ?? "Chat"
+    }
+
     /// Opens `chat` and loads older pages until message `seq` is in, then
     /// asks the timeline to show it. Only what is stored here: the hit came
     /// from this Mac's store, so the phone is not asked.

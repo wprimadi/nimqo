@@ -50,7 +50,7 @@ struct NimqoApp: App {
         MenuBarExtra {
             StatusMenu(model: model, panels: panels)
         } label: {
-            let unread = model.chats.filter { !$0.muted }.reduce(0) { $0 + $1.unread }
+            let unread = model.chats.filter { !$0.quiet }.reduce(0) { $0 + $1.unread }
             Label("NIMQO", systemImage: model.statusSymbol)
                 .labelStyle(.iconOnly)
                 .modifier(ShowsWindowOnRequest())
@@ -106,9 +106,9 @@ struct StatusMenu: View {
     var body: some View {
         Text(model.statusText)
         Divider()
-        if !model.chats.isEmpty {
+        if !model.listed.isEmpty {
             Section("Recent") {
-                ForEach(model.chats.prefix(5)) { chat in
+                ForEach(model.listed.prefix(5)) { chat in
                     Button(chat.unread > 0 ? "\(chat.title) (\(chat.unread))" : chat.title) {
                         open(chat.id)
                     }

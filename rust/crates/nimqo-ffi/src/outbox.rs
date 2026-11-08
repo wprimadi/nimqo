@@ -1,5 +1,5 @@
-//! Sending (plan 10.5): messages, reactions, mutes, and read receipts to
-//! any person or group, as WhatsApp itself allows. Statuses, channels, and
+//! Sending (plan 10.5): messages, reactions, mutes, chat actions, and read
+//! receipts to any person or group, as WhatsApp itself allows. Statuses, channels, and
 //! broadcast lists are not chats and are refused.
 //!
 //! A successful `send` only means the stanza was written to the socket; on a
@@ -26,6 +26,8 @@ use whatsapp_rust::{Client, MessageId, SendOptions, SendRequest};
 
 use crate::{CoreError, CoreListener};
 
+mod actions;
+pub use actions::{EDIT_WINDOW_SECS, REVOKE_WINDOW_SECS};
 mod files;
 mod status;
 pub use files::OutgoingFile;
@@ -188,7 +190,10 @@ impl Sender {
         if let Some(seconds) = p.timer.and_then(|t| u32::try_from(t).ok()) {
             options = options.with_ephemeral_expiration(seconds);
         }
-        let message = if p.kind == "text" {
+        let message = if p.forwarded {
+            nimqo_whatsapp::forward::forwarded(&p.kind, p.body.as_deref(), p.media.as_deref())
+                .ok_or("not forwardable")?
+        } else if p.kind == "text" {
             let body = p.body.clone().unwrap_or_default();
             match self.quote_context(p) {
                 Some(context) => wa::Message::text_with_context(body, context),

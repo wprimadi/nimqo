@@ -2,6 +2,37 @@ import AppKit
 import NimqoCore
 import SwiftUI
 
+/// What the conversation asks of the app for a message (by seq).
+struct MessageCommands {
+    var star: @MainActor (Int64, Bool) -> Void = { _, _ in }
+    /// Returns why the edit was refused.
+    var edit: @MainActor (Int64, String) async -> String? = { _, _ in nil }
+    var delete: @MainActor (Int64) -> Void = { _ in }
+    /// Opens the chat picker for it.
+    var forward: @MainActor (ChatMessage) -> Void = { _ in }
+}
+
+/// Asks before a message is deleted for everyone; it cannot be undone.
+struct DeleteConfirmation: ViewModifier {
+    @Binding var deleting: ChatMessage?
+    let delete: @MainActor (Int64) -> Void
+
+    private static let title: LocalizedStringKey = "Delete this message for everyone?"
+
+    func body(content: Content) -> some View {
+        let shown = Binding { deleting != nil } set: {
+            if !$0 {
+                deleting = nil
+            }
+        }
+        content.confirmationDialog(Self.title, isPresented: shown, presenting: deleting) { message in
+            Button("Delete for Everyone", role: .destructive) { delete(message.seq) }
+        } message: { _ in
+            Text("It is replaced by “This message was deleted” for everyone in this chat.")
+        }
+    }
+}
+
 /// What can be done to a message from the buttons shown on hover.
 struct MessageActions {
     /// The same items as the message's context menu.
@@ -177,6 +208,46 @@ extension MessageBubble {
 }
 
 extension ConversationView {
+    /// The context menu, also behind the button shown on hover.
+    @ViewBuilder
+    func menu(for message: ChatMessage) -> some View {
+        let live = message.kind != .deleted
+        if send != nil, live {
+            Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
+            ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickEmoji(for: message.seq) }
+        }
+        if message.kind == .text, let body = message.body {
+            Button("Copy", systemImage: "doc.on.doc") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(body, forType: .string)
+            }
+        }
+        if send != nil, message.isEditable {
+            Button("Edit", systemImage: "pencil") {
+                replyingTo = nil
+                editing = message
+            }
+        }
+        if live, message.isForwardable {
+            Button("Forward…", systemImage: "arrowshape.turn.up.right") { commands.forward(message) }
+        }
+        if send != nil, live {
+            Button(message.starred ? "Unstar" : "Star", systemImage: message.starred ? "star.slash" : "star") {
+                commands.star(message.seq, !message.starred)
+            }
+        }
+        if message.canSave {
+            Button("Save As…", systemImage: "square.and.arrow.down") { pictures.save(chat: chat.id, message: message) }
+        }
+        if send != nil, message.delivery == .failed {
+            Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
+        }
+        if send != nil, message.canDeleteForEveryone {
+            Divider()
+            Button("Delete for Everyone…", systemImage: "trash", role: .destructive) { deleting = message }
+        }
+    }
+
     func actions(for message: ChatMessage) -> MessageActions {
         MessageActions(
             menu: AnyView(menu(for: message)),
