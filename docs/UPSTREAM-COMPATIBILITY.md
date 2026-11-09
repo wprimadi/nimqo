@@ -7,12 +7,20 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 
 | Item | Value |
 | --- | --- |
-| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58` |
+| Upstream | `oxidezap/whatsapp-rust` `main` @ `0a6ae107810e6f4e2d73bbda0bebe12208472a58`, built from the fork `wprimadi/whatsapp-rust` branch `nimqo/video-fec-receive` (see Patches) |
 | Features | defaults off; `sqlite-storage`, `tokio-transport`, `tokio-runtime`, `tokio-native`, `ureq-client` |
 | Storage | upstream SQLite store on SQLCipher (`libsqlite3-sys` 0.38 `bundled-sqlcipher`, CommonCrypto) |
 | Rust | 1.99.1 |
 | macOS | 27.0.1, Apple Silicon; binary minimum macOS 14.0 |
 | Tools | `rust/crates/nimqo-whatsapp` binary `nimqo-poc`; SwiftPM app in `app/` via `nimqo-ffi` |
+
+## Patches
+
+NIMQO builds from a fork until these land upstream. Each is one commit on
+`wprimadi/whatsapp-rust` branch `nimqo/video-fec-receive`, based on the
+upstream commit above.
+
+- `0fb3c7f` voip: rebuild lost inbound video packets from the peer's FEC. Upstream decrypted the peer's video repair packets and dropped them, so every lost packet froze the picture until a keyframe, and the engine asked for a keyframe on each loss.
 
 ## Notes
 

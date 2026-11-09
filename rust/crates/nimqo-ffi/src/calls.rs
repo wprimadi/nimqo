@@ -137,13 +137,12 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         return;
     }
     log::info!(
-        "call {call_id} video: rtp {} lost {} nack {} retransmitted {} stale {}, \
-         units {} no-marker {} evicted {}, fragment gaps {}, sink dropped {}, keyframe asks {}; \
-         all rtp {} dropped before the engine {}, audio decoded {} concealed {}",
+        "call {call_id} video: rtp {} lost {} stale {}, units {} no-marker {} evicted {}, \
+         fragment gaps {}, sink dropped {}, keyframe asks {}, dropped before the engine {}; \
+         fec: repairs {} recovered {} parity ok {} bad {}, two lost {} late {} rejected {}, \
+         gaps skipped {} ({} packets); other payload types {} (last {})",
         s.video_rtp_received,
         s.video_rtp_lost,
-        s.video_nack_requested,
-        s.video_retransmitted,
         s.video_rtp_stale_timestamp,
         s.video_access_units_completed,
         s.video_access_units_without_marker,
@@ -151,10 +150,18 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         s.video_fu_dropped_sequence_gap,
         s.video_sink_dropped,
         s.peer_keyframe_requests,
-        s.rtp_received,
         s.inbound_pipe_dropped,
-        s.audio_frames_decoded,
-        s.audio_frames_concealed,
+        s.video_fec_repairs_received,
+        s.video_fec_recovered,
+        s.video_fec_parity_matched,
+        s.video_fec_parity_mismatched,
+        s.video_fec_insufficient,
+        s.video_fec_late,
+        s.video_fec_rejected,
+        s.video_gaps_skipped,
+        s.video_packets_skipped,
+        s.rtp_payload_type_unexpected,
+        s.last_unexpected_payload_type,
     );
 }
 

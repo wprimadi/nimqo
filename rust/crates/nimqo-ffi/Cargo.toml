@@ -21,7 +21,7 @@ nimqo-whatsapp = { path = "../nimqo-whatsapp" }
 oslog = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 uniffi = { version = "0.32", features = ["cli"] }
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "0a6ae107810e6f4e2d73bbda0bebe12208472a58", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client", "voip-libopus", "voip-relay-native"] }
+whatsapp-rust = { git = "https://github.com/wprimadi/whatsapp-rust", rev = "0fb3c7f110e20802e32d2c68c1dd0069a76f99f2", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "tokio-native", "ureq-client", "voip-libopus", "voip-relay-native"] }
 
 [lints]
 workspace = true

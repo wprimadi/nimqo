@@ -22,4 +22,6 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = ["https://github.com/oxidezap/whatsapp-rust"]
+# The fork carries NIMQO's fixes on top of upstream until they land there
+# (docs/UPSTREAM-COMPATIBILITY.md).
+allow-git = ["https://github.com/oxidezap/whatsapp-rust", "https://github.com/wprimadi/whatsapp-rust"]
