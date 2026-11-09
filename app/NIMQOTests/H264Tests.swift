@@ -31,4 +31,15 @@ final class H264Tests: XCTestCase {
         XCTAssertEqual(H264.type(of: pps), 8)
         XCTAssertEqual(H264.type(of: slice), 5)
     }
+
+    /// Bits after the header: first_mb_in_slice ue(0) = 1, then slice_type.
+    func testIntraSlices() {
+        XCTAssertTrue(H264.isIntra(slice))
+        XCTAssertTrue(H264.isIntra(Data([0x41, 0x88]))) // 1 0001000: slice_type 7, I
+        XCTAssertTrue(H264.isIntra(Data([0x41, 0xB0]))) // 1 011: slice_type 2, I
+        XCTAssertFalse(H264.isIntra(Data([0x41, 0xC0]))) // 1 1: slice_type 0, P
+        XCTAssertFalse(H264.isIntra(Data([0x41, 0xA0]))) // 1 010: slice_type 1, B
+        XCTAssertFalse(H264.isIntra(Data([0x41]))) // cut short
+        XCTAssertFalse(H264.isIntra(sps))
+    }
 }

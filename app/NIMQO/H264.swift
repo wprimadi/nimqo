@@ -38,6 +38,50 @@ enum H264 {
         (unit.first ?? 0) & 0x1F
     }
 
+    /// Whether a picture slice is intra-coded, so decoding can restart on it:
+    /// an IDR slice, or a plain I slice (type 1 with slice_type I or SI),
+    /// which is how some senders answer a keyframe request.
+    static func isIntra(_ unit: Data) -> Bool {
+        switch type(of: unit) {
+        case 5: return true
+        case 1:
+            var reader = BitReader(bytes: [UInt8](unit.dropFirst()))
+            guard reader.golomb() != nil, let slice = reader.golomb() else { return false }
+            return slice % 5 == 2 || slice % 5 == 4
+        default: return false
+        }
+    }
+
+    /// Reads the slice header's first fields: unsigned Exp-Golomb codes.
+    private struct BitReader {
+        let bytes: [UInt8]
+        var position = 0
+
+        mutating func bit() -> Int? {
+            guard position < bytes.count * 8 else { return nil }
+            defer { position += 1 }
+            return Int((bytes[position / 8] >> (7 - position % 8)) & 1)
+        }
+
+        mutating func golomb() -> Int? {
+            var zeros = 0
+            while true {
+                guard let bit = bit() else { return nil }
+                if bit == 1 {
+                    break
+                }
+                zeros += 1
+                guard zeros < 32 else { return nil }
+            }
+            var value = 0
+            for _ in 0 ..< zeros {
+                guard let bit = bit() else { return nil }
+                value = value << 1 | bit
+            }
+            return (1 << zeros) - 1 + value
+        }
+    }
+
     static func annexB(_ units: [Data]) -> Data {
         units.reduce(into: Data()) { out, unit in
             out.append(contentsOf: startCode)

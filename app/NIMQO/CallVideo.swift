@@ -193,8 +193,8 @@ final class RemoteVideo {
 }
 
 /// Feeds the layer's renderer on one queue, in arrival order: H.264 only
-/// decodes in order, and after a loss or a decoder failure only from the
-/// next IDR picture, so frames until then are dropped and one is asked for.
+/// decodes in order, and after a decoder failure only from the next intra
+/// picture, so frames until then are dropped and one is asked for.
 final class RemoteDecoder: @unchecked Sendable {
     /// Set once, before the first frame.
     var shown: (@Sendable (Int) -> Void)?
@@ -204,9 +204,13 @@ final class RemoteDecoder: @unchecked Sendable {
     private var format: CMVideoFormatDescription?
     private var sps: Data?
     private var pps: Data?
-    private var waiting = true
     private var reported: Int?
     private var asked = Date.distantPast
+    /// Since when frames are dropped while waiting for an intra picture.
+    private var waiting: Date? = .now
+    private var dropped = 0
+    private var arrived: Date?
+    private let log = Logger(subsystem: "app.nimqo", category: "call-video")
 
     init(renderer: AVSampleBufferVideoRenderer) {
         self.renderer = renderer
@@ -222,12 +226,51 @@ final class RemoteDecoder: @unchecked Sendable {
             self.format = nil
             self.sps = nil
             self.pps = nil
-            self.waiting = true
+            self.waiting = .now
+            self.dropped = 0
+            self.arrived = nil
             self.reported = nil
         }
     }
 
     private func enqueue(_ frame: Data, turns: Int) {
+        // A freeze with no decoder failure is the network, not this side.
+        if let arrived, Date.now.timeIntervalSince(arrived) > 1 {
+            log.info("no video frames for \(Date.now.timeIntervalSince(arrived), format: .fixed(precision: 1)) s")
+        }
+        arrived = .now
+        let slices = slices(of: frame)
+        // Parameter sets alone: they come just before the picture.
+        guard !slices.isEmpty else { return }
+        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            let error = renderer.error.map { String(describing: $0) } ?? "none"
+            log.error("video decoder failed: \(error, privacy: .public)")
+            renderer.flush()
+            waiting = waiting ?? .now
+        }
+        let pictures = slices.filter { [1, 5].contains(H264.type(of: $0)) }
+        let intra = !pictures.isEmpty && pictures.allSatisfy(H264.isIntra)
+        guard waiting == nil || intra, let format,
+              let sample = Self.sample(H264.avcc(slices), format: format)
+        else {
+            dropped += 1
+            return ask()
+        }
+        renderer.enqueue(sample)
+        if let waiting {
+            let (seconds, count) = (Date.now.timeIntervalSince(waiting), dropped)
+            log.info("picture after \(seconds, format: .fixed(precision: 1)) s, \(count) frames dropped")
+        }
+        waiting = nil
+        dropped = 0
+        if reported != turns {
+            reported = turns
+            shown?(turns)
+        }
+    }
+
+    /// The frame's slices; its parameter sets update the format.
+    private func slices(of frame: Data) -> [Data] {
         var slices: [Data] = []
         for unit in H264.units(annexB: frame) {
             switch H264.type(of: unit) {
@@ -241,25 +284,10 @@ final class RemoteDecoder: @unchecked Sendable {
             default: slices.append(unit)
             }
         }
-        // Parameter sets alone: they come just before the picture.
-        guard !slices.isEmpty else { return }
         if format == nil, let sps, let pps {
             format = Self.format(sps: sps, pps: pps)
         }
-        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
-            renderer.flush()
-            waiting = true
-        }
-        let idr = slices.contains { H264.type(of: $0) == 5 }
-        guard !waiting || idr, let format, let sample = Self.sample(H264.avcc(slices), format: format) else {
-            return ask()
-        }
-        renderer.enqueue(sample)
-        waiting = false
-        if reported != turns {
-            reported = turns
-            shown?(turns)
-        }
+        return slices
     }
 
     /// At most once a second; the call engine paces it further.

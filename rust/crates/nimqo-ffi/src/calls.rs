@@ -584,7 +584,7 @@ impl Core {
     /// Asks the other side for a fresh keyframe after a decode error.
     pub fn request_call_keyframe(&self) {
         if let Some(handle) = self.calls.handle() {
-            handle.request_peer_keyframe(KeyframeUrgency::Coalesced);
+            handle.request_peer_keyframe(KeyframeUrgency::Immediate);
         }
     }
 
