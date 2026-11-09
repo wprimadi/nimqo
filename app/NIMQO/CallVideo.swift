@@ -15,6 +15,8 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
     private var send: (@Sendable (Data) -> Void)?
     private var wantsKeyframe = true
     private var last = CMTime.invalid
+    /// The encoder's picture size; zero when there is none.
+    private var size: (Int32, Int32) = (0, 0)
     private let log = Logger(subsystem: "app.nimqo", category: "call-camera")
 
     /// Starts capturing; `send` gets each encoded access unit. Blocks while
@@ -41,23 +43,34 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
             session.addOutput(output)
         }
         session.commitConfiguration()
-        lock.withLock {
-            self.send = send
-            wantsKeyframe = true
-            last = .invalid
-        }
+        attach(send)
         session.startRunning()
     }
 
+    /// Where encoded frames go, starting with a keyframe. The shared screen
+    /// calls this after `stop` and feeds `encode` itself.
+    func attach(_ send: @escaping @Sendable (Data) -> Void) {
+        let old = lock.withLock {
+            defer {
+                encoder = nil
+                size = (0, 0)
+                self.send = send
+                wantsKeyframe = true
+                last = .invalid
+            }
+            return encoder
+        }
+        if let old {
+            VTCompressionSessionInvalidate(old)
+        }
+    }
+
     func stop() {
-        session.stopRunning()
-        session.beginConfiguration()
-        session.inputs.forEach(session.removeInput)
-        session.outputs.forEach(session.removeOutput)
-        session.commitConfiguration()
+        stopCapture()
         let encoder = lock.withLock {
             defer {
                 self.encoder = nil
+                size = (0, 0)
                 send = nil
             }
             return self.encoder
@@ -67,6 +80,14 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
         }
     }
 
+    private func stopCapture() {
+        session.stopRunning()
+        session.beginConfiguration()
+        session.inputs.forEach(session.removeInput)
+        session.outputs.forEach(session.removeOutput)
+        session.commitConfiguration()
+    }
+
     /// The other side lost the picture; the next frame starts a new one.
     func forceKeyframe() {
         lock.withLock { wantsKeyframe = true }
@@ -74,19 +95,31 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
 
     func captureOutput(_: AVCaptureOutput, didOutput sample: CMSampleBuffer, from _: AVCaptureConnection) {
         guard let image = CMSampleBufferGetImageBuffer(sample) else { return }
-        let time = CMSampleBufferGetPresentationTimeStamp(sample)
-        let (encoder, send, keyframe) = lock.withLock {
-            // About 15 frames a second, whatever the camera gives.
+        encode(image, at: CMSampleBufferGetPresentationTimeStamp(sample))
+    }
+
+    /// One picture, at about 15 frames a second whatever the source gives.
+    /// A new size (another window shared) starts a new encoder.
+    func encode(_ image: CVPixelBuffer, at time: CMTime) {
+        let (width, height) = (Int32(CVPixelBufferGetWidth(image)), Int32(CVPixelBufferGetHeight(image)))
+        let (encoder, send, keyframe, retired) = lock.withLock {
             if last.isValid, (time - last).seconds < 1 / 16 {
-                return (nil as VTCompressionSession?, nil as (@Sendable (Data) -> Void)?, false)
+                return (nil as VTCompressionSession?, nil as (@Sendable (Data) -> Void)?, false,
+                        nil as VTCompressionSession?)
             }
             last = time
-            if self.encoder == nil {
-                self.encoder = Self.encoder(width: Int32(CVPixelBufferGetWidth(image)),
-                                            height: Int32(CVPixelBufferGetHeight(image)))
+            var retired: VTCompressionSession?
+            if size != (width, height) {
+                retired = self.encoder
+                self.encoder = Self.encoder(width: width, height: height)
+                size = (width, height)
+                wantsKeyframe = true
             }
             defer { wantsKeyframe = false }
-            return (self.encoder, self.send, wantsKeyframe)
+            return (self.encoder, self.send, wantsKeyframe, retired)
+        }
+        if let retired {
+            VTCompressionSessionInvalidate(retired)
         }
         guard let encoder, let send else { return }
         let options = keyframe ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue] as CFDictionary : nil
@@ -110,7 +143,8 @@ final class CallCamera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, 
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_ProfileLevel: kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
-            kVTCompressionPropertyKey_AverageBitRate: 600_000,
+            // Text on a shared screen needs more than a face does.
+            kVTCompressionPropertyKey_AverageBitRate: width > 640 ? 1_500_000 : 600_000,
             kVTCompressionPropertyKey_ExpectedFrameRate: 15,
             kVTCompressionPropertyKey_MaxKeyFrameInterval: 30,
         ]

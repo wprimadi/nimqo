@@ -44,7 +44,7 @@ final class CallStore {
     }
 
     private(set) var current: Call?
-    private(set) var problem: String?
+    var problem: String?
     var core: Core? {
         didSet {
             if let bridge {
@@ -57,6 +57,7 @@ final class CallStore {
     @ObservationIgnored let camera = CallCamera()
     @ObservationIgnored let preview: AVCaptureVideoPreviewLayer
     let remote = RemoteVideo()
+    let screen: ScreenShare
     /// A call rang while NIMQO could not answer: the chat.
     @ObservationIgnored var missed: ((String) -> Void)?
     @ObservationIgnored private var bridge: CallBridge?
@@ -66,11 +67,13 @@ final class CallStore {
     init() {
         preview = AVCaptureVideoPreviewLayer(session: camera.session)
         preview.videoGravity = .resizeAspectFill
+        screen = ScreenShare(camera: camera)
         bridge = CallBridge(audio: audio, camera: camera, remote: remote) { [weak self] signal in
             Task { @MainActor in self?.handle(signal) }
         }
         remote.onLoss = { [weak self] in self?.core?.requestCallKeyframe() }
         remote.onPicture = { [weak self] in self?.current?.peerVideo = true }
+        screen.ended = { [weak self] in self?.stopSharing() }
     }
 
     func place(_ chat: String, video: Bool) {
@@ -161,7 +164,7 @@ final class CallStore {
     /// Turns this side's camera on or off; on also answers the other side's
     /// ask for video.
     func toggleCamera() {
-        guard let call = current, !call.isOver, call.phase != .incoming else { return }
+        guard let call = current, !call.isOver, call.phase != .incoming, !sharing else { return }
         if call.camera {
             current?.camera = false
             stopCamera()
@@ -241,7 +244,7 @@ final class CallStore {
         return video ? await startCamera() : false
     }
 
-    private func startCamera() async -> Bool {
+    func startCamera() async -> Bool {
         guard await AVCaptureDevice.requestAccess(for: .video) else {
             problem = String(localized: """
             NIMQO needs the camera for video. Allow it in System Settings › Privacy & Security › Camera.
@@ -266,10 +269,11 @@ final class CallStore {
     /// Never leaves the microphone or camera on after a call is gone.
     private func stopMedia() {
         audio.stop()
+        screen.stop()
         stopCamera()
     }
 
-    private func stopCamera() {
+    func stopCamera() {
         let camera = camera
         Task.detached { camera.stop() }
     }
@@ -289,8 +293,10 @@ final class CallStore {
             }
         }
     }
+}
 
-    private func ring(_ ringing: Bool) {
+private extension CallStore {
+    func ring(_ ringing: Bool) {
         if ringing {
             ringtone = ringtone ?? NSSound(named: "Submarine")
             ringtone?.loops = true

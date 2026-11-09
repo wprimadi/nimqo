@@ -116,7 +116,7 @@ private struct CallScreen: View {
                     }
                     .shadow(radius: 6)
                     Spacer()
-                    if call.camera {
+                    if call.camera, !store.sharing {
                         LayerView(layer: store.preview)
                             .scaleEffect(x: -1, y: 1)
                             .frame(width: 168, height: 126)
@@ -216,6 +216,14 @@ private struct CallControls: View {
                             tint: call.camera ? .white : nil, foreground: call.camera ? .black : .white,
                             action: store.toggleCamera)
                     .keyboardShortcut("v", modifiers: [.command, .shift])
+                    .disabled(store.sharing)
+                    .opacity(store.sharing ? 0.4 : 1)
+                if call.phase == .connected {
+                    RoundButton(title: store.sharing ? "Stop Sharing" : "Share Screen",
+                                symbol: store.sharing ? "rectangle.on.rectangle.slash" : "rectangle.on.rectangle",
+                                tint: store.sharing ? .white : nil, foreground: store.sharing ? .black : .white,
+                                action: store.toggleScreen)
+                }
                 RoundButton(title: "End", symbol: "phone.down.fill", tint: .red) { store.hangUp() }
             }
         }
