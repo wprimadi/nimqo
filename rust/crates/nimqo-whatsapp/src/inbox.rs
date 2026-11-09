@@ -1,7 +1,6 @@
 //! Encrypted message store behind upstream's `InboundDurabilityHook`.
 //!
-//! Every chat is stored (read-only display); sending stays allowlisted
-//! elsewhere.
+//! Every chat is stored here; sending lives in the FFI outbox.
 //!
 //! Upstream acknowledges a message as soon as it is decrypted unless a
 //! durability hook is registered. With this hook, a message is acknowledged
@@ -800,7 +799,7 @@ fn is_broadcast_list(chat: &whatsapp_rust::Jid) -> bool {
 }
 
 /// Sender key of the user's own messages.
-pub(crate) const ME: &str = "me";
+pub const ME: &str = "me";
 
 /// One chat per person: a one-to-one chat addressed by LID is filed under
 /// the phone number when the message carries it, so both addressings of the

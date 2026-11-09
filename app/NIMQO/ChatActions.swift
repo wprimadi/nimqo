@@ -71,13 +71,13 @@ extension ChatMessage {
 
     /// Own, sent, and still inside WhatsApp's window to delete for everyone.
     var canDeleteForEveryone: Bool {
-        fromMe && kind != .deleted && delivery != .pending && delivery != .failed
+        fromMe && kind != .deleted && kind != .call && delivery != .pending && delivery != .failed
             && Int64(Date.now.timeIntervalSince1970) - timestampSecs < deleteWindowSecs()
     }
 
     /// A member's message an admin may delete for everyone, within the window.
     var canAdminDelete: Bool {
-        !fromMe && kind != .deleted
+        !fromMe && kind != .deleted && kind != .call
             && Int64(Date.now.timeIntervalSince1970) - timestampSecs < deleteWindowSecs()
     }
 

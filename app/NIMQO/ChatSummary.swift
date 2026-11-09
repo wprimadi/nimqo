@@ -1,5 +1,6 @@
 import Foundation
 import NimqoCore
+import SwiftUI
 
 /// UI model for one row in the chat list.
 struct ChatSummary: Identifiable, Hashable {
@@ -60,6 +61,9 @@ extension ChatSummary {
 extension ChatMessage {
     /// Text, or a label for content the timeline cannot show yet.
     static func describe(kind: MessageKind, body: String?) -> String {
+        if kind == .call {
+            return CallEntry(body).text
+        }
         let label = switch kind {
         case .text: ""
         case .image: "Photo"
@@ -68,9 +72,56 @@ extension ChatMessage {
         case .document: "Document"
         case .sticker: "Sticker"
         case .deleted: "This message was deleted"
-        case .unsupported: "Message not supported yet"
+        case .call, .unsupported: "Message not supported yet"
         }
         guard let body, !body.isEmpty else { return label }
         return label.isEmpty || kind == .document ? body : "\(label): \(body)"
+    }
+}
+
+/// A call in a timeline; the core stores it as `<voice|video> <outcome> <seconds>`.
+struct CallEntry {
+    let video: Bool
+    let outcome: String
+    let secs: Int
+
+    init(_ body: String?) {
+        let parts = (body ?? "").split(separator: " ").map(String.init)
+        video = parts.first == "video"
+        outcome = parts.count > 1 ? parts[1] : ""
+        secs = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+    }
+
+    var missed: Bool {
+        outcome == "missed"
+    }
+
+    var label: some View {
+        Label { Text(text) } icon: {
+            Image(systemName: symbol).foregroundStyle(missed ? .red : .secondary)
+        }
+    }
+
+    var symbol: String {
+        switch (video, missed) {
+        case (true, _): "video.fill"
+        case (false, true): "phone.arrow.down.left.fill"
+        case (false, false): "phone.fill"
+        }
+    }
+
+    var text: String {
+        let call = video ? String(localized: "Video call") : String(localized: "Voice call")
+        switch outcome {
+        case "connected":
+            let length = Duration.seconds(secs)
+                .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 1))
+            return "\(call) · \(length)"
+        case "missed": return video ? String(localized: "Missed video call") : String(localized: "Missed voice call")
+        case "declined":
+            return video ? String(localized: "Declined video call") : String(localized: "Declined voice call")
+        case "noanswer": return String(localized: "\(call) · No answer")
+        default: return String(localized: "\(call) · Failed")
+        }
     }
 }

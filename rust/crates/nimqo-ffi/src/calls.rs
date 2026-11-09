@@ -6,10 +6,12 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use nimqo_whatsapp::inbox::Inbox;
+use nimqo_whatsapp::calllog::{self, Call, Outcome};
+use nimqo_whatsapp::inbox::{Inbox, ME};
 use nimqo_whatsapp::lids;
 use whatsapp_rust::Client;
 use whatsapp_rust::Jid;
+use whatsapp_rust::prelude::wa;
 use whatsapp_rust::types::call::{CallAction, IncomingCall};
 use whatsapp_rust::types::events::Event;
 use whatsapp_rust::voip::{
@@ -79,18 +81,72 @@ struct Active {
     connected: bool,
 }
 
+/// What the chat's timeline gets when the call ends.
+struct Log {
+    id: String,
+    chat: String,
+    video: bool,
+    outgoing: bool,
+    started: i64,
+    connected: Option<i64>,
+}
+
+impl Log {
+    /// `None` when another device took the call: the phone's record says how.
+    fn into_call(self, reason: CallEnd) -> Option<Call> {
+        let outcome = match (reason, self.connected, self.outgoing) {
+            (CallEnd::Elsewhere, ..) => return None,
+            (_, Some(_), _) => Outcome::Connected,
+            (CallEnd::Declined, ..) | (CallEnd::Local, None, false) => Outcome::Declined,
+            (CallEnd::Failed, ..) => Outcome::Failed,
+            (_, None, true) => Outcome::NoAnswer,
+            (_, None, false) => Outcome::Missed,
+        };
+        Some(Call {
+            sender: if self.outgoing {
+                ME.to_owned()
+            } else {
+                self.chat.clone()
+            },
+            chat: self.chat,
+            id: self.id,
+            video: self.video,
+            outcome,
+            started: self.started,
+            secs: self.connected.map_or(0, |c| now() - c),
+        })
+    }
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
 #[derive(Default)]
 struct State {
     ringing: Option<IncomingCall>,
     /// A call being placed or answered, before its handle exists.
     starting: bool,
     active: Option<Active>,
+    log: Option<Log>,
 }
 
-#[derive(Default)]
 pub(crate) struct Calls {
     listener: Mutex<Option<Arc<dyn CallListener>>>,
     state: Mutex<State>,
+    inbox: Inbox,
+}
+
+/// Files a call in its chat, off the async threads.
+fn file(inbox: &Inbox, call: Call) {
+    let inbox = inbox.clone();
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = calllog::store(&inbox, call) {
+            log::warn!("call not filed: {e:#}");
+        }
+    });
 }
 
 fn refused(reason: &str) -> CoreError {
@@ -166,6 +222,14 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
 }
 
 impl Calls {
+    pub(crate) fn new(inbox: Inbox) -> Self {
+        Self {
+            listener: Mutex::default(),
+            state: Mutex::default(),
+            inbox,
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state
             .lock()
@@ -186,9 +250,10 @@ impl Calls {
 
     /// Reports the end once, whoever notices first.
     fn finish(&self, call_id: &str, reason: CallEnd) {
-        let (ended, handle) = {
+        let (ended, handle, log) = {
             let mut state = self.lock();
-            if state
+            let log = state.log.take_if(|l| l.id == call_id);
+            let (ended, handle) = if state
                 .active
                 .as_ref()
                 .is_some_and(|a| a.handle.call_id() == call_id)
@@ -203,8 +268,12 @@ impl Calls {
                 (true, None)
             } else {
                 (false, None)
-            }
+            };
+            (ended, handle, log)
         };
+        if let Some(call) = log.and_then(|l| l.into_call(reason)) {
+            file(&self.inbox, call);
+        }
         if ended {
             log::info!("call {call_id} ended: {reason:?}");
             if let Some(handle) = handle {
@@ -219,6 +288,9 @@ impl Calls {
     fn mark_connected(&self, call_id: &str) {
         let first = {
             let mut state = self.lock();
+            if let Some(l) = state.log.as_mut().filter(|l| l.id == call_id) {
+                l.connected.get_or_insert_with(now);
+            }
             match state.active.as_mut() {
                 Some(a) if a.handle.call_id() == call_id && !a.connected => {
                     a.connected = true;
@@ -347,8 +419,63 @@ impl Calls {
                     listener.on_missed_call(chat);
                 }
             }
+            Event::CallLogSync(e) => {
+                let id = Some(e.call_id.as_str());
+                self.file_phone_call(
+                    client,
+                    &e.record,
+                    Some(&e.call_creator_jid),
+                    Some(e.from_me),
+                    id,
+                )
+                .await;
+            }
+            Event::CallLogHistory(e) => {
+                let creator = e.call_creator_jid.as_ref();
+                self.file_phone_call(client, &e.record, creator, e.from_me, None)
+                    .await;
+            }
             _ => {}
         }
+    }
+
+    /// A call the phone recorded: placed or taken there, or rung here while
+    /// NIMQO was closed.
+    async fn file_phone_call(
+        &self,
+        client: &Client,
+        record: &wa::CallLogRecord,
+        creator: Option<&Jid>,
+        from_me: Option<bool>,
+        id: Option<&str>,
+    ) {
+        let Some(from_me) = from_me else { return };
+        let (Some(id), Some(outcome), Some(started), Some(peer)) = (
+            id.or(record.call_id.as_deref()),
+            Outcome::of(record.call_result, from_me),
+            calllog::started_of(record),
+            calllog::peer_of(record, creator, from_me),
+        ) else {
+            return;
+        };
+        let chat = lids::phone_chat(&self.inbox, client, &peer).await;
+        let sender = match (from_me, creator) {
+            (true, _) => ME.to_owned(),
+            (false, Some(c)) if record.group_jid.is_some() => {
+                lids::phone_chat(&self.inbox, client, c).await
+            }
+            (false, _) => chat.clone(),
+        };
+        let call = Call {
+            chat,
+            sender,
+            id: id.to_owned(),
+            video: record.is_video.unwrap_or(false),
+            outcome,
+            started,
+            secs: record.duration.unwrap_or(0),
+        };
+        file(&self.inbox, call);
     }
 
     async fn on_signal(&self, client: &Arc<Client>, inbox: &Inbox, call: &IncomingCall) {
@@ -371,6 +498,14 @@ impl Calls {
                 self.lock().ringing = Some(call.clone());
                 log::info!("call {call_id} ringing");
                 let chat = lids::phone_chat(inbox, client, &call.from).await;
+                self.lock().log = Some(Log {
+                    id: call_id.clone(),
+                    chat: chat.clone(),
+                    video: *is_video,
+                    outgoing: false,
+                    started: now(),
+                    connected: None,
+                });
                 if let Some(listener) = self.listener() {
                     listener.on_call_ringing(call_id.clone(), chat, *is_video);
                 }
@@ -457,6 +592,14 @@ impl Core {
             };
             let call_id = handle.call_id().to_owned();
             log::info!("call {call_id} placed (video: {video})");
+            calls.lock().log = Some(Log {
+                id: call_id.clone(),
+                chat: chat_id,
+                video,
+                outgoing: true,
+                started: now(),
+                connected: None,
+            });
             calls.adopt(handle, mic, camera, true);
             let (calls, id) = (Arc::clone(&calls), call_id.clone());
             tokio::spawn(async move {
@@ -645,5 +788,50 @@ impl Core {
         if let Some(camera) = camera {
             let _ = camera.try_send(frame);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn log(outgoing: bool, connected: Option<i64>) -> Log {
+        Log {
+            id: "c".into(),
+            chat: "222@s.whatsapp.net".into(),
+            video: false,
+            outgoing,
+            started: 0,
+            connected,
+        }
+    }
+
+    fn outcome(outgoing: bool, connected: Option<i64>, reason: CallEnd) -> Option<Outcome> {
+        log(outgoing, connected)
+            .into_call(reason)
+            .map(|c| c.outcome)
+    }
+
+    #[test]
+    fn ends_read_as_the_timeline_shows_them() {
+        let talked = Some(now() - 30);
+        assert_eq!(outcome(false, None, CallEnd::Elsewhere), None);
+        assert_eq!(
+            outcome(true, talked, CallEnd::Failed),
+            Some(Outcome::Connected)
+        );
+        assert_eq!(
+            outcome(false, None, CallEnd::Local),
+            Some(Outcome::Declined)
+        );
+        assert_eq!(
+            outcome(true, None, CallEnd::Declined),
+            Some(Outcome::Declined)
+        );
+        assert_eq!(outcome(true, None, CallEnd::Local), Some(Outcome::NoAnswer));
+        assert_eq!(outcome(false, None, CallEnd::Remote), Some(Outcome::Missed));
+        let call = log(true, talked).into_call(CallEnd::Remote).unwrap();
+        assert_eq!(call.sender, ME);
+        assert!((30..32).contains(&call.secs));
     }
 }

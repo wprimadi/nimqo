@@ -86,6 +86,10 @@ struct CoreModelTests {
         #expect(chat(name: nil, phone: nil, group: false, kind: .image, body: "beach").preview == "Photo: beach")
         #expect(chat(name: nil, phone: nil, group: false, kind: .document, body: "a.pdf").preview == "a.pdf")
         #expect(chat(name: nil, phone: nil, group: false, kind: .sticker, body: nil).preview == "Sticker")
+        #expect(chat(name: nil, phone: nil, group: false, kind: .call, body: "voice missed 0").preview
+            == "Missed voice call")
+        #expect(CallEntry("video connected 185").text == "Video call · 3 min")
+        #expect(CallEntry("voice noanswer 0").text == "Voice call · No answer")
         let deleted = chat(name: nil, phone: nil, group: false, kind: .deleted, body: nil)
         #expect(deleted.preview == "This message was deleted")
         #expect(deleted.timer == "1 day")

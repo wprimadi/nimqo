@@ -347,7 +347,9 @@ struct MessageBubble: View {
                 }
                 // A shown picture needs no "Photo" label, only its caption;
                 // a document shows its own name.
-                if !(message.hasMedia && (message.body == nil || message.kind == .document)) {
+                if message.kind == .call {
+                    CallEntry(message.body).label
+                } else if !(message.hasMedia && (message.body == nil || message.kind == .document)) {
                     Text(rich)
                         .italic(message.kind != .text && !message.hasMedia)
                         .textSelection(.enabled)

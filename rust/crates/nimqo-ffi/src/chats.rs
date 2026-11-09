@@ -12,6 +12,8 @@ pub enum MessageKind {
     Sticker,
     /// Deleted for everyone by its sender.
     Deleted,
+    /// A call; the body is `<voice|video> <outcome> <seconds>`.
+    Call,
     Unsupported,
 }
 
@@ -25,6 +27,7 @@ impl MessageKind {
             "document" => Self::Document,
             "sticker" => Self::Sticker,
             "deleted" => Self::Deleted,
+            "call" => Self::Call,
             _ => Self::Unsupported,
         }
     }

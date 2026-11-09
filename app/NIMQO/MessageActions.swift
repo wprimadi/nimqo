@@ -231,7 +231,8 @@ extension ConversationView {
     /// The context menu, also behind the button shown on hover.
     @ViewBuilder
     func menu(for message: ChatMessage) -> some View {
-        let live = message.kind != .deleted
+        // A call is no message: nothing to reply to, react to, or star.
+        let live = message.kind != .deleted && message.kind != .call
         if send != nil, live {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { replyingTo = message }
             ReactMenu(mine: message.myReaction) { react(message.seq, $0) } more: { pickEmoji(for: message.seq) }
@@ -273,7 +274,7 @@ extension ConversationView {
     func actions(for message: ChatMessage) -> MessageActions {
         MessageActions(
             menu: AnyView(menu(for: message)),
-            react: send != nil && message.kind != .deleted ? { react(message.seq, $0) } : nil,
+            react: send != nil && message.kind != .deleted && message.kind != .call ? { react(message.seq, $0) } : nil,
             moreReactions: { pickEmoji(for: message.seq) },
             picking: pickingEmoji == message.seq,
             pickRequest: emojiRequests,

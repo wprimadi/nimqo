@@ -1,7 +1,6 @@
 //! UniFFI surface for the Swift app (plan section 8, ADR 0001).
 //!
-//! The app pairs, reports connection state, shows every chat read-only, and
-//! sends only to the allowlisted test number.
+//! The app pairs, reports connection state, and reads and writes every chat.
 
 use std::fs::File;
 use std::path::PathBuf;
@@ -1195,7 +1194,7 @@ async fn connect(
         stores.media_key.clone(),
     ));
     let presences = Arc::<Presences>::default();
-    let calls = Arc::<calls::Calls>::default();
+    let calls = Arc::new(calls::Calls::new(inbox.clone()));
     let builder = call_handlers(Bot::builder(), inbox.clone(), Arc::clone(&calls));
     let builder = message_handlers(builder, history_inbox.clone(), &sender_cell, &avatars);
     let builder = presence_handlers(builder, history_inbox, Arc::clone(&presences));
@@ -1282,7 +1281,7 @@ fn state_handlers<B, T, H, R>(
     )
 }
 
-/// Ringing, answers, and hang-ups for 1:1 calls.
+/// Ringing, answers, and hang-ups for 1:1 calls, and the phone's call log.
 fn call_handlers<B, T, H, R>(
     builder: whatsapp_rust::bot::BotBuilder<B, T, H, R>,
     inbox: Inbox,
@@ -1293,6 +1292,8 @@ fn call_handlers<B, T, H, R>(
             EventKind::IncomingCall,
             EventKind::MissedCall,
             EventKind::CallEndedElsewhere,
+            EventKind::CallLogSync,
+            EventKind::CallLogHistory,
         ],
         move |event, client| {
             let (inbox, calls) = (inbox.clone(), Arc::clone(&calls));
