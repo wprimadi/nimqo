@@ -193,8 +193,9 @@ final class RemoteVideo {
 }
 
 /// Feeds the layer's renderer on one queue, in arrival order: H.264 only
-/// decodes in order, and after a decoder failure only from the next intra
-/// picture, so frames until then are dropped and one is asked for.
+/// decodes in order, and after a decoder failure only from the next IDR
+/// picture, so frames until then are dropped and one is asked for. (A plain
+/// I picture is not enough: resuming on one left the picture black.)
 final class RemoteDecoder: @unchecked Sendable {
     /// Set once, before the first frame.
     var shown: (@Sendable (Int) -> Void)?
@@ -209,11 +210,25 @@ final class RemoteDecoder: @unchecked Sendable {
     /// Since when frames are dropped while waiting for an intra picture.
     private var waiting: Date? = .now
     private var dropped = 0
+    /// Plain I pictures dropped while waiting: tells whether the peer answers
+    /// keyframe requests with them rather than an IDR.
+    private var intraDropped = 0
     private var arrived: Date?
+    /// A decode failure the renderer reported without changing its status.
+    private var failed: String?
+    private var observer: Any?
     private let log = Logger(subsystem: "app.nimqo", category: "call-video")
 
     init(renderer: AVSampleBufferVideoRenderer) {
         self.renderer = renderer
+        observer = NotificationCenter.default.addObserver(
+            forName: AVSampleBufferVideoRenderer.didFailToDecodeNotification, object: renderer, queue: nil
+        ) { [weak self] note in
+            let error = note.userInfo?[AVSampleBufferVideoRenderer.didFailToDecodeNotificationErrorKey]
+            let text = error.map { String(describing: $0) } ?? "unknown"
+            guard let self else { return }
+            queue.async { self.failed = text }
+        }
     }
 
     func decode(_ frame: Data, orientation: UInt8) {
@@ -228,6 +243,8 @@ final class RemoteDecoder: @unchecked Sendable {
             self.pps = nil
             self.waiting = .now
             self.dropped = 0
+            self.intraDropped = 0
+            self.failed = nil
             self.arrived = nil
             self.reported = nil
         }
@@ -242,27 +259,34 @@ final class RemoteDecoder: @unchecked Sendable {
         let slices = slices(of: frame)
         // Parameter sets alone: they come just before the picture.
         guard !slices.isEmpty else { return }
-        if renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
-            let error = renderer.error.map { String(describing: $0) } ?? "none"
+        if failed != nil || renderer.status == .failed || renderer.requiresFlushToResumeDecoding {
+            let error = failed ?? renderer.error.map { String(describing: $0) } ?? "none"
             log.error("video decoder failed: \(error, privacy: .public)")
             renderer.flush()
+            failed = nil
             waiting = waiting ?? .now
         }
-        let pictures = slices.filter { [1, 5].contains(H264.type(of: $0)) }
-        let intra = !pictures.isEmpty && pictures.allSatisfy(H264.isIntra)
-        guard waiting == nil || intra, let format,
+        let idr = slices.contains { H264.type(of: $0) == 5 }
+        guard waiting == nil || idr, let format,
               let sample = Self.sample(H264.avcc(slices), format: format)
         else {
             dropped += 1
+            let pictures = slices.filter { H264.type(of: $0) == 1 }
+            if !pictures.isEmpty, pictures.allSatisfy(H264.isIntra) {
+                intraDropped += 1
+            }
             return ask()
         }
         renderer.enqueue(sample)
         if let waiting {
-            let (seconds, count) = (Date.now.timeIntervalSince(waiting), dropped)
-            log.info("picture after \(seconds, format: .fixed(precision: 1)) s, \(count) frames dropped")
+            let (seconds, count, intra) = (Date.now.timeIntervalSince(waiting), dropped, intraDropped)
+            log.info("""
+            picture after \(seconds, format: .fixed(precision: 1)) s, \(count) frames dropped, \(intra) of them I
+            """)
         }
         waiting = nil
         dropped = 0
+        intraDropped = 0
         if reported != turns {
             reported = turns
             shown?(turns)
