@@ -130,6 +130,29 @@ fn video_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<u8>, VideoFrame> {
     (camera_tx, camera_rx, screen_tx)
 }
 
+/// Counts only, for telling a network stall from a decoder one.
+fn log_video_stats(call_id: &str, handle: &CallHandle) {
+    let s = handle.media_stats();
+    if s.video_rtp_received == 0 {
+        return;
+    }
+    log::info!(
+        "call {call_id} video: rtp {} lost {} nack {} retransmitted {} stale {}, \
+         units {} no-marker {} evicted {}, fragment gaps {}, sink dropped {}, keyframe asks {}",
+        s.video_rtp_received,
+        s.video_rtp_lost,
+        s.video_nack_requested,
+        s.video_retransmitted,
+        s.video_rtp_stale_timestamp,
+        s.video_access_units_completed,
+        s.video_access_units_without_marker,
+        s.video_access_units_evicted,
+        s.video_fu_dropped_sequence_gap,
+        s.video_sink_dropped,
+        s.peer_keyframe_requests,
+    );
+}
+
 impl Calls {
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state
@@ -151,28 +174,30 @@ impl Calls {
 
     /// Reports the end once, whoever notices first.
     fn finish(&self, call_id: &str, reason: CallEnd) {
-        let ended = {
+        let (ended, handle) = {
             let mut state = self.lock();
             if state
                 .active
                 .as_ref()
                 .is_some_and(|a| a.handle.call_id() == call_id)
             {
-                state.active = None;
-                true
+                (true, state.active.take().map(|a| a.handle))
             } else if state
                 .ringing
                 .as_ref()
                 .is_some_and(|r| r.action.call_id() == call_id)
             {
                 state.ringing = None;
-                true
+                (true, None)
             } else {
-                false
+                (false, None)
             }
         };
         if ended {
             log::info!("call {call_id} ended: {reason:?}");
+            if let Some(handle) = handle {
+                log_video_stats(call_id, &handle);
+            }
             if let Some(listener) = self.listener() {
                 listener.on_call_ended(call_id.to_owned(), reason);
             }
