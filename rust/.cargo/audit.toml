@@ -1,0 +1,4 @@
+# RUSTSEC-2026-0459: see the matching ignore in deny.toml for why and when to
+# remove it.
+[advisories]
+ignore = ["RUSTSEC-2026-0459"]

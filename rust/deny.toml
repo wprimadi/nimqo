@@ -8,6 +8,13 @@ ignore = [
     # build time (askama -> basic-toml); not in the shipped library. Remove
     # when UniFFI drops it.
     { id = "RUSTSEC-2026-0374", reason = "build-time only via uniffi_bindgen; no upgrade available" },
+    # SQLite < 3.54 can return stale page-cache memory when it opens a database
+    # with a crafted -wal file. NIMQO opens only its own databases in its own
+    # data folder; an attacker would already need write access there. No fix
+    # is installable: diesel 2.3 caps libsqlite3-sys < 0.39, and 0.39's
+    # bundled-sqlcipher still ships SQLite 3.53.4. Remove (here and in
+    # .cargo/audit.toml) once SQLCipher bundles SQLite >= 3.54.
+    { id = "RUSTSEC-2026-0459", reason = "own databases only; no patched SQLCipher build yet" },
 ]
 
 [licenses]
