@@ -21,3 +21,10 @@ todo = "deny"
 # FFI error instead of aborting the UI.
 panic = "unwind"
 lto = "thin"
+
+# Dependencies run optimised even in debug builds: unoptimised SRTP, video
+# depacketising and Opus fell behind a call's video bursts, and 14% of video
+# packets were lost on this Mac (a keyframe never arrived whole). NIMQO's own
+# crates stay at debug settings.
+[profile.dev.package."*"]
+opt-level = 3
