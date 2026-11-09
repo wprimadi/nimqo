@@ -138,7 +138,8 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
     }
     log::info!(
         "call {call_id} video: rtp {} lost {} nack {} retransmitted {} stale {}, \
-         units {} no-marker {} evicted {}, fragment gaps {}, sink dropped {}, keyframe asks {}",
+         units {} no-marker {} evicted {}, fragment gaps {}, sink dropped {}, keyframe asks {}; \
+         all rtp {} dropped before the engine {}, audio decoded {} concealed {}",
         s.video_rtp_received,
         s.video_rtp_lost,
         s.video_nack_requested,
@@ -150,6 +151,10 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         s.video_fu_dropped_sequence_gap,
         s.video_sink_dropped,
         s.peer_keyframe_requests,
+        s.rtp_received,
+        s.inbound_pipe_dropped,
+        s.audio_frames_decoded,
+        s.audio_frames_concealed,
     );
 }
 
