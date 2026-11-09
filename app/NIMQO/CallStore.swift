@@ -212,6 +212,8 @@ final class CallStore {
             if current?.matches(id) == true {
                 peerVideo(state)
             }
+        case let .peerScreen(id, sharing):
+            remote.fits = sharing && current?.matches(id) == true
         }
     }
 
@@ -316,6 +318,7 @@ final class CallBridge: CallListener {
         case ended(String, CallEnd)
         case missed(String)
         case peerVideo(String, PeerVideo)
+        case peerScreen(String, Bool)
     }
 
     private let audio: CallAudio
@@ -348,6 +351,10 @@ final class CallBridge: CallListener {
 
     func onPeerVideo(callId: String, state: PeerVideo) {
         signal(.peerVideo(callId, state))
+    }
+
+    func onPeerScreen(callId: String, sharing: Bool) {
+        signal(.peerScreen(callId, sharing))
     }
 
     func onCallAudio(samples: [Int16]) {

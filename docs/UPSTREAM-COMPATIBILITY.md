@@ -16,11 +16,12 @@ unqualified (plan 9.1). Only behavior verified here counts as supported.
 
 ## Patches
 
-NIMQO builds from a fork until these land upstream. Each is one commit on
+NIMQO builds from a fork until these land upstream. Each is a commit on
 `wprimadi/whatsapp-rust` branch `nimqo/video-fec-receive`, based on the
 upstream commit above.
 
 - `0fb3c7f` voip: rebuild lost inbound video packets from the peer's FEC. Upstream decrypted the peer's video repair packets and dropped them, so every lost packet froze the picture until a keyframe, and the engine asked for a keyframe on each loss.
+- `d5b1fe5`, `61704b0` voip: deliver a 1:1 peer's screen-share state, from the peer only. Upstream accepted the `screen_share` stanza only from group participants, so a phone sharing its screen in a 1:1 call looked like a camera and was cropped.
 
 ## Notes
 

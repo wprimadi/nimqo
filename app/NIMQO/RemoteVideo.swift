@@ -11,6 +11,11 @@ final class RemoteVideo {
     /// Quarter turns the picture needs, counterclockwise, to stand upright.
     private(set) var turns = 0
     private(set) var hasPicture = false
+    /// A shared screen shows whole; a face fills the window.
+    var fits = false {
+        didSet { layer.videoGravity = fits ? .resizeAspect : .resizeAspectFill }
+    }
+
     /// Asks the other side for a fresh keyframe.
     @ObservationIgnored var onLoss: (() -> Void)?
     /// The first picture arrived: proof the peer's camera is on, since a
@@ -31,6 +36,7 @@ final class RemoteVideo {
 
     func reset() {
         decoder.reset()
+        fits = false
         hasPicture = false
         turns = 0
     }

@@ -15,7 +15,8 @@ use whatsapp_rust::prelude::wa;
 use whatsapp_rust::types::call::{CallAction, IncomingCall};
 use whatsapp_rust::types::events::Event;
 use whatsapp_rust::voip::{
-    CallEvent, CallHandle, KeyframeUrgency, VideoFrame, VideoState, VideoUpgradeToken,
+    CallEvent, CallHandle, KeyframeUrgency, ScreenShareState, VideoFrame, VideoState,
+    VideoUpgradeToken,
 };
 
 use crate::{Core, CoreError};
@@ -63,6 +64,9 @@ pub trait CallListener: Send + Sync {
     /// A call rang while NIMQO could not answer it.
     fn on_missed_call(&self, chat_id: String);
     fn on_peer_video(&self, call_id: String, state: PeerVideo);
+    /// The other side started (`true`) or stopped sharing its screen, in
+    /// place of its camera.
+    fn on_peer_screen(&self, call_id: String, sharing: bool);
     /// 16 kHz mono samples to play.
     fn on_call_audio(&self, samples: Vec<i16>);
     /// One Annex-B access unit; `orientation` is in quarter turns.
@@ -396,6 +400,12 @@ impl Calls {
                 };
                 if let (Some(shown), Some(listener)) = (shown, listener) {
                     listener.on_peer_video(call_id.to_owned(), shown);
+                }
+            }
+            CallEvent::ScreenShareChanged { screen_share, .. } => {
+                if let Some(listener) = listener {
+                    let sharing = screen_share.state == ScreenShareState::Started;
+                    listener.on_peer_screen(call_id.to_owned(), sharing);
                 }
             }
             CallEvent::VideoKeyframeNeeded => {
