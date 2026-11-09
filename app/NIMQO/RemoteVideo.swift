@@ -13,6 +13,9 @@ final class RemoteVideo {
     private(set) var hasPicture = false
     /// Asks the other side for a fresh keyframe.
     @ObservationIgnored var onLoss: (() -> Void)?
+    /// The first picture arrived: proof the peer's camera is on, since a
+    /// peer that starts with video may never announce it.
+    @ObservationIgnored var onPicture: (() -> Void)?
     @ObservationIgnored private let decoder: RemoteDecoder
 
     init() {
@@ -33,6 +36,9 @@ final class RemoteVideo {
     }
 
     private func shown(_ turns: Int) {
+        if !hasPicture {
+            onPicture?()
+        }
         hasPicture = true
         self.turns = turns
     }

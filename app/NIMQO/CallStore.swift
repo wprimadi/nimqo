@@ -70,6 +70,7 @@ final class CallStore {
             Task { @MainActor in self?.handle(signal) }
         }
         remote.onLoss = { [weak self] in self?.core?.requestCallKeyframe() }
+        remote.onPicture = { [weak self] in self?.current?.peerVideo = true }
     }
 
     func place(_ chat: String, video: Bool) {
