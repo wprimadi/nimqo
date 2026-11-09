@@ -14,12 +14,14 @@ final class ScreenShare: NSObject {
     @ObservationIgnored var ended: (() -> Void)?
     @ObservationIgnored private var picked: ((SCContentFilter) -> Void)?
     @ObservationIgnored private var stream: SCStream?
-    @ObservationIgnored private let output: ScreenOutput
+    /// One per stream, so no picture outlives the share it came from.
+    @ObservationIgnored private var output: ScreenOutput?
+    /// Bumped by `stop`, so a start still under way gives up.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private let camera: CallCamera
 
     init(camera: CallCamera) {
-        output = ScreenOutput(camera: camera)
-        super.init()
-        output.stopped = { [weak self] in Task { @MainActor in self?.stoppedOutside() } }
+        self.camera = camera
     }
 
     func pick(_ picked: @escaping (SCContentFilter) -> Void) {
@@ -35,14 +37,28 @@ final class ScreenShare: NSObject {
     }
 
     func start(_ filter: SCContentFilter) async throws {
+        let generation = generation
+        let output = ScreenOutput(camera: camera)
+        output.stopped = { [weak self] in Task { @MainActor in self?.stoppedOutside() } }
         let stream = SCStream(filter: filter, configuration: Self.configuration(for: filter), delegate: output)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
+        self.output = output
         try await stream.startCapture()
+        // Stopped (or the call ended) while capture was starting.
+        guard generation == self.generation else {
+            output.disable()
+            try? await stream.stopCapture()
+            throw CancellationError()
+        }
         self.stream = stream
         active = true
     }
 
+    /// No frame is encoded once this returns, even before capture winds down.
     func stop() {
+        generation += 1
+        output?.disable()
+        output = nil
         let stream = stream
         self.stream = nil
         active = false
@@ -115,15 +131,24 @@ private final class ScreenOutput: NSObject, SCStreamOutput, SCStreamDelegate, @u
     /// Set once, before capture starts.
     var stopped: (@Sendable () -> Void)?
     private let camera: CallCamera
-    /// Touched only on `queue`.
+    /// Both touched only on `queue`.
+    private var enabled = true
     private var last: CVPixelBuffer?
 
     init(camera: CallCamera) {
         self.camera = camera
     }
 
+    /// Waits out a frame being encoded; none follows.
+    func disable() {
+        queue.sync {
+            enabled = false
+            last = nil
+        }
+    }
+
     func stream(_: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen else { return }
+        guard type == .screen, enabled else { return }
         let info = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false)
             as? [[SCStreamFrameInfo: Any]]
         let status = (info?.first?[.status] as? Int).flatMap(SCFrameStatus.init)
@@ -170,8 +195,20 @@ extension CallStore {
             camera.stop()
             camera.attach { core?.pushCallVideo(frame: $0) }
         }.value
+        guard current?.started == started, current?.isOver == false else { return stopCamera() }
         do {
             try await screen.start(filter)
+            // The call ended while capture was starting.
+            guard current?.started == started, current?.isOver == false else {
+                screen.stop()
+                return stopCamera()
+            }
+        } catch is CancellationError {
+            // Stopped while starting: by the call ending, or nothing to undo.
+            if current?.started == started, current?.isOver == false {
+                restoreCamera(announced: false)
+            }
+            return
         } catch {
             problem = String(localized: """
             The screen could not be shared. Allow NIMQO in System Settings › Privacy & Security › \
