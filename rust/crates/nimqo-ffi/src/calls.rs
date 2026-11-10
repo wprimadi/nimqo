@@ -615,6 +615,13 @@ impl Calls {
     }
 
     async fn on_signal(&self, client: &Arc<Client>, inbox: &Inbox, call: &IncomingCall) {
+        log::info!(
+            "call {} signal {} (group {}, offline {})",
+            call.action.call_id(),
+            call.action.wire_tag(),
+            call.group.is_some(),
+            call.offline
+        );
         match &call.action {
             CallAction::Offer {
                 call_id,

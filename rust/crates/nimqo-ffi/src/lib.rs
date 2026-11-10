@@ -1557,16 +1557,54 @@ struct NimqoOnly(oslog::OsLogger);
 
 impl log::Log for NimqoOnly {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.target().starts_with("nimqo") && metadata.level() <= log::Level::Info
+        let target = metadata.target();
+        if target.starts_with("nimqo") {
+            return metadata.level() <= log::Level::Info;
+        }
+        // Why a call was dropped lives upstream; its warnings come through with numbers masked.
+        let calls = [
+            "whatsapp_rust::handlers::call",
+            "whatsapp_rust::voip",
+            "wacore::voip",
+        ];
+        calls.iter().any(|c| target.starts_with(c)) && metadata.level() <= log::Level::Warn
     }
 
     fn log(&self, record: &log::Record<'_>) {
-        if self.enabled(record.metadata()) {
-            self.0.log(record);
+        if !self.enabled(record.metadata()) {
+            return;
         }
+        if record.target().starts_with("nimqo") {
+            return self.0.log(record);
+        }
+        let masked = mask_numbers(&record.args().to_string());
+        self.0.log(
+            &log::Record::builder()
+                .metadata(record.metadata().clone())
+                .args(format_args!("{masked}"))
+                .build(),
+        );
     }
 
     fn flush(&self) {}
+}
+
+/// Runs of five or more digits (phone numbers, LIDs) become `#`.
+fn mask_numbers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut digits = String::new();
+    for c in text.chars().chain(std::iter::once('\0')) {
+        if c.is_ascii_digit() {
+            digits.push(c);
+            continue;
+        }
+        out.push_str(if digits.len() >= 5 { "#" } else { &digits });
+        digits.clear();
+        if c != '\0' {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1585,5 +1623,11 @@ mod tests {
         };
         assert!(logger.enabled(&meta("nimqo_ffi")));
         assert!(!logger.enabled(&meta("whatsapp_rust::client")));
+        // Upstream call records only at warn, and masked.
+        assert!(!logger.enabled(&meta("whatsapp_rust::handlers::call")));
+        assert_eq!(
+            mask_numbers("call 00af12 from 6281234567890@s.whatsapp.net:12 x"),
+            "call 00af12 from #@s.whatsapp.net:12 x"
+        );
     }
 }
