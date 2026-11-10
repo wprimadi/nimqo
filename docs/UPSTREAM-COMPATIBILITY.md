@@ -25,6 +25,7 @@ upstream commit above.
 - `f936769` voip: keep a paced-out picture's fragments in one access unit. A shared screen's large pictures go out over more than 8 ms of media time offset, which upstream read as a new picture mid-NAL: the rest became orphan fragments and the screen froze.
 - `20b7920` voip: review follow-up to the inbound video hold (upstream #1872): held gaps expire on the engine timer, late originals are dropped instead of cutting off a rebuilt NAL, restart-sized jumps request a keyframe, holds no longer add up across gaps, short repairs are retried, and audio on a rebuilt carrier is played.
 - `c572dd7` voip: a group video offer spells its codecs `enc="h.264" dec="H264"` with no `orientation`, as the 1:1 offer already does. The old spelling was acked and never rang.
+- `9f612f8` voip: a group call asks every participant whose video comes in for a keyframe (RTCP PLI); upstream refused all group keyframe asks, so one lost packet could freeze a picture for good. Whether the server relays the PLI is unverified.
 
 ## Notes
 
