@@ -399,9 +399,25 @@ impl Calls {
         if let Some(mut events) = events {
             let calls = Arc::clone(self);
             tokio::spawn(async move {
+                // ponytail: counts only, to learn what a group's server feeds back (NACK, REMB…).
+                let mut rtcp = std::collections::BTreeMap::<(u8, u8), u32>::new();
                 while let Ok(event) = events.recv().await {
+                    if let CallEvent::RtcpReceived {
+                        packet_types,
+                        feedback,
+                        ..
+                    } = &event
+                    {
+                        let kinds = packet_types.iter().map(|&pt| (pt, 0));
+                        let kinds =
+                            kinds.chain(feedback.iter().map(|f| (f.packet_type, f.fmt + 1)));
+                        for kind in kinds {
+                            *rtcp.entry(kind).or_default() += 1;
+                        }
+                    }
                     calls.on_media_event(&call_id, event).await;
                 }
+                log::info!("call {call_id} rtcp in (type, feedback fmt+1): {rtcp:?}");
             });
         }
     }
