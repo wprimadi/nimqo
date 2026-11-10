@@ -17,15 +17,33 @@ final class GroupVideo {
         routes.withLock { $0 = $0 ?? [:] }
     }
 
+    /// One picture per participant the call lists: video tagged with any
+    /// other id is dropped, so a stream of made-up ids builds nothing.
+    func update(_ participants: [CallParticipant]) {
+        guard routes.withLock({ $0 != nil }) else { return }
+        let ids = Set(participants.map(\.id))
+        for (id, picture) in pictures where !ids.contains(id) {
+            picture.reset()
+        }
+        pictures = pictures.filter { ids.contains($0.key) }
+        for id in ids where pictures[id] == nil {
+            let picture = RemoteVideo()
+            // ponytail: one keyframe request for the whole call, per-sender if the engine grows one.
+            picture.onLoss = { [weak self] in self?.onLoss?() }
+            pictures[id] = picture
+        }
+        let pictures = pictures
+        routes.withLock { routes in
+            if routes != nil {
+                routes = pictures
+            }
+        }
+    }
+
     /// False when this is not a group call: the frame is for the 1:1 picture.
     nonisolated func show(_ frame: Data, orientation: UInt8, from id: String) -> Bool {
-        let route = routes.withLock { routes -> RemoteVideo?? in routes.map { $0[id] } }
-        switch route {
-        case .none: return false
-        case let .some(.some(picture)): picture.show(frame, orientation: orientation)
-        // The first frame of someone new: the decoder asks for a keyframe anyway.
-        case .some(.none): Task { @MainActor in self.add(id) }
-        }
+        guard let route = routes.withLock({ $0.map { $0[id] } }) else { return false }
+        route?.show(frame, orientation: orientation)
         return true
     }
 
@@ -33,21 +51,6 @@ final class GroupVideo {
         routes.withLock { $0 = nil }
         pictures.values.forEach { $0.reset() }
         pictures = [:]
-    }
-
-    private func add(_ id: String) {
-        guard pictures[id] == nil else { return }
-        let picture = RemoteVideo()
-        // ponytail: one keyframe request for the whole call, per-sender if the engine grows one.
-        picture.onLoss = { [weak self] in self?.onLoss?() }
-        let added = routes.withLock { routes in
-            guard routes != nil else { return false }
-            routes?[id] = picture
-            return true
-        }
-        if added {
-            pictures[id] = picture
-        }
     }
 }
 

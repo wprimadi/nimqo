@@ -197,6 +197,22 @@ fn audio_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<i16>, Vec<i16>> {
     (mic_tx, mic_rx, speaker_tx)
 }
 
+/// The group a group offer names, only when the caller is in it: an offer
+/// can name any group, and the call would ring as if it came from there.
+async fn caller_group(client: &Client, group: &Jid, from: &Jid) -> Option<String> {
+    let meta = client.groups().fetch_metadata(group).await.ok()?;
+    let member = meta.participants.iter().any(|p| {
+        [Some(&p.jid), p.phone_number.as_ref(), p.lid.as_ref()]
+            .into_iter()
+            .flatten()
+            .any(|j| j.user == from.user)
+    });
+    if !member {
+        log::warn!("group offer from someone not in the group: shown as theirs");
+    }
+    member.then(|| group.to_non_ad_string())
+}
+
 fn video_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<u8>, VideoFrame> {
     let (camera_tx, camera_rx) = async_channel::bounded(4);
     let (screen_tx, screen_rx) = async_channel::bounded::<VideoFrame>(8);
@@ -600,8 +616,12 @@ impl Calls {
                 }
                 self.lock().ringing = Some(call.clone());
                 log::info!("call {call_id} ringing (group: {})", group_jid.is_some());
-                let chat = match group_jid {
-                    Some(group) => group.to_non_ad_string(),
+                let group = match group_jid {
+                    Some(group) => caller_group(client, group, &call.from).await,
+                    None => None,
+                };
+                let chat = match group {
+                    Some(group) => group,
                     None => lids::phone_chat(inbox, client, &call.from).await,
                 };
                 self.lock().log = Some(Log {

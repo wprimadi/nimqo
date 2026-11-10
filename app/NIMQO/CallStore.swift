@@ -292,6 +292,7 @@ private extension CallStore {
         case let .participants(id, people):
             if current?.matches(id) == true {
                 current?.participants = people
+                groupVideo.update(people)
             }
         case let .peerScreen(id, sharing):
             remote.fits = sharing && current?.matches(id) == true
