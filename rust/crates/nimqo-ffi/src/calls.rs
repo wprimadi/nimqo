@@ -425,10 +425,12 @@ impl Calls {
                             *rtcp.entry(kind).or_default() += 1;
                         }
                         // Application feedback: REMB, or whatever WhatsApp puts there.
-                        for f in feedback
+                        // Only the first 64: a long call, or a flood, must not grow it.
+                        let room = 64usize.saturating_sub(afb.len());
+                        let afbs = feedback
                             .iter()
-                            .filter(|f| f.packet_type == 206 && f.fmt == 15)
-                        {
+                            .filter(|f| f.packet_type == 206 && f.fmt == 15);
+                        for f in afbs.take(room) {
                             afb.push(remb_bps(&f.fci).map_or_else(
                                 || format!("{:02x?}", &f.fci[..f.fci.len().min(12)]),
                                 |bps| format!("{}k", bps / 1000),
