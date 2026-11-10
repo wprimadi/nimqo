@@ -1,4 +1,4 @@
-//! One 1:1 voice or video call at a time. Swift brings the microphone and
+//! One voice or video call at a time, with a person or a group. Swift brings the microphone and
 //! camera and plays what comes back; this side rings, answers, and keeps the
 //! call's state. Media crosses the FFI as 16 kHz mono PCM and Annex-B H.264.
 //! Logs name call ids only, never who is calling.
@@ -14,6 +14,7 @@ use whatsapp_rust::Jid;
 use whatsapp_rust::prelude::wa;
 use whatsapp_rust::types::call::{CallAction, IncomingCall};
 use whatsapp_rust::types::events::Event;
+use whatsapp_rust::types::group_call::GroupCallUpdate;
 use whatsapp_rust::voip::{
     CallEvent, CallHandle, KeyframeUrgency, ScreenShareState, VideoFrame, VideoState,
     VideoUpgradeToken,
@@ -52,6 +53,17 @@ pub enum PeerVideo {
     Off,
 }
 
+/// Someone in a group call.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CallParticipant {
+    /// What their video is tagged with in `on_call_video`.
+    pub id: String,
+    /// Their chat, for a name and picture.
+    pub chat: String,
+    /// In the call, not still being rung.
+    pub joined: bool,
+}
+
 /// Implemented in Swift. Called from Rust worker threads; the media
 /// callbacks come many times a second.
 #[uniffi::export(with_foreign)]
@@ -69,8 +81,11 @@ pub trait CallListener: Send + Sync {
     fn on_peer_screen(&self, call_id: String, sharing: bool);
     /// 16 kHz mono samples to play.
     fn on_call_audio(&self, samples: Vec<i16>);
-    /// One Annex-B access unit; `orientation` is in quarter turns.
-    fn on_call_video(&self, frame: Vec<u8>, keyframe: bool, orientation: u8);
+    /// One Annex-B access unit; `orientation` is in quarter turns. `from`
+    /// names the participant in a group call, `None` in a 1:1 call.
+    fn on_call_video(&self, frame: Vec<u8>, keyframe: bool, orientation: u8, from: Option<String>);
+    /// Everyone else in a group call, whenever that changes.
+    fn on_call_participants(&self, call_id: String, participants: Vec<CallParticipant>);
     /// The next encoded frame must be a keyframe.
     fn on_keyframe_needed(&self);
 }
@@ -83,6 +98,9 @@ struct Active {
     video_request: Option<VideoUpgradeToken>,
     outgoing: bool,
     connected: bool,
+    /// A group call: one person leaving does not end it.
+    group: bool,
+    client: Arc<Client>,
 }
 
 /// What the chat's timeline gets when the call ends.
@@ -184,7 +202,8 @@ fn video_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<u8>, VideoFrame> {
     let (screen_tx, screen_rx) = async_channel::bounded::<VideoFrame>(8);
     tokio::spawn(async move {
         while let Ok(frame) = screen_rx.recv().await {
-            listener.on_call_video(frame.data, frame.keyframe, frame.orientation);
+            let from = frame.sender.as_ref().map(Jid::to_non_ad_string);
+            listener.on_call_video(frame.data, frame.keyframe, frame.orientation, from);
         }
     });
     (camera_tx, camera_rx, screen_tx)
@@ -329,11 +348,16 @@ impl Calls {
     /// Keeps the handle and follows the call until it ends.
     fn adopt(
         self: &Arc<Self>,
+        client: Arc<Client>,
         handle: CallHandle,
-        mic: async_channel::Sender<Vec<i16>>,
-        camera: Option<async_channel::Sender<Vec<u8>>>,
+        media: (
+            async_channel::Sender<Vec<i16>>,
+            Option<async_channel::Sender<Vec<u8>>>,
+        ),
         outgoing: bool,
+        group: bool,
     ) {
+        let (mic, camera) = media;
         let call_id = handle.call_id().to_owned();
         let events = handle.take_events();
         {
@@ -346,6 +370,8 @@ impl Calls {
                 video_request: None,
                 outgoing,
                 connected: false,
+                group,
+                client,
             });
         }
         let calls = Arc::clone(self);
@@ -427,6 +453,7 @@ impl Calls {
                     listener.on_peer_screen(call_id.to_owned(), sharing);
                 }
             }
+            CallEvent::GroupUpdated(update) => self.on_group_update(call_id, &update).await,
             CallEvent::VideoKeyframeNeeded => {
                 if let Some(listener) = listener {
                     listener.on_keyframe_needed();
@@ -434,6 +461,54 @@ impl Calls {
             }
             _ => {}
         }
+    }
+
+    /// Tells the app who else is in a group call; the call counts as
+    /// connected once someone has joined.
+    async fn on_group_update(&self, call_id: &str, update: &GroupCallUpdate) {
+        let Some(client) = self
+            .lock()
+            .active
+            .as_ref()
+            .filter(|a| a.handle.call_id() == call_id)
+            .map(|a| Arc::clone(&a.client))
+        else {
+            return;
+        };
+        let me: Vec<Jid> = [client.pn(), client.lid()].into_iter().flatten().collect();
+        let mut participants = Vec::new();
+        for p in &update.participants {
+            let mine = [Some(&p.jid), p.pn.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|j| me.iter().any(|m| m.user == j.user));
+            if mine {
+                continue;
+            }
+            let chat = match &p.pn {
+                Some(pn) => pn.to_non_ad_string(),
+                None => lids::phone_chat(&self.inbox, &client, &p.jid).await,
+            };
+            participants.push(CallParticipant {
+                id: p.jid.to_non_ad_string(),
+                chat,
+                joined: p.state.as_deref() == Some("connected"),
+            });
+        }
+        if participants.iter().any(|p| p.joined) {
+            self.mark_connected(call_id);
+        }
+        if let Some(listener) = self.listener() {
+            listener.on_call_participants(call_id.to_owned(), participants);
+        }
+    }
+
+    /// Whether the call going on is a group call.
+    fn in_group_call(&self, call_id: &str) -> bool {
+        self.lock()
+            .active
+            .as_ref()
+            .is_some_and(|a| a.group && a.handle.call_id() == call_id)
     }
 
     /// Call signaling from the account's event stream.
@@ -515,8 +590,7 @@ impl Calls {
                 group_jid,
                 ..
             } => {
-                // ponytail: 1:1 only; group calls keep ringing on the phone.
-                if group_jid.is_some() || call.offline {
+                if call.offline {
                     return;
                 }
                 if Self::busy(&self.lock()) {
@@ -525,8 +599,11 @@ impl Calls {
                     return;
                 }
                 self.lock().ringing = Some(call.clone());
-                log::info!("call {call_id} ringing");
-                let chat = lids::phone_chat(inbox, client, &call.from).await;
+                log::info!("call {call_id} ringing (group: {})", group_jid.is_some());
+                let chat = match group_jid {
+                    Some(group) => group.to_non_ad_string(),
+                    None => lids::phone_chat(inbox, client, &call.from).await,
+                };
                 self.lock().log = Some(Log {
                     id: call_id.clone(),
                     chat: chat.clone(),
@@ -541,6 +618,10 @@ impl Calls {
             }
             CallAction::Accept { call_id, .. } => self.mark_connected(call_id),
             // `busy` and `enc` speak for one device; the others keep ringing.
+            // In a group call these speak for one participant; the call's
+            // own end comes from its media.
+            CallAction::Reject { call_id, .. } | CallAction::Terminate { call_id, .. }
+                if self.in_group_call(call_id) => {}
             CallAction::Reject {
                 call_id, reason, ..
             } if reason.is_none() => {
@@ -578,20 +659,25 @@ impl Core {
         }
     }
 
-    /// Calls a person and returns the call id. Ringing ends in
-    /// `on_call_connected` or `on_call_ended`.
+    /// Calls a person, or everyone in a group, and returns the call id.
+    /// Ringing ends in `on_call_connected` or `on_call_ended`.
     ///
     /// # Errors
-    /// `SendRefused` for a group, another call in progress, or when the call
-    /// cannot be placed.
+    /// `SendRefused` for a chat that cannot be called, another call in
+    /// progress, or when the call cannot be placed.
     pub async fn place_call(&self, chat_id: String, video: bool) -> Result<String, CoreError> {
         let (calls, client) = (Arc::clone(&self.calls), Arc::clone(&self.client));
         self.on_runtime(async move {
             let peer: Jid = chat_id
                 .parse()
                 .ok()
-                .filter(|_| chat_id.ends_with("@s.whatsapp.net") || chat_id.ends_with("@lid"))
-                .ok_or_else(|| refused("Only people can be called."))?;
+                .filter(|_| {
+                    ["@s.whatsapp.net", "@lid", "@g.us"]
+                        .iter()
+                        .any(|s| chat_id.ends_with(s))
+                })
+                .ok_or_else(|| refused("Only people and groups can be called."))?;
+            let group = chat_id.ends_with("@g.us");
             let listener = calls
                 .listener()
                 .ok_or_else(|| refused("Calls are not ready yet."))?;
@@ -604,14 +690,26 @@ impl Core {
             }
             let (mic, mic_rx, speaker) = audio_pair(Arc::clone(&listener));
             let voip = client.voip();
-            let mut builder = voip.call(&peer).audio_opus(mic_rx, speaker);
-            let mut camera = None;
-            if video {
+            let (camera, sink) = if video {
                 let (tx, rx, screen) = video_pair(listener);
-                builder = builder.video(rx, screen);
-                camera = Some(tx);
-            }
-            let handle = match builder.start().await {
+                (Some(tx), Some((rx, screen)))
+            } else {
+                (None, None)
+            };
+            let started = if group {
+                let mut builder = voip.group_call_by_id(&peer).audio_opus(mic_rx, speaker);
+                if let Some((rx, screen)) = sink {
+                    builder = builder.video(rx, screen);
+                }
+                builder.start().await
+            } else {
+                let mut builder = voip.call(&peer).audio_opus(mic_rx, speaker);
+                if let Some((rx, screen)) = sink {
+                    builder = builder.video(rx, screen);
+                }
+                builder.start().await
+            };
+            let handle = match started {
                 Ok(handle) => handle,
                 Err(e) => {
                     calls.lock().starting = false;
@@ -629,7 +727,7 @@ impl Core {
                 started: now(),
                 connected: None,
             });
-            calls.adopt(handle, mic, camera, true);
+            calls.adopt(Arc::clone(&client), handle, (mic, camera), true, group);
             let (calls, id) = (Arc::clone(&calls), call_id.clone());
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(RING_SECS)).await;
@@ -682,7 +780,14 @@ impl Core {
             match builder.start().await {
                 Ok(handle) => {
                     log::info!("call {call_id} answered (video: {video})");
-                    calls.adopt(handle, mic, camera, false);
+                    let group = matches!(
+                        &call.action,
+                        CallAction::Offer {
+                            group_jid: Some(_),
+                            ..
+                        }
+                    );
+                    calls.adopt(Arc::clone(&client), handle, (mic, camera), false, group);
                     Ok(())
                 }
                 Err(e) => {

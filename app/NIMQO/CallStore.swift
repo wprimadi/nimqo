@@ -29,6 +29,12 @@ final class CallStore {
         var peerAsks = false
         var muted = false
         var connectedAt: Date?
+        /// Everyone else in a group call.
+        var participants: [CallParticipant] = []
+
+        var group: Bool {
+            chat.hasSuffix("@g.us")
+        }
 
         var isOver: Bool {
             if case .ended = phase {
@@ -57,6 +63,7 @@ final class CallStore {
     @ObservationIgnored let camera = CallCamera()
     @ObservationIgnored let preview: AVCaptureVideoPreviewLayer
     let remote = RemoteVideo()
+    let groupVideo = GroupVideo()
     let screen: ScreenShare
     /// A call rang while NIMQO could not answer: the chat.
     @ObservationIgnored var missed: ((String) -> Void)?
@@ -68,10 +75,11 @@ final class CallStore {
         preview = AVCaptureVideoPreviewLayer(session: camera.session)
         preview.videoGravity = .resizeAspectFill
         screen = ScreenShare(camera: camera)
-        bridge = CallBridge(audio: audio, camera: camera, remote: remote) { [weak self] signal in
+        bridge = CallBridge(audio: audio, camera: camera, remote: remote, group: groupVideo) { [weak self] signal in
             Task { @MainActor in self?.handle(signal) }
         }
         remote.onLoss = { [weak self] in self?.core?.requestCallKeyframe() }
+        groupVideo.onLoss = { [weak self] in self?.core?.requestCallKeyframe() }
         remote.onPicture = { [weak self] in self?.current?.peerVideo = true }
         screen.ended = { [weak self] in self?.stopSharing() }
     }
@@ -81,6 +89,9 @@ final class CallStore {
         problem = nil
         let call = Call(chat: chat, outgoing: true, video: video, phase: .calling)
         current = call
+        if call.group {
+            groupVideo.start()
+        }
         Task {
             let camera = await startMedia(video: video)
             // Hung up while the microphone was being asked for.
@@ -190,43 +201,6 @@ final class CallStore {
         current?.peerAsks = false
     }
 
-    private func handle(_ signal: CallBridge.Signal) {
-        switch signal {
-        case let .ringing(id, chat, video):
-            guard current?.isOver ?? true else { return }
-            problem = nil
-            current = Call(id: id, chat: chat, outgoing: false, video: video, phase: .incoming)
-            ring(true)
-            NSApp.requestUserAttention(.criticalRequest)
-        case let .connected(id):
-            guard current?.matches(id) == true, current?.isOver == false else { return }
-            current?.phase = .connected
-            current?.connectedAt = .now
-        case let .ended(id, reason):
-            if current?.matches(id) == true {
-                finish(reason)
-            }
-        case let .missed(chat):
-            missed?(chat)
-        case let .peerVideo(id, state):
-            if current?.matches(id) == true {
-                peerVideo(state)
-            }
-        case let .peerScreen(id, sharing):
-            remote.fits = sharing && current?.matches(id) == true
-        }
-    }
-
-    private func peerVideo(_ state: PeerVideo) {
-        current?.peerAsks = state == .requested
-        if state != .requested {
-            current?.peerVideo = state == .on
-        }
-        if state == .off {
-            remote.reset()
-        }
-    }
-
     /// The microphone, then the camera if asked; nil without a microphone,
     /// otherwise whether the camera is on.
     private func startMedia(video: Bool) async -> Bool? {
@@ -285,6 +259,7 @@ final class CallStore {
         ring(false)
         stopMedia()
         remote.reset()
+        groupVideo.reset()
         current?.phase = .ended(reason)
         log.info("call ended: \(String(describing: reason))")
         // Long enough to read why, then the window goes.
@@ -298,6 +273,58 @@ final class CallStore {
 }
 
 private extension CallStore {
+    func handle(_ signal: CallBridge.Signal) {
+        switch signal {
+        case let .ringing(id, chat, video):
+            ringing(id, chat: chat, video: video)
+        case let .connected(id):
+            connected(id)
+        case let .ended(id, reason):
+            if current?.matches(id) == true {
+                finish(reason)
+            }
+        case let .missed(chat):
+            missed?(chat)
+        case let .peerVideo(id, state):
+            if current?.matches(id) == true {
+                peerVideo(state)
+            }
+        case let .participants(id, people):
+            if current?.matches(id) == true {
+                current?.participants = people
+            }
+        case let .peerScreen(id, sharing):
+            remote.fits = sharing && current?.matches(id) == true
+        }
+    }
+
+    func peerVideo(_ state: PeerVideo) {
+        current?.peerAsks = state == .requested
+        if state != .requested {
+            current?.peerVideo = state == .on
+        }
+        if state == .off {
+            remote.reset()
+        }
+    }
+
+    func ringing(_ id: String, chat: String, video: Bool) {
+        guard current?.isOver ?? true else { return }
+        problem = nil
+        current = Call(id: id, chat: chat, outgoing: false, video: video, phase: .incoming)
+        if current?.group == true {
+            groupVideo.start()
+        }
+        ring(true)
+        NSApp.requestUserAttention(.criticalRequest)
+    }
+
+    func connected(_ id: String) {
+        guard current?.matches(id) == true, current?.isOver == false else { return }
+        current?.phase = .connected
+        current?.connectedAt = .now
+    }
+
     func ring(_ ringing: Bool) {
         if ringing {
             ringtone = ringtone ?? NSSound(named: "Submarine")
@@ -306,66 +333,5 @@ private extension CallStore {
         } else {
             ringtone?.stop()
         }
-    }
-}
-
-/// Receives the core's call callbacks on Rust threads. Media goes straight
-/// to the audio and video objects; the rest hops to the store.
-final class CallBridge: CallListener {
-    enum Signal: Sendable {
-        case ringing(String, String, Bool)
-        case connected(String)
-        case ended(String, CallEnd)
-        case missed(String)
-        case peerVideo(String, PeerVideo)
-        case peerScreen(String, Bool)
-    }
-
-    private let audio: CallAudio
-    private let camera: CallCamera
-    private let remote: RemoteVideo
-    private let signal: @Sendable (Signal) -> Void
-
-    init(audio: CallAudio, camera: CallCamera, remote: RemoteVideo, signal: @escaping @Sendable (Signal) -> Void) {
-        self.audio = audio
-        self.camera = camera
-        self.remote = remote
-        self.signal = signal
-    }
-
-    func onCallRinging(callId: String, chatId: String, video: Bool) {
-        signal(.ringing(callId, chatId, video))
-    }
-
-    func onCallConnected(callId: String) {
-        signal(.connected(callId))
-    }
-
-    func onCallEnded(callId: String, reason: CallEnd) {
-        signal(.ended(callId, reason))
-    }
-
-    func onMissedCall(chatId: String) {
-        signal(.missed(chatId))
-    }
-
-    func onPeerVideo(callId: String, state: PeerVideo) {
-        signal(.peerVideo(callId, state))
-    }
-
-    func onPeerScreen(callId: String, sharing: Bool) {
-        signal(.peerScreen(callId, sharing))
-    }
-
-    func onCallAudio(samples: [Int16]) {
-        audio.play(samples)
-    }
-
-    func onCallVideo(frame: Data, keyframe _: Bool, orientation: UInt8) {
-        remote.show(frame, orientation: orientation)
-    }
-
-    func onKeyframeNeeded() {
-        camera.forceKeyframe()
     }
 }

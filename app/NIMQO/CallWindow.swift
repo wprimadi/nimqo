@@ -16,7 +16,8 @@ struct CallWindow: View {
     var body: some View {
         Group {
             if let call = store.current {
-                CallScreen(call: call, store: store, chat: model.summary(of: call.chat), avatars: model.avatars)
+                CallScreen(call: call, store: store, chat: model.summary(of: call.chat), avatars: model.avatars,
+                           summary: model.summary(of:))
             } else {
                 Color.clear
             }
@@ -35,7 +36,7 @@ struct CallWindow: View {
 
 extension CallStore.Call {
     var showsVideo: Bool {
-        !isOver && (camera || peerVideo)
+        !isOver && (camera || peerVideo || (group && phase == .connected))
     }
 }
 
@@ -44,6 +45,7 @@ private struct CallScreen: View {
     let store: CallStore
     let chat: ChatSummary
     let avatars: AvatarStore
+    let summary: (String) -> ChatSummary
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -100,7 +102,10 @@ private struct CallScreen: View {
 
     private var videoLayout: some View {
         ZStack {
-            if call.peerVideo {
+            if call.group {
+                GroupGrid(participants: call.participants, video: store.groupVideo, summary: summary, avatars: avatars)
+                    .padding(.top, 76).padding(.bottom, 96)
+            } else if call.peerVideo {
                 RemotePicture(remote: store.remote).transition(.opacity)
             } else {
                 VStack(spacing: 10) {
@@ -299,7 +304,7 @@ private struct Pulse: View {
 }
 
 /// The other side's camera, turned upright.
-private struct RemotePicture: View {
+struct RemotePicture: View {
     let remote: RemoteVideo
 
     var body: some View {

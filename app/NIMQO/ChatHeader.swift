@@ -79,9 +79,7 @@ private struct ChatHeader: ViewModifier {
             .hidesWindowTitle()
             .toolbar {
                 headerItem(status: status)
-                if !chat.isGroup {
-                    ToolbarItemGroup(placement: .primaryAction) { callButtons }
-                }
+                ToolbarItemGroup(placement: .primaryAction) { callButtons }
             }
             .task(id: chat.id) { await contacts.watch(chat) }
             // Typing ends without a signal when the "paused" one is lost.
@@ -105,7 +103,6 @@ private struct ChatHeader: ViewModifier {
         }
     }
 
-    // ponytail: 1:1 only; group calls are not supported yet.
     @ViewBuilder
     private var callButtons: some View {
         Button("Voice Call", systemImage: "phone") { calls.place(chat.id, video: false) }
