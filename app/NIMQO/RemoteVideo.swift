@@ -179,6 +179,8 @@ final class RemoteDecoder: @unchecked Sendable {
         }
         if format == nil, let sps, let pps {
             format = Self.format(sps: sps, pps: pps)
+            let size = format.map(CMVideoFormatDescriptionGetDimensions)
+            log.notice("video format \(size?.width ?? 0)x\(size?.height ?? 0)")
         }
         return slices
     }

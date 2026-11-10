@@ -200,7 +200,10 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         "call {call_id} video: rtp {} lost {} stale {}, units {} no-marker {} evicted {}, \
          fragment gaps {}, sink dropped {}, keyframe asks {}, dropped before the engine {}; \
          fec: repairs {} recovered {} parity ok {} bad {}, two lost {} late {} rejected {}, \
-         gaps skipped {} ({} packets); other payload types {} (last {})",
+         gaps skipped {} ({} packets); other payload types {} (last {}); \
+         ssrc switches {} (partial dropped {}), retired ignored {}; all rtp {} srtp failed {} \
+         (video {}) sframe failed {}, auxiliary {}, unclassified {}, unusable {}, oversize {}, \
+         orphan fragments {}, timestamp boundary drops {}, shared timestamp {}",
         s.video_rtp_received,
         s.video_rtp_lost,
         s.video_rtp_stale_timestamp,
@@ -222,6 +225,20 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         s.video_packets_skipped,
         s.rtp_payload_type_unexpected,
         s.last_unexpected_payload_type,
+        s.video_ssrc_switches,
+        s.video_ssrc_switch_partial_dropped,
+        s.video_retired_ssrc_ignored,
+        s.rtp_received,
+        s.srtp_unprotect_failed,
+        s.video_srtp_unprotect_failed,
+        s.sframe_decrypt_failed,
+        s.auxiliary_rtp_authenticated,
+        s.relay_packet_unclassified,
+        s.video_payload_unusable,
+        s.video_nal_oversize_dropped,
+        s.video_fu_orphan_fragments,
+        s.video_fu_dropped_timestamp_boundary,
+        s.video_access_units_shared_timestamp,
     );
 }
 
@@ -405,6 +422,7 @@ impl Calls {
             CallEvent::ScreenShareChanged { screen_share, .. } => {
                 if let Some(listener) = listener {
                     let sharing = screen_share.state == ScreenShareState::Started;
+                    log::info!("call {call_id} peer screen share: {sharing}");
                     listener.on_peer_screen(call_id.to_owned(), sharing);
                 }
             }

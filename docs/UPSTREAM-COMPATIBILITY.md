@@ -22,6 +22,7 @@ upstream commit above.
 
 - `0fb3c7f` voip: rebuild lost inbound video packets from the peer's FEC. Upstream decrypted the peer's video repair packets and dropped them, so every lost packet froze the picture until a keyframe, and the engine asked for a keyframe on each loss.
 - `d5b1fe5`, `61704b0` voip: deliver a 1:1 peer's screen-share state, from the peer only. Upstream accepted the `screen_share` stanza only from group participants, so a phone sharing its screen in a 1:1 call looked like a camera and was cropped.
+- `f936769` voip: keep a paced-out picture's fragments in one access unit. A shared screen's large pictures go out over more than 8 ms of media time offset, which upstream read as a new picture mid-NAL: the rest became orphan fragments and the screen froze.
 
 ## Notes
 

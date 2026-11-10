@@ -304,12 +304,15 @@ private struct RemotePicture: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let sideways = remote.turns % 2 == 1
+            // A shared screen comes upright, still marked with the camera's
+            // turn: turning it laid the screen on its side.
+            let turns = remote.fits ? 0 : remote.turns
+            let sideways = turns % 2 == 1
             LayerView(layer: remote.layer)
                 .frame(width: sideways ? geometry.size.height : geometry.size.width,
                        height: sideways ? geometry.size.width : geometry.size.height)
                 // Counterclockwise: turning clockwise showed a portrait phone upside down.
-                .rotationEffect(.degrees(Double(remote.turns) * -90))
+                .rotationEffect(.degrees(Double(turns) * -90))
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .opacity(remote.hasPicture ? 1 : 0)
         }
