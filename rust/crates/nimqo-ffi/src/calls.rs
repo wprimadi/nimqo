@@ -863,7 +863,10 @@ impl Core {
             };
             let (mic, mic_rx, speaker) = audio_pair(Arc::clone(&listener));
             let voip = client.voip();
-            let mut builder = voip.accept(&call).audio_opus(mic_rx, speaker);
+            // Not `audio_opus`: since 2026-11-10 phones send MLow on payload type 122 to an
+            // Opus-only answer, which drops every packet. The MLow profile takes 120-122 and
+            // either codec; its cost is a clipped first frame per talkspurt (upstream #1098).
+            let mut builder = voip.accept(&call).audio(mic_rx, speaker);
             let mut camera = None;
             if video {
                 let (tx, rx, screen) = video_pair(listener);
