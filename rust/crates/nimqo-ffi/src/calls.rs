@@ -225,6 +225,15 @@ fn video_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<u8>, VideoFrame> {
     (camera_tx, camera_rx, screen_tx)
 }
 
+/// The bitrate a REMB feedback item carries (RFC draft-alvestrand-rmcat-remb).
+fn remb_bps(fci: &[u8]) -> Option<u64> {
+    let [b'R', b'E', b'M', b'B', _, e, m1, m2, ..] = *fci else {
+        return None;
+    };
+    let mantissa = (u64::from(e & 0x03) << 16) | (u64::from(m1) << 8) | u64::from(m2);
+    Some(mantissa << (e >> 2))
+}
+
 /// Counts only, for telling a network stall from a decoder one.
 fn log_video_stats(call_id: &str, handle: &CallHandle) {
     let s = handle.media_stats();
@@ -401,6 +410,7 @@ impl Calls {
             tokio::spawn(async move {
                 // ponytail: counts only, to learn what a group's server feeds back (NACK, REMB…).
                 let mut rtcp = std::collections::BTreeMap::<(u8, u8), u32>::new();
+                let mut afb = Vec::new();
                 while let Ok(event) = events.recv().await {
                     if let CallEvent::RtcpReceived {
                         packet_types,
@@ -414,10 +424,21 @@ impl Calls {
                         for kind in kinds {
                             *rtcp.entry(kind).or_default() += 1;
                         }
+                        // Application feedback: REMB, or whatever WhatsApp puts there.
+                        for f in feedback
+                            .iter()
+                            .filter(|f| f.packet_type == 206 && f.fmt == 15)
+                        {
+                            afb.push(remb_bps(&f.fci).map_or_else(
+                                || format!("{:02x?}", &f.fci[..f.fci.len().min(12)]),
+                                |bps| format!("{}k", bps / 1000),
+                            ));
+                        }
                     }
                     calls.on_media_event(&call_id, event).await;
                 }
                 log::info!("call {call_id} rtcp in (type, feedback fmt+1): {rtcp:?}");
+                log::info!("call {call_id} rtcp afb: {afb:?}");
             });
         }
     }
@@ -971,6 +992,13 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remb_reads_exponent_and_mantissa() {
+        // exp 3, mantissa 0x1_0000 (65536) → 524288 bps.
+        assert_eq!(remb_bps(b"REMB\x01\x0d\x00\x00"), Some(524_288));
+        assert_eq!(remb_bps(b"XXXX\x01\x0d\x00\x00"), None);
+    }
 
     fn log(outgoing: bool, connected: Option<i64>) -> Log {
         Log {
