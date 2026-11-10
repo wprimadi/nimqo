@@ -237,6 +237,20 @@ fn remb_bps(fci: &[u8]) -> Option<u64> {
 /// Counts only, for telling a network stall from a decoder one.
 fn log_video_stats(call_id: &str, handle: &CallHandle) {
     let s = handle.media_stats();
+    log::info!(
+        "call {call_id} audio: rtp {}, decoded {} delivered {} concealed {}, no decoder {}, \
+         no encoder out {}, mlow off-point {} inactive {}, foreign {}, sink dropped {}",
+        s.rtp_received,
+        s.audio_frames_decoded,
+        s.audio_frames_delivered,
+        s.audio_frames_concealed,
+        s.audio_frames_without_decoder,
+        s.outbound_frames_without_encoder,
+        s.mlow_off_point_dropped,
+        s.mlow_inactive_or_sid,
+        s.foreign_frames_decoded,
+        s.audio_sink_dropped,
+    );
     if s.video_rtp_received == 0 {
         return;
     }
@@ -655,8 +669,16 @@ impl Calls {
                 call_id,
                 is_video,
                 group_jid,
+                audio,
                 ..
             } => {
+                // Remote strings: a few, and short.
+                let codecs: Vec<_> = audio
+                    .iter()
+                    .take(4)
+                    .map(|c| (c.enc.chars().take(12).collect::<String>(), c.rate))
+                    .collect();
+                log::info!("call {call_id} offer audio {codecs:?}");
                 if call.offline {
                     return;
                 }
