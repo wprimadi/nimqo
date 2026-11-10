@@ -638,12 +638,17 @@ impl Calls {
     }
 
     async fn on_signal(&self, client: &Arc<Client>, inbox: &Inbox, call: &IncomingCall) {
+        let reason = match &call.action {
+            CallAction::Terminate { reason, .. } => reason.as_deref().unwrap_or("none"),
+            _ => "-",
+        };
         log::info!(
-            "call {} signal {} (group {}, offline {})",
+            "call {} signal {} (group {}, offline {}, media {}, reason {reason})",
             call.action.call_id(),
             call.action.wire_tag(),
             call.group.is_some(),
-            call.offline
+            call.offline,
+            call.media().is_some(),
         );
         match &call.action {
             CallAction::Offer {
