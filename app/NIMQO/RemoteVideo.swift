@@ -1,6 +1,7 @@
 import AVFoundation
 import Observation
 import os
+import SwiftUI
 
 /// The other side's camera: what the call window shows. Decoding happens
 /// in `RemoteDecoder`, off the main thread.
@@ -237,5 +238,27 @@ final class RemoteDecoder: @unchecked Sendable {
                                  Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
         }
         return sample
+    }
+}
+
+/// The other side's camera, turned upright.
+struct RemotePicture: View {
+    let remote: RemoteVideo
+
+    var body: some View {
+        GeometryReader { geometry in
+            // A shared screen comes upright, still marked with the camera's
+            // turn: turning it laid the screen on its side.
+            let turns = remote.fits ? 0 : remote.turns
+            let sideways = turns % 2 == 1
+            LayerView(layer: remote.layer)
+                .frame(width: sideways ? geometry.size.height : geometry.size.width,
+                       height: sideways ? geometry.size.width : geometry.size.height)
+                // Counterclockwise: turning clockwise showed a portrait phone upside down.
+                .rotationEffect(.degrees(Double(turns) * -90))
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .opacity(remote.hasPicture ? 1 : 0)
+        }
+        .accessibilityLabel("Video")
     }
 }

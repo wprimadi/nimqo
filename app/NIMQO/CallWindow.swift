@@ -47,6 +47,9 @@ private struct CallScreen: View {
     let avatars: AvatarStore
     let summary: (String) -> ChatSummary
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The title and controls over video, hidden while the pointer is idle or away.
+    @State private var chrome = true
+    @State private var idle: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -104,7 +107,6 @@ private struct CallScreen: View {
         ZStack {
             if call.group {
                 GroupGrid(participants: call.participants, video: store.groupVideo, summary: summary, avatars: avatars)
-                    .padding(.top, 76).padding(.bottom, 96)
             } else if call.peerVideo {
                 RemotePicture(remote: store.remote).transition(.opacity)
             } else {
@@ -120,6 +122,7 @@ private struct CallScreen: View {
                         CallStatus(call: call).font(.subheadline)
                     }
                     .shadow(radius: 6)
+                    .opacity(chrome ? 1 : 0)
                     Spacer()
                     if call.camera, !store.sharing {
                         LayerView(layer: store.preview)
@@ -141,8 +144,37 @@ private struct CallScreen: View {
                     .padding(.horizontal, 18)
                     .background(.ultraThinMaterial, in: .capsule)
                     .padding(.bottom, 22)
+                    .opacity(chrome ? 1 : 0)
+                    .allowsHitTesting(chrome)
             }
             .foregroundStyle(.white)
+        }
+        .onContinuousHover { phase in
+            if case .active = phase {
+                wake()
+            } else if canHide {
+                chrome = false
+            }
+        }
+        .onChange(of: canHide, initial: true) { wake() }
+        .animation(.easeInOut(duration: reduceMotion ? 0.1 : 0.25), value: chrome)
+    }
+
+    /// The controls stay while they matter: before the call connects, while
+    /// the other side asks for video, or while a problem is shown.
+    private var canHide: Bool {
+        call.phase == .connected && !call.peerAsks && store.problem == nil
+    }
+
+    /// Shows the title and controls, and hides them after three idle seconds.
+    private func wake() {
+        chrome = true
+        idle?.cancel()
+        idle = Task {
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled, canHide {
+                chrome = false
+            }
         }
     }
 }
@@ -300,96 +332,5 @@ private struct Pulse: View {
         }
         .onAppear { spread = !reduceMotion }
         .accessibilityHidden(true)
-    }
-}
-
-/// The other side's camera, turned upright.
-struct RemotePicture: View {
-    let remote: RemoteVideo
-
-    var body: some View {
-        GeometryReader { geometry in
-            // A shared screen comes upright, still marked with the camera's
-            // turn: turning it laid the screen on its side.
-            let turns = remote.fits ? 0 : remote.turns
-            let sideways = turns % 2 == 1
-            LayerView(layer: remote.layer)
-                .frame(width: sideways ? geometry.size.height : geometry.size.width,
-                       height: sideways ? geometry.size.width : geometry.size.height)
-                // Counterclockwise: turning clockwise showed a portrait phone upside down.
-                .rotationEffect(.degrees(Double(turns) * -90))
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .opacity(remote.hasPicture ? 1 : 0)
-        }
-        .accessibilityLabel("Video")
-    }
-}
-
-/// Keeps a ringing call above other apps' windows; draggable by its
-/// background throughout; every call starts in the top-right corner.
-private struct FloatingWindow: NSViewRepresentable {
-    let floating: Bool
-
-    func makeNSView(context _: Context) -> NSView {
-        Corner()
-    }
-
-    /// Pins the window by its top-right corner, so growing for video spreads
-    /// left and down instead of off the screen. SwiftUI would bring back
-    /// wherever the last call's window was dragged; a new call starts in
-    /// the corner again, and a drag moves the pin.
-    private final class Corner: NSView {
-        private static let margin: CGFloat = 12
-        private var observers: [Any] = []
-        private var pin: NSPoint?
-        /// A resize moves the window too; only a move at this size is a drag.
-        private var size: NSSize?
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers = []
-            guard let window else { return }
-            observers = [watch(NSWindow.didResizeNotification, of: window),
-                         watch(NSWindow.didMoveNotification, of: window)]
-            // After SwiftUI has put the window where it last was.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, let visible = self.window?.screen?.visibleFrame else { return }
-                pin = NSPoint(x: visible.maxX - Self.margin, y: visible.maxY - Self.margin)
-                follow()
-            }
-        }
-
-        /// A move remembers the corner; a resize keeps it.
-        private func watch(_ name: Notification.Name, of window: NSWindow) -> Any {
-            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    name == NSWindow.didMoveNotification ? self?.remember() : self?.follow()
-                }
-            }
-        }
-
-        private func remember() {
-            guard let frame = window?.frame, frame.size == size else { return }
-            pin = NSPoint(x: frame.maxX, y: frame.maxY)
-        }
-
-        private func follow() {
-            guard let window, let pin, let visible = window.screen?.visibleFrame else { return }
-            let size = window.frame.size
-            self.size = size
-            let origin = NSPoint(x: max(visible.minX, min(pin.x - size.width, visible.maxX - size.width)),
-                                 y: max(visible.minY, min(pin.y - size.height, visible.maxY - size.height)))
-            if origin != window.frame.origin {
-                window.setFrameOrigin(origin)
-            }
-        }
-    }
-
-    func updateNSView(_ view: NSView, context _: Context) {
-        DispatchQueue.main.async {
-            view.window?.level = floating ? .floating : .normal
-            view.window?.isMovableByWindowBackground = true
-        }
     }
 }

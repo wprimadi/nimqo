@@ -62,15 +62,22 @@ struct GroupGrid: View {
     let avatars: AvatarStore
 
     var body: some View {
-        let columns = participants.count <= 1 ? 1 : participants.count <= 4 ? 2 : 3
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns), spacing: 6) {
-            ForEach(participants, id: \.id) { person in
-                tile(person)
-                    .frame(height: columns == 1 ? 420 : columns == 2 ? 200 : 130)
-                    .clipShape(.rect(cornerRadius: 12, style: .continuous))
+        let count = max(participants.count, 1)
+        let columns = count == 1 ? 1 : count <= 4 ? 2 : 3
+        let rows = (count + columns - 1) / columns
+        GeometryReader { geometry in
+            let spacing: CGFloat = 6
+            let height = (geometry.size.height - spacing * CGFloat(rows - 1)) / CGFloat(rows)
+            let grid = Array(repeating: GridItem(.flexible(), spacing: spacing), count: columns)
+            LazyVGrid(columns: grid, spacing: spacing) {
+                ForEach(participants, id: \.id) { person in
+                    tile(person)
+                        .frame(height: max(height, 0))
+                        .clipShape(.rect(cornerRadius: columns == 1 ? 0 : 12, style: .continuous))
+                }
             }
         }
-        .padding(8)
+        .padding(count == 1 ? 0 : 6)
         .animation(.spring(duration: 0.35, bounce: 0), value: participants)
     }
 
