@@ -880,10 +880,134 @@ pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<St
     if sticker_of(b).is_some() {
         return Some(("sticker", None));
     }
+    // Wrappers get_base_message does not open.
+    for inner in [
+        &b.group_mentioned_message,
+        &b.bot_invoke_message,
+        &b.associated_child_message,
+        &b.status_mention_message,
+    ] {
+        if let Some(inner) = inner.as_option().and_then(|w| w.message.as_option()) {
+            return classify(inner);
+        }
+    }
+    if let Some(text) = shown_text(b) {
+        return Some(("text", Some(text)));
+    }
     let silent = b.protocol_message.as_option().is_some()
         || b.reaction_message.as_option().is_some()
-        || b.sender_key_distribution_message.as_option().is_some();
-    (!silent).then_some(("unsupported", None))
+        || b.sender_key_distribution_message.as_option().is_some()
+        // Votes, keys, edits and bundles that change other messages, which
+        // the official client never shows as a message of their own.
+        || b.keep_in_chat_message.as_option().is_some()
+        || b.enc_reaction_message.as_option().is_some()
+        || b.poll_update_message.as_option().is_some()
+        || b.enc_comment_message.as_option().is_some()
+        || b.enc_event_response_message.as_option().is_some()
+        || b.secret_encrypted_message.as_option().is_some()
+        || b.message_history_bundle.as_option().is_some()
+        || b.message_history_notice.as_option().is_some()
+        || b.album_message.as_option().is_some()
+        || b.placeholder_message.as_option().is_some()
+        || b.call_log_messsage.as_option().is_some()
+        || b.sticker_sync_rmr_message.as_option().is_some();
+    if silent {
+        return None;
+    }
+    let fields = top_fields(b);
+    // Only message context (keys, secrets): nothing to show.
+    if fields.iter().all(|&f| f == 35) {
+        return None;
+    }
+    log::info!("unsupported message, fields {fields:?}");
+    Some(("unsupported", None))
+}
+
+/// Text for kinds the timeline shows as text: templates and buttons (one-time
+/// codes come as these), lists, polls, events, contacts, places and pins.
+fn shown_text(b: &wa::Message) -> Option<String> {
+    let some = |s: &Option<String>| s.clone().filter(|s| !s.is_empty());
+    if let Some(t) = b.template_message.as_option() {
+        let hydrated = t.hydrated_template.as_option();
+        if let Some(text) = hydrated.and_then(|h| some(&h.hydrated_content_text)) {
+            return Some(text);
+        }
+    }
+    if let Some(m) = b.interactive_message.as_option()
+        && let Some(text) = m.body.as_option().and_then(|body| some(&body.text))
+    {
+        return Some(text);
+    }
+    if let Some(m) = b.buttons_message.as_option()
+        && let Some(text) = some(&m.content_text)
+    {
+        return Some(text);
+    }
+    if let Some(m) = b.list_message.as_option() {
+        return some(&m.description).or_else(|| some(&m.title));
+    }
+    let poll = [
+        &b.poll_creation_message,
+        &b.poll_creation_message_v2,
+        &b.poll_creation_message_v3,
+        &b.poll_creation_message_v5,
+    ]
+    .into_iter()
+    .find_map(|p| p.as_option());
+    if let Some(p) = poll {
+        return Some(format!("📊 {}", p.name.clone().unwrap_or_default()));
+    }
+    if let Some(e) = b.event_message.as_option() {
+        return Some(format!("📅 {}", e.name.clone().unwrap_or_default()));
+    }
+    if let Some(c) = b.scheduled_call_creation_message.as_option() {
+        return Some(format!("📅 {}", c.title.clone().unwrap_or_default()));
+    }
+    if let Some(c) = b.contact_message.as_option() {
+        return Some(format!("👤 {}", c.display_name.clone().unwrap_or_default()));
+    }
+    if b.location_message.as_option().is_some() || b.live_location_message.as_option().is_some() {
+        return Some("📍 Location".to_owned());
+    }
+    if b.pin_in_chat_message.as_option().is_some() {
+        return Some("📌 Pinned a message".to_owned());
+    }
+    None
+}
+
+/// The top-level field numbers set in a message: logged for kinds not shown
+/// yet, so they can be told apart without logging what they say.
+fn top_fields(message: &wa::Message) -> Vec<u64> {
+    use whatsapp_rust::buffa::Message as _;
+    let bytes = message.encode_to_vec();
+    let mut fields = Vec::new();
+    let mut at = 0;
+    let varint = |at: &mut usize| -> Option<u64> {
+        let mut value = 0u64;
+        for shift in (0..64).step_by(7) {
+            let byte = *bytes.get(*at)?;
+            *at += 1;
+            value |= u64::from(byte & 0x7f) << shift;
+            if byte & 0x80 == 0 {
+                return Some(value);
+            }
+        }
+        None
+    };
+    while let Some(key) = varint(&mut at) {
+        fields.push(key >> 3);
+        let skip = match key & 7 {
+            0 => varint(&mut at).map(|_| 0),
+            1 => Some(8),
+            2 => varint(&mut at).and_then(|n| usize::try_from(n).ok()),
+            5 => Some(4),
+            _ => None,
+        };
+        let Some(skip) = skip else { break };
+        at += skip;
+    }
+    fields.dedup();
+    fields
 }
 
 #[cfg(test)]
@@ -1059,10 +1183,22 @@ mod tests {
         m.reaction_message =
             whatsapp_rust::buffa::MessageField::some(wa::message::ReactionMessage::default());
         assert_eq!(classify(&m), None);
+        assert_eq!(classify(&wa::Message::default()), None);
+        let mut otp = wa::Message::default();
+        let mut template = wa::message::TemplateMessage::default();
+        let mut hydrated = wa::message::template_message::HydratedFourRowTemplate::default();
+        hydrated.hydrated_content_text = Some("123456 is your code".into());
+        template.hydrated_template = whatsapp_rust::buffa::MessageField::some(hydrated);
+        otp.template_message = whatsapp_rust::buffa::MessageField::some(template);
         assert_eq!(
-            classify(&wa::Message::default()),
-            Some(("unsupported", None))
+            classify(&otp),
+            Some(("text", Some("123456 is your code".into())))
         );
+        let mut unknown = wa::Message::default();
+        unknown.newsletter_admin_invite_message = whatsapp_rust::buffa::MessageField::some(
+            wa::message::NewsletterAdminInviteMessage::default(),
+        );
+        assert_eq!(classify(&unknown), Some(("unsupported", None)));
         let text = wa::Message::text("hi");
         assert_eq!(classify(&text), Some(("text", Some("hi".into()))));
     }

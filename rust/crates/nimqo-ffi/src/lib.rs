@@ -325,6 +325,11 @@ impl Core {
             messages.retain(|m| m.from_me || self.inbox.is_contact(&m.sender).unwrap_or(false));
         }
         let mut names = std::collections::HashMap::new();
+        // A mention of this account carries its own number or LID, which
+        // no contact or push name lists.
+        for me in [self.client.pn(), self.client.lid()].into_iter().flatten() {
+            names.insert(me.user.to_string(), Some("You".to_owned()));
+        }
         for m in &mut messages {
             let Some(body) = &m.body else { continue };
             for user in chats::mentioned_users(body) {

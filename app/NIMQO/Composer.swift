@@ -95,8 +95,10 @@ struct Composer: View {
                         editing = lastEditable
                         return .handled
                     }
-                    .padding(.horizontal, 14)
+                    .padding(.leading, 14)
                     .padding(.vertical, 8)
+                    .padding(.trailing, 34)
+                    .overlay(alignment: .bottomTrailing) { emojiButton }
                     .glassSurface(in: .rect(cornerRadius: 18))
                 Button(editing == nil ? "Send" : "Save Edit", systemImage: editing == nil ? "arrow.up" : "checkmark",
                        action: submit)
@@ -175,6 +177,21 @@ struct Composer: View {
                 sendFiles(more)
             }
         }
+    }
+
+    /// The system's emoji picker, typing into the field (also Fn-E or Control-Command-Space).
+    private var emojiButton: some View {
+        Button("Emoji", systemImage: "face.smiling") {
+            focused = true
+            DispatchQueue.main.async { NSApp.orderFrontCharacterPalette(nil) }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .font(.title3)
+        .foregroundStyle(.secondary)
+        .help("Emoji")
+        .padding(.trailing, 10)
+        .padding(.bottom, 7)
     }
 
     private func submit() {
