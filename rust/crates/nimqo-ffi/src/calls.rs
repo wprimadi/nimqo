@@ -200,7 +200,7 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         "call {call_id} video: rtp {} lost {} stale {}, units {} no-marker {} evicted {}, \
          fragment gaps {}, sink dropped {}, keyframe asks {}, dropped before the engine {}; \
          fec: repairs {} recovered {} parity ok {} bad {}, two lost {} late {} rejected {}, \
-         gaps skipped {} ({} packets); other payload types {} (last {}); \
+         gaps skipped {} ({} packets) late {}; other payload types {} (last {}); \
          ssrc switches {} (partial dropped {}), retired ignored {}; all rtp {} srtp failed {} \
          (video {}) sframe failed {}, auxiliary {}, unclassified {}, unusable {}, oversize {}, \
          orphan fragments {}, timestamp boundary drops {}, shared timestamp {}",
@@ -223,6 +223,7 @@ fn log_video_stats(call_id: &str, handle: &CallHandle) {
         s.video_fec_rejected,
         s.video_gaps_skipped,
         s.video_packets_skipped,
+        s.video_packets_late,
         s.rtp_payload_type_unexpected,
         s.last_unexpected_payload_type,
         s.video_ssrc_switches,
