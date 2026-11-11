@@ -6,7 +6,7 @@ use anyhow::Result;
 use whatsapp_rust::prelude::wa;
 use whatsapp_rust::types::events::LazyHistorySync;
 
-use crate::inbox::{Inbox, ME, Row, classify};
+use crate::inbox::{Inbox, ME, Row, STATUS, STATUS_LIFETIME, classify};
 
 /// Stores every displayable message in one history chunk, one transaction
 /// per conversation. Returns the number of messages read.
@@ -60,6 +60,20 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         chats.push(chat);
     }
     let rest = stream.remainder()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    let statuses: Vec<Row> = rest
+        .status_v3_messages
+        .iter()
+        .filter_map(|m| status_row(m, now))
+        .collect();
+    if !statuses.is_empty() {
+        log::info!("{} status update(s) from history", statuses.len());
+        total += statuses.len();
+        inbox.commit(statuses, &[])?;
+        chats.push(STATUS.to_owned());
+    }
     for m in rest.phone_number_to_lid_mappings {
         pairs.extend(lid_pair(m.lid_jid.as_deref(), m.pn_jid.as_deref()));
     }
@@ -206,6 +220,19 @@ fn history_votes(chat: &str, m: &wa::WebMessageInfo) -> Vec<crate::effects::Effe
         .collect()
 }
 
+/// A status update still up (`now`), as a live one is kept: gone a day
+/// after it was posted, and not yet viewed here unless it is our own.
+fn status_row(m: &wa::WebMessageInfo, now: i64) -> Option<Row> {
+    let mut row = row(STATUS, m)?;
+    let ends = row.ts + STATUS_LIFETIME;
+    if ends <= now {
+        return None;
+    }
+    row.expires_at = Some(ends);
+    row.read = row.from_me;
+    Some(row)
+}
+
 /// Never "pending": that would put the phone's message in our outbox.
 fn history_status(status: Option<wa::web_message_info::Status>) -> &'static str {
     use wa::web_message_info::Status;
@@ -294,5 +321,33 @@ mod tests {
             (ME, 0),
             "an own vote taken back"
         );
+    }
+
+    #[test]
+    fn history_statuses_last_a_day_and_wait_to_be_viewed() {
+        use whatsapp_rust::buffa::MessageField;
+        use whatsapp_rust::prelude::MessageBuilderExt as _;
+        let status = |ts: u64| {
+            let mut key = wa::MessageKey::default();
+            key.id = Some(format!("s{ts}"));
+            key.remote_jid = Some(STATUS.into());
+            key.participant = Some("62811:2@s.whatsapp.net".into());
+            let mut m = wa::WebMessageInfo::default();
+            m.key = MessageField::some(key);
+            m.message = MessageField::some(wa::Message::text("hi".to_owned()));
+            m.message_timestamp = Some(ts);
+            m
+        };
+        let now = 200_000;
+        let row = status_row(&status(150_000), now).unwrap();
+        assert_eq!(
+            (row.chat.as_str(), row.sender.as_str()),
+            (STATUS, "62811@s.whatsapp.net")
+        );
+        assert_eq!(
+            (row.expires_at, row.read),
+            (Some(150_000 + STATUS_LIFETIME), false)
+        );
+        assert!(status_row(&status(100_000), now).is_none(), "already gone");
     }
 }
