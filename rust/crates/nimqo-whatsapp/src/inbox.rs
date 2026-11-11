@@ -194,7 +194,7 @@ impl Inbox {
                COALESCE((SELECT ts FROM chat_pins WHERE chat = m.chat), 0) AS pinned,
                EXISTS (SELECT 1 FROM chat_archives WHERE chat = m.chat) AS archived
              FROM messages m
-             WHERE m.chat <> 'status@broadcast' AND m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
+             WHERE m.chat NOT IN ('status@broadcast', 'favorites@stickers.nimqo') AND m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
                               ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
              -- Pinned first, the latest pin on top, so no limit hides them.
              ORDER BY pinned DESC, m.ts DESC LIMIT ?",

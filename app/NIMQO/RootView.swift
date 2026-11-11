@@ -166,7 +166,7 @@ struct MainView: View {
                 isAdmin: { [contacts = model.contacts] in contacts.isAdmin(of: chat.id) },
                 sendVoice: { await model.sendVoice($0, to: chat.id) },
                 stickers: model.core.map { core in
-                    StickerPicking(core: core) { await model.sendSticker($0, to: chat.id) }
+                    StickerPicking(core: core) { await model.sendSticker($0, gif: $1, to: chat.id) }
                 }
             )
         )

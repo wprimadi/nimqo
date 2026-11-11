@@ -50,7 +50,7 @@ impl Inbox {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(
             "SELECT chat, rowid AS seq, ts, kind, body, from_me FROM messages
-             WHERE body LIKE ? ESCAPE '\\' AND chat <> 'status@broadcast' AND kind NOT IN ('deleted', 'document', 'call')
+             WHERE body LIKE ? ESCAPE '\\' AND chat NOT IN ('status@broadcast', 'favorites@stickers.nimqo') AND kind NOT IN ('deleted', 'document', 'call')
              ORDER BY ts DESC, rowid DESC LIMIT ?",
         )
         .bind::<Text, _>(pattern(text))

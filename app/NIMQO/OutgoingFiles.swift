@@ -171,10 +171,17 @@ extension CoreModel {
     }
 
     /// Sends a sticker picked from those seen; returns why it was refused.
-    func sendSticker(_ sticker: StickerRef, to chat: String) async -> String? {
+    /// Sends a picked sticker, or a GIF when `gif`, by its upload.
+    func sendSticker(_ sticker: StickerRef, gif: Bool, to chat: String) async -> String? {
         guard let core else { return "Not connected." }
         let result = await Task.detached {
-            Result { try core.sendSticker(chatId: chat, fromChat: sticker.chatId, seq: sticker.seq) }
+            Result {
+                if gif {
+                    try core.sendGif(chatId: chat, fromChat: sticker.chatId, seq: sticker.seq)
+                } else {
+                    try core.sendSticker(chatId: chat, fromChat: sticker.chatId, seq: sticker.seq)
+                }
+            }
         }.value
         if case let .failure(error) = result {
             return Self.message(for: error)

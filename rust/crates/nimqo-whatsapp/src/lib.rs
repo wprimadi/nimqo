@@ -9,6 +9,7 @@ pub mod channels;
 pub mod contacts;
 pub mod db;
 mod effects;
+pub mod favorites;
 pub mod flags;
 pub mod forward;
 pub mod groups;

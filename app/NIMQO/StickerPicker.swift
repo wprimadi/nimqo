@@ -5,62 +5,134 @@ import SwiftUI
 /// Where the sticker picker gets its stickers and sends the one picked.
 struct StickerPicking {
     let core: Core
-    /// Sends it to the open chat; returns why it was refused.
-    let send: @MainActor (StickerRef) async -> String?
+    /// Sends it to the open chat, as a GIF when true; returns why it was
+    /// refused.
+    let send: @MainActor (StickerRef, Bool) async -> String?
 }
 
-/// The stickers seen in any chat, newest first, each once. Click one to
-/// send it; it pops as it goes.
+private enum PickerTab: String, CaseIterable, Identifiable {
+    case favorites, recent, gifs
+
+    var id: Self {
+        self
+    }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .favorites: "Favorites"
+        case .recent: "Recent"
+        case .gifs: "GIFs"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .favorites: "star.fill"
+        case .recent: "clock.fill"
+        case .gifs: "play.square.stack.fill"
+        }
+    }
+
+    var empty: (title: LocalizedStringKey, detail: LocalizedStringKey) {
+        switch self {
+        case .favorites: ("No favorites yet", "Stickers you star in WhatsApp on your phone appear here.")
+        case .recent: ("No stickers yet", "Stickers sent to you appear here to send on.")
+        case .gifs: ("No GIFs yet", "GIFs sent to you appear here to send on.")
+        }
+    }
+
+    func load(_ core: Core) -> [StickerRef] {
+        switch self {
+        case .favorites: (try? core.favoriteStickers()) ?? []
+        case .recent: (try? core.recentStickers()) ?? []
+        case .gifs: (try? core.recentGifs()) ?? []
+        }
+    }
+}
+
+/// Favorite stickers (starred on the phone), the stickers and the GIFs
+/// seen in chats, newest first, each once. Click one to send it; it pops
+/// as it goes.
 struct StickerPicker: View {
     let picking: StickerPicking
     let done: (String?) -> Void
-    @State private var stickers: [StickerRef]?
+    @AppStorage("stickerTab") private var tab = PickerTab.favorites
+    @State private var items: [PickerTab: [StickerRef]] = [:]
     @State private var sending: StickerRef?
+    @Namespace private var selection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "face.smiling.inverse")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 30, height: 30)
-                    .background(Color.pink.gradient, in: .rect(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Stickers").font(.headline)
-                    Text("From your chats").font(.caption).foregroundStyle(.secondary)
-                }
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            tabs
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 6)], spacing: 6) {
-                    ForEach(Array((stickers ?? []).enumerated()), id: \.element.seq) { index, sticker in
-                        StickerCell(sticker: sticker, core: picking.core, index: index,
-                                    sending: sending == sticker) { pick(sticker) }
+                LazyVGrid(columns: columns, spacing: 6) {
+                    ForEach(Array((items[tab] ?? []).enumerated()), id: \.element.seq) { index, item in
+                        StickerCell(sticker: item, core: picking.core, index: index, gif: tab == .gifs,
+                                    sending: sending == item) { pick(item) }
                     }
                 }
                 .padding(2)
             }
+            .id(tab)
+            .transition(.opacity.combined(with: .offset(y: 8)))
             .overlay {
-                if stickers == nil {
+                if items[tab] == nil {
                     ProgressView()
-                } else if stickers?.isEmpty == true {
-                    ContentUnavailableView("No stickers yet", systemImage: "face.smiling",
-                                           description: Text("Stickers sent to you appear here to send on."))
+                } else if items[tab]?.isEmpty == true {
+                    ContentUnavailableView(tab.empty.title, systemImage: tab.symbol,
+                                           description: Text(tab.empty.detail))
                 }
             }
         }
         .padding(14)
-        .frame(width: 340, height: 380)
-        .task {
-            let core = picking.core
-            stickers = await Task.detached { (try? core.recentStickers()) ?? [] }.value
+        .frame(width: 380, height: 420)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.25), value: tab)
+        .task(id: tab) {
+            guard items[tab] == nil else { return }
+            let (core, shown) = (picking.core, tab)
+            items[shown] = await Task.detached { shown.load(core) }.value
         }
     }
 
-    private func pick(_ sticker: StickerRef) {
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: tab == .gifs ? 110 : 72), spacing: 6)]
+    }
+
+    /// A pill per tab; the chosen one's background slides between them.
+    private var tabs: some View {
+        HStack(spacing: 4) {
+            ForEach(PickerTab.allCases) { option in
+                Button { tab = option } label: {
+                    Label(option.title, systemImage: option.symbol)
+                        .font(.callout.weight(tab == option ? .semibold : .regular))
+                        .foregroundStyle(tab == option ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
+                        .symbolEffect(.bounce, value: tab == option)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background {
+                            if tab == option {
+                                Capsule().fill(Color.accentColor.gradient)
+                                    .shadow(color: .accentColor.opacity(0.4), radius: 6, y: 2)
+                                    .matchedGeometryEffect(id: "tab", in: selection)
+                            }
+                        }
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(tab == option ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .background(.primary.opacity(0.06), in: .capsule)
+    }
+
+    private func pick(_ item: StickerRef) {
         guard sending == nil else { return }
-        sending = sticker
+        sending = item
         Task {
-            let refusal = await picking.send(sticker)
+            let refusal = await picking.send(item, tab == .gifs)
             // Long enough for the pop to be seen.
             try? await Task.sleep(for: .milliseconds(220))
             done(refusal)
@@ -72,6 +144,8 @@ private struct StickerCell: View {
     let sticker: StickerRef
     let core: Core
     let index: Int
+    /// A GIF: its still, wide, marked "GIF".
+    var gif = false
     let sending: Bool
     let pick: () -> Void
     @State private var image: NSImage?
@@ -84,7 +158,22 @@ private struct StickerCell: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(.primary.opacity(hovering ? 0.08 : 0))
-                if let image {
+                if let image, gif {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+                        .overlay(alignment: .bottomLeading) {
+                            Text("GIF")
+                                .font(.caption2.weight(.heavy))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(.black.opacity(0.55), in: .capsule)
+                                .padding(6)
+                        }
+                } else if let image {
                     Image(nsImage: image)
                         .resizable()
                         .scaledToFit()
@@ -96,9 +185,9 @@ private struct StickerCell: View {
                         .padding(10)
                 }
             }
-            .frame(height: 72)
+            .frame(height: gif ? 80 : 72)
             .scaleEffect(scale)
-            .rotationEffect(.degrees(hovering && !reduceMotion ? -4 : 0))
+            .rotationEffect(.degrees(hovering && !reduceMotion && !gif ? -4 : 0))
             .opacity(shown || reduceMotion ? 1 : 0)
             .contentShape(.rect)
         }
@@ -107,7 +196,7 @@ private struct StickerCell: View {
             withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.5)) { hovering = over }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.25, bounce: 0.6), value: sending)
-        .accessibilityLabel("Sticker")
+        .accessibilityLabel(gif ? "GIF" : "Sticker")
         .task { await load() }
         .onAppear {
             // Cascades in, row by row.
@@ -139,7 +228,8 @@ private struct StickerCell: View {
         if let first {
             image = NSImage(data: first.bytes)
         }
-        guard first?.full != true, await core.downloadMedia(chatId: chat, seq: seq) else { return }
+        // A GIF shows the still it came with; its video is not fetched to pick it.
+        guard !gif, first?.full != true, await core.downloadMedia(chatId: chat, seq: seq) else { return }
         if let full = await read() {
             image = NSImage(data: full.bytes)
         }

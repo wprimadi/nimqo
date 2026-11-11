@@ -64,6 +64,32 @@ impl Inbox {
 /// # Errors
 /// The query fails.
 pub fn recent_stickers(inbox: &Inbox, limit: usize) -> Result<Vec<(String, i64)>> {
+    recent(inbox, "sticker", limit, |media| {
+        let s = wa::message::StickerMessage::decode_from_slice(media).ok()?;
+        sendable(&s).then(|| s.file_sha256.unwrap_or_default())
+    })
+}
+
+/// The newest GIFs (looping videos) seen in any chat, each once, as
+/// (chat, seq): those that can be sent again by their upload.
+///
+/// # Errors
+/// The query fails.
+pub fn recent_gifs(inbox: &Inbox, limit: usize) -> Result<Vec<(String, i64)>> {
+    recent(inbox, "video", limit, |media| {
+        let v = wa::message::VideoMessage::decode_from_slice(media).ok()?;
+        gif_sendable(&v).then(|| v.file_sha256.unwrap_or_default())
+    })
+}
+
+/// The newest messages of `kind` whose media `identity` accepts, each
+/// identity once. Favorite stickers and status updates are not "seen".
+fn recent(
+    inbox: &Inbox,
+    kind: &str,
+    limit: usize,
+    identity: impl Fn(&[u8]) -> Option<Vec<u8>>,
+) -> Result<Vec<(String, i64)>> {
     #[derive(diesel::QueryableByName)]
     struct Row {
         #[diesel(sql_type = Text)]
@@ -77,23 +103,43 @@ pub fn recent_stickers(inbox: &Inbox, limit: usize) -> Result<Vec<(String, i64)>
         let mut conn = inbox.lock()?;
         diesel::sql_query(
             "SELECT chat, rowid AS seq, media FROM messages
-             WHERE kind = 'sticker' AND media IS NOT NULL AND chat <> 'status@broadcast'
+             WHERE kind = ? AND media IS NOT NULL
+               AND chat NOT IN ('status@broadcast', 'favorites@stickers.nimqo')
              ORDER BY ts DESC, rowid DESC LIMIT 600",
         )
+        .bind::<Text, _>(kind)
         .load(&mut *conn)?
     };
     let mut seen = std::collections::HashSet::new();
     Ok(rows
         .into_iter()
-        .filter(|r| {
-            let Ok(s) = wa::message::StickerMessage::decode_from_slice(&r.media) else {
-                return false;
-            };
-            sendable(&s) && seen.insert(s.file_sha256.unwrap_or_default())
-        })
+        .filter(|r| identity(&r.media).is_some_and(|id| seen.insert(id)))
         .take(limit)
         .map(|r| (r.chat, r.seq))
         .collect())
+}
+
+/// A looping video, uploaded (path and key known).
+fn gif_sendable(v: &wa::message::VideoMessage) -> bool {
+    v.gif_playback == Some(true)
+        && v.direct_path.as_deref().is_some_and(|p| !p.is_empty())
+        && v.media_key.as_deref().is_some_and(|k| !k.is_empty())
+        && v.file_sha256.as_deref().is_some_and(|h| !h.is_empty())
+}
+
+/// A GIF sent again as picked, by its upload, without its caption or the
+/// context it first came with. None for anything but an uploaded GIF.
+#[must_use]
+pub fn gif(media: &[u8]) -> Option<wa::Message> {
+    let mut x = wa::message::VideoMessage::decode_from_slice(media).ok()?;
+    if !gif_sendable(&x) {
+        return None;
+    }
+    x.context_info = MessageField::none();
+    x.caption = None;
+    let mut m = wa::Message::default();
+    m.video_message = MessageField::some(x);
+    Some(m)
 }
 
 /// Uploaded (path and key known) and not animated.
@@ -165,6 +211,22 @@ pub fn forwarded(kind: &str, body: Option<&str>, media: Option<&[u8]>) -> Option
 mod tests {
     use super::*;
     use whatsapp_rust::prelude::MessageExt as _;
+
+    #[test]
+    fn only_uploaded_gifs_are_sent_again_without_their_caption() {
+        let mut v = wa::message::VideoMessage::default();
+        v.direct_path = Some("/v/x".into());
+        v.media_key = Some(vec![1; 32]);
+        v.file_sha256 = Some(vec![2; 32]);
+        v.caption = Some("lol".into());
+        assert!(gif(&v.encode_to_vec()).is_none(), "a plain video is no GIF");
+        v.gif_playback = Some(true);
+        let sent = gif(&v.encode_to_vec()).unwrap();
+        let x = sent.video_message.as_option().unwrap();
+        assert_eq!(x.caption, None);
+        v.direct_path = None;
+        assert!(gif(&v.encode_to_vec()).is_none(), "not uploaded");
+    }
 
     #[test]
     fn copies_are_marked_forwarded_and_keep_their_media() {

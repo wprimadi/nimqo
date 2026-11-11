@@ -1060,6 +1060,44 @@ impl Core {
             .collect())
     }
 
+    /// Stickers starred as favorites on the account's devices, the latest
+    /// first.
+    ///
+    /// # Errors
+    /// `Storage` if they cannot be read.
+    pub fn favorite_stickers(&self) -> Result<Vec<StickerRef>, CoreError> {
+        Ok(self
+            .inbox
+            .favorite_stickers()
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(|(chat_id, seq)| StickerRef { chat_id, seq })
+            .collect())
+    }
+
+    /// GIFs to pick from: the newest seen in any chat, each once.
+    ///
+    /// # Errors
+    /// `Storage` if they cannot be read.
+    pub fn recent_gifs(&self) -> Result<Vec<StickerRef>, CoreError> {
+        Ok(nimqo_whatsapp::forward::recent_gifs(&self.inbox, 120)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(|(chat_id, seq)| StickerRef { chat_id, seq })
+            .collect())
+    }
+
+    /// Sends the GIF of message `seq` in `from_chat` to `chat_id`.
+    ///
+    /// # Errors
+    /// As `send_sticker`.
+    pub fn send_gif(&self, chat_id: &str, from_chat: &str, seq: i64) -> Result<(), CoreError> {
+        self.sender.send_gif(chat_id, from_chat, seq)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
     /// Sends the sticker of message `seq` in `from_chat` to `chat_id`.
     ///
     /// # Errors
@@ -1598,6 +1636,7 @@ fn message_handlers<B, T, H, R>(
                 EventKind::ArchiveUpdate,
                 EventKind::StarUpdate,
                 EventKind::DeleteMessageForMeUpdate,
+                EventKind::FavoriteStickerUpdate,
                 EventKind::GroupUpdate,
             ],
             move |event, _| {
@@ -1621,6 +1660,7 @@ fn message_handlers<B, T, H, R>(
                     sender.load_contacts_once().await;
                     sender.load_mutes_once().await;
                     sender.load_flags_once().await;
+                    sender.load_favorite_stickers_once().await;
                 }
             }
         })
@@ -1682,6 +1722,9 @@ async fn on_account_event(sender: Arc<outbox::Sender>, event: &Event) {
                 .await;
         }
         Event::GroupUpdate(g) => sender.on_group_update(&g.group_jid, &g.action),
+        Event::FavoriteStickerUpdate(f) => {
+            sender.on_favorite_sticker(&f.filehash, &f.action, f.timestamp.timestamp());
+        }
         Event::MarkChatAsReadUpdate(update) => {
             let range = update.action.message_range.as_option();
             sender

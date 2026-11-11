@@ -260,6 +260,72 @@ impl Sender {
         Ok(())
     }
 
+    /// A sticker was made a favorite, or no longer one, on one of the
+    /// account's devices.
+    pub fn on_favorite_sticker(
+        &self,
+        filehash: &str,
+        action: &whatsapp_rust::prelude::wa::sync_action_value::StickerAction,
+        ts: i64,
+    ) {
+        use nimqo_whatsapp::favorites::{FAVORITES, sticker_of};
+        let sticker = if action.is_favorite.unwrap_or(false) {
+            sticker_of(filehash, action)
+        } else {
+            None
+        };
+        match self.inbox.set_favorite_sticker(filehash, sticker, ts) {
+            Ok(()) => self.listener.on_chats_changed(vec![FAVORITES.to_owned()]),
+            Err(e) => log::warn!("favorite sticker not stored: {e:#}"),
+        }
+    }
+
+    /// Sends the GIF of message `seq` in `from` to `chat`, by its upload.
+    ///
+    /// # Errors
+    /// As `send_sticker`.
+    pub fn send_gif(&self, chat: &str, from: &str, seq: i64) -> Result<(), CoreError> {
+        Self::may_send(chat)?;
+        let m = self.original(from, seq)?;
+        let sendable = m.kind == "video"
+            && m.media
+                .as_deref()
+                .and_then(nimqo_whatsapp::forward::gif)
+                .is_some();
+        if !sendable {
+            return Err(refused("This GIF can't be sent."));
+        }
+        let id = self.client.generate_message_id();
+        self.inbox
+            .enqueue_copy(chat, id.as_str(), crate::unix_now(), &m, false)
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
+    /// Favorite stickers were synced before NIMQO kept them: fetch them
+    /// once. A read, nothing is sent.
+    pub async fn load_favorite_stickers_once(&self) {
+        if !self
+            .inbox
+            .first_time("load favorite stickers")
+            .unwrap_or(false)
+        {
+            return;
+        }
+        match self
+            .client
+            .resync_app_state(
+                [whatsapp_rust::WAPatchName::RegularLow],
+                whatsapp_rust::AppStateResyncMode::Snapshot,
+            )
+            .await
+        {
+            Ok(_) => log::info!("favorite stickers loaded"),
+            Err(e) => log::warn!("favorite stickers not loaded: {e}"),
+        }
+    }
+
     /// Pins, archives, and stars set before NIMQO kept them: fetch them
     /// once. A read, nothing is sent.
     pub async fn load_flags_once(&self) {
