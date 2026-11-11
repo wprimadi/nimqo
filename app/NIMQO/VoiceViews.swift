@@ -95,36 +95,74 @@ private struct LiveWaveform: View {
     }
 }
 
-/// An audio message's bars: what was played in the tint, the rest dim.
-/// Click or drag along it to move there.
+/// An audio message's bars, as many as fit the width (never past it):
+/// what was played in a glowing gradient of the tint, the rest dim, and a
+/// playhead between them. Click or drag along it to move there.
 struct WaveformBars: View {
     let bars: [UInt8]
     /// 0 to 1.
     let progress: Double
     let tint: Color
+    /// Shows the playhead.
+    var active = false
     let seek: (Double) -> Void
+
+    private static let barWidth: CGFloat = 3
+    private static let gap: CGFloat = 2
 
     var body: some View {
         GeometryReader { geometry in
-            let count = bars.count
-            let gap: CGFloat = 2
-            let width = max(1.5, (geometry.size.width - gap * CGFloat(count - 1)) / CGFloat(max(count, 1)))
-            HStack(alignment: .center, spacing: gap) {
-                ForEach(Array(bars.enumerated()), id: \.offset) { index, bar in
-                    let played = Double(index) / Double(max(count, 1)) < progress
-                    Capsule()
-                        .fill(played ? AnyShapeStyle(tint) : AnyShapeStyle(.secondary.opacity(0.45)))
-                        .frame(width: width, height: max(3, geometry.size.height * CGFloat(bar) / 100))
+            let shown = Self.fit(bars, count: Int((geometry.size.width + Self.gap) / (Self.barWidth + Self.gap)))
+            let head = geometry.size.width * progress
+            ZStack(alignment: .leading) {
+                HStack(alignment: .center, spacing: Self.gap) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, bar in
+                        Capsule().frame(width: Self.barWidth,
+                                        height: max(3, geometry.size.height * CGFloat(bar) / 100))
+                    }
+                }
+                .frame(maxHeight: .infinity)
+                .foregroundStyle(.secondary.opacity(0.4))
+                // The played part: the same bars, in the tint, cut at the head.
+                HStack(alignment: .center, spacing: Self.gap) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, bar in
+                        Capsule().frame(width: Self.barWidth,
+                                        height: max(3, geometry.size.height * CGFloat(bar) / 100))
+                    }
+                }
+                .frame(maxHeight: .infinity)
+                .foregroundStyle(LinearGradient(colors: [tint.opacity(0.75), tint],
+                                                startPoint: .leading, endPoint: .trailing))
+                .shadow(color: tint.opacity(0.5), radius: 3)
+                .mask(alignment: .leading) { Rectangle().frame(width: head) }
+                if active {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 11, height: 11)
+                        .shadow(color: tint.opacity(0.7), radius: 5)
+                        .overlay(Circle().strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
+                        .offset(x: min(max(head - 5.5, -2), geometry.size.width - 9))
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
-            .frame(maxHeight: .infinity)
             .contentShape(.rect)
             .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
                 seek(min(max(drag.location.x / geometry.size.width, 0), 1))
             })
         }
         .frame(height: 28)
+        .clipped()
         .accessibilityHidden(true)
+    }
+
+    /// `bars` stretched or squeezed to `count`, each the loudest it covers.
+    nonisolated static func fit(_ bars: [UInt8], count: Int) -> [UInt8] {
+        guard count > 0, !bars.isEmpty else { return [] }
+        return (0 ..< count).map { index in
+            let start = index * bars.count / count
+            let end = max(start + 1, (index + 1) * bars.count / count)
+            return bars[start ..< min(end, bars.count)].max() ?? 0
+        }
     }
 
     /// 64 bars from a sender's waveform, or a calm made-up one when it has

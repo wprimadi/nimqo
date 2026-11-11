@@ -34,7 +34,8 @@ struct AudioMessageView: View {
             VStack(alignment: .leading, spacing: 3) {
                 TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
                     WaveformBars(bars: WaveformBars.shape([UInt8](info?.waveform ?? Data()), seed: message.seq),
-                                 progress: playback.progress, tint: tint, seek: seek)
+                                 progress: playback.progress, tint: tint,
+                                 active: playback.isPlaying || playback.progress > 0, seek: seek)
                 }
                 HStack(spacing: 6) {
                     if store.didFail(chat: chat, message: message) {
@@ -53,9 +54,10 @@ struct AudioMessageView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            .frame(width: 190)
+            .frame(width: 200)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .padding(.leading, 4)
         .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.3), value: playback.isPlaying)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(info?.voice == false ? "Audio" : "Voice message")
@@ -92,6 +94,19 @@ struct AudioMessageView: View {
                 }
             }
             .frame(width: 38, height: 38)
+            .shadow(color: tint.opacity(playback.isPlaying ? 0.55 : 0.25), radius: playback.isPlaying ? 8 : 3)
+            // How far it has played, around the button.
+            .overlay {
+                if playback.isLoaded {
+                    TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                        Circle()
+                            .trim(from: 0, to: playback.progress)
+                            .stroke(tint.opacity(0.9), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .padding(-4)
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if info?.voice == true, !message.fromMe {
                     Image(systemName: "mic.fill")

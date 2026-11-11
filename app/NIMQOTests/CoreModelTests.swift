@@ -69,7 +69,7 @@ struct CoreModelTests {
             ChatSummary(Chat(
                 id: "x", isGroup: group, name: name, phone: phone, lastActivitySecs: 0,
                 lastKind: kind, lastBody: body, lastFromMe: false, unread: 3, contactName: saved, timerSecs: 86400,
-                muted: false, pinned: true, archived: group
+                muted: false, pinned: true, archived: group, activity: nil
             ))
         }
         // An archived chat is as quiet as a muted one: no count, no alert.
