@@ -46,7 +46,7 @@ struct MenuBarPanel: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            StatusOrb(connected: model.state == .connected, symbol: model.statusSymbol)
+            StatusOrb(connected: model.state == .connected)
             VStack(alignment: .leading, spacing: 1) {
                 Text("NIMQO").font(.headline)
                 Text(model.statusText).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -141,31 +141,36 @@ struct MenuBarPanel: View {
     }
 }
 
-/// Green and breathing while connected; otherwise the state's symbol.
+/// The NIMQO logo with a status dot: green and breathing while connected,
+/// orange otherwise.
 private struct StatusOrb: View {
     let connected: Bool
-    let symbol: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        ZStack {
-            Circle()
-                .fill(connected ? Color.green.gradient : Color.orange.gradient)
-                .frame(width: 34, height: 34)
-                .shadow(color: (connected ? Color.green : .orange).opacity(0.5), radius: 8)
-            if connected {
-                Circle()
-                    .stroke(.green.opacity(0.5), lineWidth: 2)
-                    .frame(width: 34, height: 34)
-                    .phaseAnimator([false, true]) { ring, spread in
-                        ring.scaleEffect(spread && !reduceMotion ? 1.45 : 1).opacity(spread && !reduceMotion ? 0 : 0.8)
-                    } animation: { _ in .easeOut(duration: 1.8) }
+        Image("Logo")
+            .resizable()
+            .interpolation(.high)
+            .frame(width: 38, height: 38)
+            .shadow(color: Brand.green.opacity(0.4), radius: 8, y: 2)
+            .overlay(alignment: .bottomTrailing) {
+                ZStack {
+                    if connected {
+                        Circle()
+                            .fill(.green.opacity(0.6))
+                            .phaseAnimator([false, true]) { ring, spread in
+                                ring.scaleEffect(spread && !reduceMotion ? 2.2 : 1)
+                                    .opacity(spread && !reduceMotion ? 0 : 0.8)
+                            } animation: { _ in .easeOut(duration: 1.8) }
+                    }
+                    Circle()
+                        .fill(connected ? Color.green : .orange)
+                        .overlay(Circle().strokeBorder(.background, lineWidth: 2))
+                }
+                .frame(width: 12, height: 12)
+                .offset(x: 1, y: 1)
             }
-            Image(systemName: connected ? "bolt.horizontal.fill" : symbol)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(.white)
-        }
-        .accessibilityHidden(true)
+            .accessibilityHidden(true)
     }
 }
 

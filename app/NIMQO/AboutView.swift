@@ -53,7 +53,7 @@ struct AboutView: View {
 }
 
 /// The logo's own colors.
-private enum Brand {
+enum Brand {
     static let mint = Color(red: 0.62, green: 1.0, blue: 0.72)
     static let green = Color(red: 0.24, green: 0.86, blue: 0.42)
     static let teal = Color(red: 0.05, green: 0.55, blue: 0.55)
