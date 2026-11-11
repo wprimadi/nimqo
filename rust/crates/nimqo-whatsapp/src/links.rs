@@ -108,16 +108,20 @@ impl Inbox {
         struct Row {
             #[diesel(sql_type = Binary)]
             media: Vec<u8>,
+            #[diesel(sql_type = Text)]
+            body: String,
         }
         let mut conn = self.lock()?;
         let row: Option<Row> = diesel::sql_query(
-            "SELECT media FROM messages WHERE rowid = ? AND chat = ? AND kind = 'text' AND media IS NOT NULL",
+            "SELECT media, coalesce(body, '') AS body FROM messages
+             WHERE rowid = ? AND chat = ? AND kind = 'text' AND media IS NOT NULL",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)
         .get_result(&mut *conn)
         .optional()?;
-        Ok(row.and_then(|r| Link::decode(&r.media)))
+        // Checked again against the text as it is now.
+        Ok(row.and_then(|r| Link::decode(&r.media)?.checked(&r.body)))
     }
 
     /// Keeps the preview of a text being sent from here (pending, own).

@@ -130,12 +130,14 @@ impl Effect {
                 body,
             } => diesel::sql_query(
                 // A text's old link preview may not fit the new text.
+                // By the new kind: the right side reads the old row.
                 "UPDATE messages SET kind = ?, body = ?, edited = 1,
-                   media = CASE WHEN kind = 'text' THEN NULL ELSE media END
+                   media = CASE WHEN ? = 'text' THEN NULL ELSE media END
                  WHERE chat = ? AND sender = ? AND id = ? AND kind <> 'deleted'",
             )
             .bind::<Text, _>(*kind)
             .bind::<diesel::sql_types::Nullable<Text>, _>(body)
+            .bind::<Text, _>(*kind)
             .bind::<Text, _>(chat)
             .bind::<Text, _>(sender)
             .bind::<Text, _>(target)
@@ -306,6 +308,31 @@ mod tests {
             (row().my_reaction, row().reactions.as_deref()),
             (None, Some("😂"))
         );
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn an_edit_into_text_drops_what_the_old_message_kept() {
+        let path = std::env::temp_dir().join(format!("nimqo-edit-kind-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([5; 32]), Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        inbox.insert_kind_for_test(chat, "m1", "image", vec![1, 2, 3]);
+        inbox.apply_for_test(&[Effect::Edit {
+            chat: chat.into(),
+            sender: chat.into(),
+            target: "m1".into(),
+            kind: "text",
+            body: Some("see https://example.com".into()),
+        }]);
+        let row = inbox.messages(chat, 10).unwrap().remove(0);
+        // The image's media is no link preview for the new text.
+        assert_eq!(
+            (row.kind.as_str(), row.has_link, row.has_media),
+            ("text", false, false)
+        );
+        assert_eq!(inbox.link(chat, row.seq).unwrap(), None);
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }
