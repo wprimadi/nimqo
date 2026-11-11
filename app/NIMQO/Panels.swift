@@ -46,11 +46,13 @@ struct PanelSheet: View {
             case .profile:
                 VStack(spacing: 0) {
                     ProfileEditor(core: core, avatars: avatars)
+                    Divider().opacity(0.5)
                     HStack {
                         Spacer()
                         Button("Done") { dismiss() }
                     }
-                    .padding([.horizontal, .bottom], Theme.Spacing.large)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 }
                 .windowLook()
             case .about:

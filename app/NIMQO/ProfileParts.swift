@@ -172,3 +172,38 @@ private struct ScreenFit: ViewModifier {
         .frame(height: min(height ?? cap, cap))
     }
 }
+
+/// The picture's ring: a gradient turning slowly, a soft glow of it
+/// behind, brighter while a picture is dragged over; a spinner while it is
+/// saved. Still under Reduce Motion.
+struct ProfileRing: View {
+    let busy: Bool
+    let glowing: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private let colors: [Color] = [.accentColor, .pink, .orange, .yellow, .accentColor]
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let angle = Angle.degrees(reduceMotion ? 0 : time * 24)
+            ZStack {
+                Circle()
+                    .fill(AngularGradient(colors: colors, center: .center, angle: angle))
+                    .blur(radius: glowing ? 22 : 14)
+                    .opacity(glowing ? 0.95 : 0.6)
+                Circle()
+                    .fill(AngularGradient(colors: colors, center: .center, angle: angle))
+                if busy {
+                    Circle()
+                        .trim(from: 0, to: 0.25)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(reduceMotion ? 0 : time * 360))
+                        .padding(-5)
+                }
+            }
+        }
+        .animation(.spring(duration: 0.3), value: glowing)
+        .accessibilityHidden(true)
+    }
+}

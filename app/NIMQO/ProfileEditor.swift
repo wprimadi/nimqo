@@ -20,6 +20,7 @@ struct ProfileEditor: View {
     @State private var choosing = false
     @State private var dropping = false
     @State private var shown = false
+    @State private var hoveringPhoto = false
     @FocusState private var focus: Field?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -27,37 +28,35 @@ struct ProfileEditor: View {
         case photo, name, about
     }
 
-    private static let presets = [
-        "Available", "Busy", "At work", "In a meeting", "At the gym",
-        "Sleeping", "Urgent calls only", "Battery about to die",
-    ]
+    /// "+62…" from the account's own chat id.
+    private var phone: String? {
+        guard let id = profile?.id, id.hasSuffix("@s.whatsapp.net") else { return nil }
+        return "+" + id.prefix { $0 != "@" && $0 != ":" }
+    }
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 0) {
             hero
-            if let problem {
-                Label(problem, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.opacity)
-            }
-            if profile != nil {
-                VStack(spacing: 12) {
+            VStack(spacing: 16) {
+                if let problem {
+                    ProblemBanner(text: problem)
+                }
+                if profile != nil {
                     nameField
                     aboutField
+                } else if failed {
+                    ContentUnavailableView("Profile unavailable", systemImage: "wifi.slash",
+                                           description: Text("It appears once NIMQO is connected to WhatsApp."))
+                } else {
+                    ProgressView().padding()
                 }
-                .disabled(core == nil)
-                .opacity(shown || reduceMotion ? 1 : 0)
-                .offset(y: shown || reduceMotion ? 0 : 12)
-            } else if failed {
-                ContentUnavailableView("Profile unavailable", systemImage: "wifi.slash",
-                                       description: Text("It appears once NIMQO is connected to WhatsApp."))
-            } else {
-                ProgressView().padding()
             }
+            .disabled(core == nil)
+            .padding(20)
+            .opacity(shown || reduceMotion ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : 14)
         }
-        .padding(22)
-        .frame(width: 420)
+        .frame(width: 460)
         .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.2), value: problem)
         .task { await load() }
         .fileImporter(isPresented: $choosing, allowedContentTypes: [.image]) { result in
@@ -75,44 +74,53 @@ struct ProfileEditor: View {
 
     // MARK: Picture
 
+    /// Edge to edge: the picture in a turning ring over a wash of its own
+    /// colours, and the name and About as people will see them, live as
+    /// they are typed.
     private var hero: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             ZStack {
-                Circle()
-                    .fill(AngularGradient(colors: [.accentColor, .pink, .orange, .accentColor], center: .center))
+                ProfileRing(busy: busy == .photo, glowing: dropping || hoveringPhoto)
                     .frame(width: 140, height: 140)
-                    .rotationEffect(.degrees(busy == .photo && !reduceMotion ? 360 : 0))
-                    .animation(busy == .photo && !reduceMotion
-                        ? .linear(duration: 1.2).repeatForever(autoreverses: false) : .default, value: busy)
-                    .blur(radius: dropping ? 6 : 0)
                 picture
-                    .frame(width: 128, height: 128)
+                    .frame(width: 126, height: 126)
                     .clipShape(.circle)
-                    .overlay(Circle().strokeBorder(.background, lineWidth: 3))
                     .overlay { photoHover }
+                    .onHover { hoveringPhoto = $0 }
+                    .onTapGesture {
+                        if core != nil, profile != nil {
+                            choosing = true
+                        }
+                    }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                CameraMenu(hasPhoto: hasPhoto, choose: { choosing = true }, remove: removePhoto)
+                    .disabled(core == nil || profile == nil || busy == .photo)
+                    .offset(x: -4, y: -4)
             }
             .scaleEffect(dropping && !reduceMotion ? 1.06 : 1)
-            .shadow(color: .accentColor.opacity(0.35), radius: dropping ? 24 : 14, y: 6)
             .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.4), value: dropping)
             .onDrop(of: [.image, .fileURL], isTargeted: $dropping, perform: drop)
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Profile picture")
-            .accessibilityHint("Drop a picture, or use Choose Picture.")
-            HStack(spacing: 8) {
-                Button("Choose Picture…", systemImage: "photo") { choosing = true }
-                if avatars.image(for: profile?.id ?? "") != nil || photo != nil {
-                    Button("Remove", systemImage: "trash", role: .destructive) { removePhoto() }
-                }
-            }
-            .controlSize(.small)
-            .buttonStyle(.borderless)
-            .disabled(core == nil || profile == nil || busy == .photo)
+            .accessibilityHint("Drop a picture, or click to choose one.")
+            ProfileCaption(name: shownName, phone: phone, about: about)
         }
+        .padding(.top, 30)
+        .padding(.bottom, 24)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 18)
-        .background {
-            HeroBackdrop(id: profile?.id ?? "", avatars: avatars)
-                .clipShape(.rect(cornerRadius: 24, style: .continuous))
-        }
+        .background { HeroBackdrop(id: profile?.id ?? "", avatars: avatars) }
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var shownName: String {
+        let typed = name.trimmingCharacters(in: .whitespaces)
+        return typed.isEmpty ? String(localized: "Your name") : typed
+    }
+
+    private var hasPhoto: Bool {
+        avatars.image(for: profile?.id ?? "") != nil || photo != nil
     }
 
     @ViewBuilder
@@ -132,13 +140,19 @@ struct ProfileEditor: View {
 
     private var photoHover: some View {
         ZStack {
-            Circle().fill(.black.opacity(dropping ? 0.45 : 0))
+            Circle().fill(.black.opacity(dropping ? 0.45 : hoveringPhoto && busy != .photo ? 0.35 : 0))
             if dropping {
                 Label("Drop", systemImage: "arrow.down.circle.fill")
                     .labelStyle(.iconOnly)
                     .font(.system(size: 34))
                     .foregroundStyle(.white)
                     .transition(.scale.combined(with: .opacity))
+            } else if hoveringPhoto, busy != .photo, saved != .photo {
+                Label("Change", systemImage: "camera.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .labelStyle(.titleAndIcon)
+                    .transition(.opacity)
             } else if saved == .photo {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 34))
@@ -171,49 +185,31 @@ struct ProfileEditor: View {
         save(.photo) { try await $0.setMyPhoto(jpeg: nil) }
     }
 
-    /// The middle square, 640 px, as WhatsApp keeps profile pictures.
-    static func squareJPEG(_ image: NSImage) -> Data? {
-        guard let source = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        let side = min(source.width, source.height)
-        let crop = CGRect(x: (source.width - side) / 2, y: (source.height - side) / 2, width: side, height: side)
-        guard let square = source.cropping(to: crop),
-              let context = CGContext(data: nil, width: 640, height: 640, bitsPerComponent: 8, bytesPerRow: 0,
-                                      space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
-        else { return nil }
-        context.interpolationQuality = .high
-        context.draw(square, in: CGRect(x: 0, y: 0, width: 640, height: 640))
-        guard let scaled = context.makeImage() else { return nil }
-        return NSBitmapImageRep(cgImage: scaled).representation(using: .jpeg, properties: [.compressionFactor: 0.85])
-    }
-
     // MARK: Name and About
 
     private var nameField: some View {
         ProfileField(title: "Name", symbol: "person.text.rectangle", limit: 25, text: $name,
-                     prompt: "Your name", busy: busy == .name, saved: saved == .name,
+                     prompt: "Your name", footer: "Shown to people you message who haven't saved your number.",
+                     busy: busy == .name, saved: saved == .name,
                      changed: name.trimmingCharacters(in: .whitespaces) != profile?.name) { saveName() }
             .focused($focus, equals: .name)
     }
 
     private var aboutField: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             ProfileField(title: "About", symbol: "quote.opening", limit: 139, text: $about,
-                         prompt: "Say something about yourself", busy: busy == .about, saved: saved == .about,
+                         prompt: "Say something about yourself", footer: nil,
+                         busy: busy == .about, saved: saved == .about,
                          changed: about.trimmingCharacters(in: .whitespaces) != (profile?.about ?? "")) { saveAbout() }
                 .focused($focus, equals: .about)
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(Self.presets, id: \.self) { preset in
-                        PresetChip(text: preset, chosen: about == preset) {
-                            about = preset
-                            saveAbout()
-                        }
+            FlowLayout(spacing: 6) {
+                ForEach(Self.presets, id: \.text) { preset in
+                    PresetChip(text: preset.text, symbol: preset.symbol, chosen: about == preset.text) {
+                        about = preset.text
+                        saveAbout()
                     }
                 }
-                .padding(.vertical, 2)
             }
-            .scrollIndicators(.never)
         }
     }
 
@@ -274,85 +270,5 @@ struct ProfileEditor: View {
             avatars.request(id)
         }
         withAnimation(reduceMotion ? nil : .spring(duration: 0.5, bounce: 0.3)) { shown = true }
-    }
-}
-
-/// A labelled field that saves on Return or when it loses focus, with its
-/// characters left, and a tick when saved.
-private struct ProfileField: View {
-    let title: LocalizedStringKey
-    let symbol: String
-    let limit: Int
-    @Binding var text: String
-    let prompt: LocalizedStringKey
-    let busy: Bool
-    let saved: Bool
-    let changed: Bool
-    let commit: () -> Void
-    @FocusState private var focused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Label(title, systemImage: symbol)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Group {
-                    if busy {
-                        ProgressView().controlSize(.mini)
-                    } else if saved {
-                        Label("Saved", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .transition(.scale.combined(with: .opacity))
-                    } else if focused || changed {
-                        Text("\(limit - text.count)")
-                            .monospacedDigit()
-                            .foregroundStyle(text.count > limit ? .red : .secondary)
-                            .contentTransition(.numericText())
-                    }
-                }
-                .font(.caption)
-            }
-            TextField(prompt, text: $text)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .focused($focused)
-                .onSubmit(commit)
-                .onChange(of: focused) { _, now in
-                    if !now {
-                        commit()
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(.primary.opacity(focused ? 0.08 : 0.05), in: .rect(cornerRadius: 12, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(focused ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 1.5)
-                }
-                .animation(.easeOut(duration: 0.15), value: focused)
-        }
-    }
-}
-
-private struct PresetChip: View {
-    let text: String
-    let chosen: Bool
-    let pick: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: pick) {
-            Text(LocalizedStringKey(text))
-                .font(.caption.weight(.medium))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .foregroundStyle(chosen ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-                .background(chosen ? AnyShapeStyle(Color.accentColor.gradient)
-                    : AnyShapeStyle(.primary.opacity(hovering ? 0.12 : 0.06)), in: .capsule)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
