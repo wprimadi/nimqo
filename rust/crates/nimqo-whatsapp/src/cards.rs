@@ -237,7 +237,14 @@ impl Inbox {
         let Some(row) = row else { return Ok(None) };
         let votes = if row.kind == "poll" {
             diesel::sql_query(
-                "SELECT voter, voter_jid, payload, iv FROM poll_votes WHERE chat = ? AND target = ? LIMIT 1024",
+                // A voter may be stored by number and by LID: the newest
+                // of the two stands, as for one address.
+                "SELECT voter, voter_jid, payload, iv FROM (
+                   SELECT v.*, row_number() OVER (
+                     PARTITION BY coalesce((SELECT pn FROM lid_map WHERE lid = v.voter), v.voter)
+                     ORDER BY v.ts DESC) AS n
+                   FROM poll_votes v WHERE v.chat = ? AND v.target = ?)
+                 WHERE n = 1 LIMIT 1024",
             )
             .bind::<Text, _>(chat)
             .bind::<Text, _>(&row.id)
@@ -463,6 +470,44 @@ mod tests {
                 .as_ref(),
             Some(&secret)
         );
+    }
+
+    #[test]
+    fn a_voter_known_by_number_and_lid_counts_once() {
+        use diesel::connection::SimpleConnection as _;
+        let path = std::env::temp_dir().join(format!("nimqo-votes-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(
+            &path,
+            &crate::vault::Key::new([9; 32]),
+            crate::inbox::Fault::None,
+        )
+        .unwrap();
+        let chat = "120363@g.us";
+        inbox
+            .lock()
+            .unwrap()
+            .batch_execute(&format!(
+                "INSERT INTO messages (chat, sender, id, ts, kind, from_me, media)
+                   VALUES ('{chat}', '{chat}', 'poll1', 1, 'poll', 0, x'');
+                 INSERT INTO lid_map (lid, pn) VALUES ('99@lid', '62811@s.whatsapp.net');
+                 INSERT INTO poll_votes (chat, target, voter, voter_jid, payload, iv, ts) VALUES
+                   ('{chat}', 'poll1', '62811@s.whatsapp.net', 'a', x'01', x'', 5),
+                   ('{chat}', 'poll1', '99@lid', 'b', x'02', x'', 9),
+                   ('{chat}', 'poll1', '62822@s.whatsapp.net', 'c', x'03', x'', 1);"
+            ))
+            .unwrap();
+        let seq: i64 = inbox.messages(chat, 1).unwrap()[0].seq;
+        let mut votes = inbox.card(chat, seq).unwrap().unwrap().votes;
+        votes.sort_by(|a, b| a.voter_jid.cmp(&b.voter_jid));
+        let jids: Vec<&str> = votes.iter().map(|v| v.voter_jid.as_str()).collect();
+        assert_eq!(
+            jids,
+            ["b", "c"],
+            "the newest of the two addresses, and the other voter"
+        );
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
