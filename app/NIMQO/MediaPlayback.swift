@@ -32,7 +32,7 @@ struct AudioMessageView: View {
         HStack(spacing: 10) {
             playButton
             VStack(alignment: .leading, spacing: 3) {
-                TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !playback.isPlaying)) { _ in
                     WaveformBars(bars: WaveformBars.shape([UInt8](info?.waveform ?? Data()), seed: message.seq),
                                  progress: playback.progress, tint: tint,
                                  active: playback.isPlaying || playback.progress > 0, seek: seek)
@@ -41,7 +41,7 @@ struct AudioMessageView: View {
                     if store.didFail(chat: chat, message: message) {
                         RetryDownload(chat: chat, message: message, store: store)
                     } else {
-                        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                        TimelineView(.animation(minimumInterval: 0.25, paused: !playback.isPlaying)) { _ in
                             Text(Duration.seconds(shownTime), format: .time(pattern: .minuteSecond))
                                 .monospacedDigit()
                         }
@@ -98,7 +98,7 @@ struct AudioMessageView: View {
             // How far it has played, around the button.
             .overlay {
                 if playback.isLoaded {
-                    TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !playback.isPlaying)) { _ in
                         Circle()
                             .trim(from: 0, to: playback.progress)
                             .stroke(tint.opacity(0.9), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
@@ -168,17 +168,22 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
     }
 
     @ObservationIgnored private var player: AVAudioPlayer?
+    /// Bumped on a seek or the end: the clocks above stop while paused, so
+    /// a paused view redraws on this instead.
+    private var moved = 0
 
     var isLoaded: Bool {
         player != nil
     }
 
-    /// Read on a timer while shown: not observed.
+    /// Read on a clock while playing; otherwise on `moved`.
     var currentTime: TimeInterval {
-        player?.currentTime ?? 0
+        _ = moved
+        return player?.currentTime ?? 0
     }
 
     var progress: Double {
+        _ = moved
         guard let player, player.duration > 0 else { return 0 }
         return player.currentTime / player.duration
     }
@@ -204,6 +209,7 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
     func seek(to fraction: Double) {
         guard let player else { return }
         player.currentTime = fraction * player.duration
+        moved += 1
     }
 
     func stop() {
@@ -215,6 +221,7 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         Task { @MainActor in
             player?.currentTime = 0
             isPlaying = false
+            moved += 1
         }
     }
 }

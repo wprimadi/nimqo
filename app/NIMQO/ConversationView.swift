@@ -126,6 +126,9 @@ struct ConversationView: View {
                         }
                         MessageBubble(message: message, showsSender: chat.isGroup, chat: chat.id, pictures: pictures,
                                       openQuote: show, actions: actions(for: message))
+                            // Only rows whose message changed are drawn
+                            // again: in a busy group every arrival redrew all.
+                            .equatable()
                             // A shown message pops once, on a band across the
                             // whole row that fades away, like on the phone.
                             .scaleEffect(pulsing == message.seq ? 1.06 : 1,
@@ -297,6 +300,8 @@ struct MessageBubble: View {
     }
 
     var body: some View {
+        // Links and mentions are found once per draw, not once per use.
+        let rich = rich
         HStack {
             if message.fromMe {
                 Spacer(minLength: Theme.Spacing.large)

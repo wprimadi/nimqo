@@ -62,6 +62,7 @@ extension CoreModel {
 /// Receives callbacks on Rust worker threads and hops to the main actor.
 final class Listener: CoreListener, Sendable {
     private weak let model: CoreModel?
+    private let batch = ChangeBatch()
 
     init(model: CoreModel) {
         self.model = model
@@ -80,16 +81,39 @@ final class Listener: CoreListener, Sendable {
     }
 
     func onChatsChanged(chatIds: [String]) {
-        Task { @MainActor [model] in
-            model?.chatsChanged(chatIds)
-            // New posts in channels shown: their latest page again.
-            for channel in chatIds where channel.hasSuffix("@newsletter") {
-                await model?.channels.refresh(channel)
+        Task { @MainActor [model, batch] in
+            batch.add(chatIds) { ids in
+                model?.chatsChanged(ids)
+                // New posts in channels shown: their latest page again.
+                for channel in ids where channel.hasSuffix("@newsletter") {
+                    await model?.channels.refresh(channel)
+                }
             }
         }
     }
 
     func onPairCodeError(throttled: Bool, retryAfterSecs: UInt64?) {
         Task { @MainActor [model] in model?.pairCodeFailed(throttled: throttled, retryAfterSecs: retryAfterSecs) }
+    }
+}
+
+/// Chat changes gathered for a moment: a busy group reports one per message
+/// and receipt, and each reread the chat list and the open chat.
+@MainActor
+final class ChangeBatch {
+    private var pending: Set<String> = []
+
+    nonisolated init() {}
+
+    func add(_ ids: [String], apply: @escaping @MainActor ([String]) async -> Void) {
+        let first = pending.isEmpty
+        pending.formUnion(ids)
+        guard first else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            let ids = Array(pending)
+            pending = []
+            await apply(ids)
+        }
     }
 }

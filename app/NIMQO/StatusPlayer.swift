@@ -40,7 +40,7 @@ struct StatusPlayer: View {
     }
 
     var body: some View {
-        let picture = pictures.image(chat: chat, message: update)
+        let picture = pictures.fullSize(chat: chat, message: update)
         ZStack {
             backdrop(picture?.image)
             GeometryReader { geo in

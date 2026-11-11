@@ -91,7 +91,7 @@ struct LightboxView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let picture = store.image(chat: chat, message: message)
+            let picture = store.fullSize(chat: chat, message: message)
             let size = picture?.image.size ?? CGSize(width: 16, height: 9)
             let bounds = CGRect(origin: .zero, size: geo.size)
             // A video's still and a photo's thumbnail are tiny: only a full

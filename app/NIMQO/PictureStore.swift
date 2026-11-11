@@ -13,6 +13,7 @@ final class PictureStore {
     var core: Core? {
         didSet {
             images = [:]
+            original = nil
             animations = [:]
             requested = []
             failed = []
@@ -29,7 +30,10 @@ final class PictureStore {
     private(set) var generation = 0
     /// Keyed by the message itself (chat, sender, id): storage order can be
     /// reused once a message is gone.
-    @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)] = [:]
+    /// Downscaled for the timeline; nil value: no picture yet.
+    @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)?] = [:]
+    /// The one picture shown full size (lightbox, status), at its own size.
+    @ObservationIgnored private var original: (key: String, picture: (image: NSImage, full: Bool))?
     @ObservationIgnored private var requested: Set<String> = []
     /// Animated stickers, decoded once; nil marks "not one" until the next
     /// change, since the file may not be downloaded yet.
@@ -61,10 +65,41 @@ final class PictureStore {
         if let cached = images[key] {
             return cached
         }
+        let picture = (try? core?.picture(chatId: chat, seq: message.seq)) ?? nil
+        let found = picture.flatMap { picture in
+            Self.downscaled(picture.bytes, maxPixels: 720).map { ($0, picture.full) }
+        }
+        images[key] = .some(found)
+        return found
+    }
+
+    /// The picture at its own size, for a full-window view; one at a time.
+    func fullSize(chat: String, message: ChatMessage) -> (image: NSImage, full: Bool)? {
+        _ = generation
+        let key = Self.key(chat, message)
+        if let original, original.key == key {
+            return original.picture
+        }
         guard let picture = (try? core?.picture(chatId: chat, seq: message.seq)) ?? nil,
-              let image = NSImage(data: picture.bytes) else { return nil }
-        images[key] = (image, picture.full)
+              let image = NSImage(data: picture.bytes) else { return image(chat: chat, message: message) }
+        original = (key, (image, picture.full))
         return (image, picture.full)
+    }
+
+    /// Decoded straight to at most `maxPixels` on its long side: a phone
+    /// photo decoded whole is tens of megabytes, drawn in a 280-point tile.
+    nonisolated static func downscaled(_ data: Data, maxPixels: Int) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return NSImage(data: data)
+        }
+        return NSImage(cgImage: image, size: CGSize(width: image.width, height: image.height))
     }
 
     /// An animated sticker's animation, once its file is downloaded.
@@ -84,7 +119,7 @@ final class PictureStore {
     /// is here.
     func request(chat: String, message: ChatMessage) {
         let key = Self.key(chat, message)
-        guard images[key]?.full != true else { return }
+        guard images[key]??.full != true else { return }
         download(chat: chat, message: message)
     }
 
@@ -115,7 +150,10 @@ final class PictureStore {
 
     /// A chat changed: a full image may have arrived for its thumbnails.
     func invalidate() {
-        images = images.filter(\.value.full)
+        // Only a picture still downloading can have changed; the rest stay
+        // decoded instead of all being read again on every new message.
+        images = images.filter { $0.value?.full == true || ($0.value != nil && !requested.contains($0.key)) }
+        original = nil
         animations = animations.filter { $0.value != nil }
         generation += 1
         finishSaves()

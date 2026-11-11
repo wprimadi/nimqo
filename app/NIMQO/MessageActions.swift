@@ -309,3 +309,15 @@ extension ConversationView {
         emojiRequests += 1
     }
 }
+
+extension MessageBubble: @MainActor Equatable {
+    /// What the row shows. Its closures are bound to the chat and do not
+    /// change while it is open; its pictures update on their own.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.message == rhs.message && lhs.showsSender == rhs.showsSender && lhs.chat == rhs.chat
+            && (lhs.actions == nil) == (rhs.actions == nil)
+            && (lhs.actions?.react == nil) == (rhs.actions?.react == nil)
+            && lhs.actions?.picking == rhs.actions?.picking
+            && lhs.actions?.pickRequest == rhs.actions?.pickRequest
+    }
+}
