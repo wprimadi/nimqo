@@ -11,36 +11,57 @@ extension PictureStore {
     }
 }
 
-/// A voice note or audio file: play and pause in the bubble. Downloaded on
-/// the first tap; WhatsApp's Ogg Opus plays through AVAudioPlayer.
+/// A voice note or audio file: play and pause, the sender's waveform
+/// filling as it plays (click or drag along it to move), and its speed.
+/// Downloaded on the first tap; WhatsApp's Ogg Opus plays through
+/// AVAudioPlayer.
 struct AudioMessageView: View {
     let chat: String
     let message: ChatMessage
     let store: PictureStore
     @State private var playback = AudioPlayback()
     @State private var waiting = false
+    @State private var info: AudioInfo?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var tint: Color {
+        info?.voice == false ? .orange : .accentColor
+    }
 
     var body: some View {
-        HStack(spacing: Theme.Spacing.small) {
-            let playing = playback.isPlaying
-            Button(playing ? "Pause" : "Play", systemImage: playing ? "pause.fill" : "play.fill", action: toggle)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .font(.title2)
-            if store.didFail(chat: chat, message: message) {
-                RetryDownload(chat: chat, message: message, store: store)
-            } else if waiting {
-                ProgressView().controlSize(.small)
-            } else if let duration = playback.duration {
-                Text(Duration.seconds(duration), format: .time(pattern: .minuteSecond))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Audio").foregroundStyle(.secondary)
+        HStack(spacing: 10) {
+            playButton
+            VStack(alignment: .leading, spacing: 3) {
+                TimelineView(.periodic(from: .now, by: 1.0 / 30)) { _ in
+                    WaveformBars(bars: WaveformBars.shape([UInt8](info?.waveform ?? Data()), seed: message.seq),
+                                 progress: playback.progress, tint: tint, seek: seek)
+                }
+                HStack(spacing: 6) {
+                    if store.didFail(chat: chat, message: message) {
+                        RetryDownload(chat: chat, message: message, store: store)
+                    } else {
+                        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                            Text(Duration.seconds(shownTime), format: .time(pattern: .minuteSecond))
+                                .monospacedDigit()
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    if playback.isPlaying || playback.rate != 1 {
+                        speedButton.transition(.scale.combined(with: .opacity))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
+            .frame(width: 190)
         }
+        .padding(.vertical, 2)
+        .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.3), value: playback.isPlaying)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Audio message")
+        .accessibilityLabel(info?.voice == false ? "Audio" : "Voice message")
+        .accessibilityValue(Duration.seconds(shownTime).formatted(.time(pattern: .minuteSecond)))
+        .accessibilityAction(named: playback.isPlaying ? "Pause" : "Play", toggle)
+        .task(id: message.seq) { info = try? store.core?.audioInfo(chatId: chat, seq: message.seq) }
         // A finished download arrives as a chat change.
         .onChange(of: store.generation) {
             if waiting {
@@ -48,6 +69,63 @@ struct AudioMessageView: View {
             }
         }
         .onDisappear { playback.stop() }
+    }
+
+    /// The time left while it plays, else the whole length.
+    private var shownTime: TimeInterval {
+        let length = playback.duration ?? TimeInterval(info?.seconds ?? 0)
+        return playback.isPlaying || playback.progress > 0 ? max(0, length - playback.currentTime) : length
+    }
+
+    private var playButton: some View {
+        Button(action: toggle) {
+            ZStack {
+                Circle().fill(tint.gradient)
+                if waiting {
+                    ProgressView().controlSize(.small).tint(.white)
+                } else {
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(.white)
+                        .offset(x: playback.isPlaying ? 0 : 1.5)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+            }
+            .frame(width: 38, height: 38)
+            .overlay(alignment: .bottomTrailing) {
+                if info?.voice == true, !message.fromMe {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(tint)
+                        .padding(3)
+                        .background(.background, in: .circle)
+                        .offset(x: 3, y: 3)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(playback.isPlaying ? "Pause" : "Play")
+    }
+
+    private var speedButton: some View {
+        Button {
+            playback.rate = playback.rate >= 2 ? 1 : playback.rate + 0.5
+        } label: {
+            Text(playback.rate == 1.5 ? "1.5×" : "\(Int(playback.rate))×")
+                .font(.caption2.weight(.bold))
+                .monospacedDigit()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(.primary.opacity(0.1), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .help("Playback speed")
+    }
+
+    private func seek(_ fraction: Double) {
+        if playback.isLoaded {
+            playback.seek(to: fraction)
+        }
     }
 
     private func toggle() {
@@ -69,15 +147,32 @@ struct AudioMessageView: View {
 final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
     private(set) var isPlaying = false
     private(set) var duration: TimeInterval?
+    /// 1, 1.5 or 2.
+    var rate: Float = 1 {
+        didSet { player?.rate = rate }
+    }
+
     @ObservationIgnored private var player: AVAudioPlayer?
 
     var isLoaded: Bool {
         player != nil
     }
 
+    /// Read on a timer while shown: not observed.
+    var currentTime: TimeInterval {
+        player?.currentTime ?? 0
+    }
+
+    var progress: Double {
+        guard let player, player.duration > 0 else { return 0 }
+        return player.currentTime / player.duration
+    }
+
     func load(_ data: Data) {
         player = try? AVAudioPlayer(data: data)
         player?.delegate = self
+        player?.enableRate = true
+        player?.rate = rate
         duration = player?.duration
     }
 
@@ -91,13 +186,21 @@ final class AudioPlayback: NSObject, AVAudioPlayerDelegate {
         isPlaying = player.isPlaying
     }
 
+    func seek(to fraction: Double) {
+        guard let player else { return }
+        player.currentTime = fraction * player.duration
+    }
+
     func stop() {
         player?.stop()
         isPlaying = false
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_: AVAudioPlayer, successfully _: Bool) {
-        Task { @MainActor in isPlaying = false }
+        Task { @MainActor in
+            player?.currentTime = 0
+            isPlaying = false
+        }
     }
 }
 

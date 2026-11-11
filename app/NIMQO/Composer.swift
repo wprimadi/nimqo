@@ -14,6 +14,9 @@ struct Composer: View {
     var edit: @MainActor (Int64, String) async -> String? = { _, _ in nil }
     /// Up Arrow in an empty field edits this one, as in WhatsApp.
     var lastEditable: ChatMessage?
+    /// Sends a recorded voice note; nil where none can be sent.
+    var sendVoice: (@MainActor (Data) async -> String?)?
+    @State private var recorder = VoiceRecorder()
     @State private var text = ""
     /// What was typed before editing began, put back when it ends.
     @State private var stash = ""
@@ -70,50 +73,18 @@ struct Composer: View {
                 // Rises out of the field it belongs to, and sinks back.
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
             }
-            HStack(alignment: .bottom, spacing: Theme.Spacing.small) {
-                Button("Attach a photo or file", systemImage: "plus") { picking = true }
-                    .labelStyle(.iconOnly)
-                    .buttonBorderShape(.circle)
-                    .glassButton()
-                    .controlSize(.extraLarge)
-                    .disabled(isSending)
-                TextField("Message, or a caption for a file", text: $text, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1 ... 6)
-                    .focused($focused)
-                    .onSubmit(submit)
-                    // Shift-Return starts a new line where the cursor is, as
-                    // Option-Return already does; Return alone sends.
-                    .onKeyPress(.return, phases: .down) { press in
-                        guard press.modifiers.contains(.shift) else { return .ignored }
-                        NSApp.sendAction(#selector(NSText.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
-                        return .handled
-                    }
-                    .onKeyPress(.upArrow) {
-                        guard text.isEmpty, editing == nil, let lastEditable else { return .ignored }
-                        replyingTo = nil
-                        editing = lastEditable
-                        return .handled
-                    }
-                    .padding(.leading, 14)
-                    .padding(.vertical, 8)
-                    .padding(.trailing, 34)
-                    .overlay(alignment: .bottomTrailing) { emojiButton }
-                    .glassSurface(in: .rect(cornerRadius: 18))
-                Button(editing == nil ? "Send" : "Save Edit", systemImage: editing == nil ? "arrow.up" : "checkmark",
-                       action: submit)
-                    .contentTransition(.symbolEffect(.replace))
-                    .labelStyle(.iconOnly)
-                    .fontWeight(.semibold)
-                    .buttonBorderShape(.circle)
-                    .glassButton(prominent: true)
-                    .controlSize(.extraLarge)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+            if recorder.state == .recording {
+                RecordingBar(recorder: recorder, cancel: recorder.cancel, send: sendRecording)
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .scale(scale: 0.6, anchor: .trailing).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+            } else {
+                field.transition(.opacity)
             }
-            .glassGroup(spacing: Theme.Spacing.small)
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0), value: [replyingTo?.seq, editing?.seq])
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.2), value: recorder.state)
         .onAppear { focused = true }
         .onChange(of: replyingTo?.seq) {
             if replyingTo != nil {
@@ -133,6 +104,19 @@ struct Composer: View {
             }
             focused = true
         }
+        .onChange(of: recorder.state) {
+            switch recorder.state {
+            case .denied:
+                refusal = String(localized: """
+                NIMQO may not use the microphone. Allow it in System Settings › Privacy & Security › Microphone.
+                """)
+            case .failed:
+                refusal = String(localized: "The microphone could not be started.")
+            case .idle, .recording:
+                break
+            }
+        }
+        .onDisappear { recorder.cancel() }
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item]) { result in
             guard case let .success(url) = result else { return }
             sendFiles([url])
@@ -144,6 +128,56 @@ struct Composer: View {
             sendFiles(urls)
         }
         .focusedSceneValue(\.attachFile, $picking)
+    }
+
+    /// Nothing typed and nothing edited: the round button records instead.
+    private var recordsVoice: Bool {
+        sendVoice != nil && editing == nil && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var field: some View {
+        HStack(alignment: .bottom, spacing: Theme.Spacing.small) {
+            Button("Attach a photo or file", systemImage: "plus") { picking = true }
+                .labelStyle(.iconOnly)
+                .buttonBorderShape(.circle)
+                .glassButton()
+                .controlSize(.extraLarge)
+                .disabled(isSending)
+            TextField("Message, or a caption for a file", text: $text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1 ... 6)
+                .focused($focused)
+                .onSubmit(submit)
+                // Shift-Return starts a new line where the cursor is, as
+                // Option-Return already does; Return alone sends.
+                .onKeyPress(.return, phases: .down) { press in
+                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    NSApp.sendAction(#selector(NSText.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    guard text.isEmpty, editing == nil, let lastEditable else { return .ignored }
+                    replyingTo = nil
+                    editing = lastEditable
+                    return .handled
+                }
+                .padding(.leading, 14)
+                .padding(.vertical, 8)
+                .padding(.trailing, 34)
+                .overlay(alignment: .bottomTrailing) { emojiButton }
+                .glassSurface(in: .rect(cornerRadius: 18))
+            Button(sendTitle, systemImage: sendSymbol, action: primary)
+                .contentTransition(.symbolEffect(.replace))
+                .labelStyle(.iconOnly)
+                .fontWeight(.semibold)
+                .buttonBorderShape(.circle)
+                .glassButton(prominent: true)
+                .controlSize(.extraLarge)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help(recordsVoice ? String(localized: "Record a voice message") : "")
+                .disabled(isSending || (!recordsVoice && text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+        }
+        .glassGroup(spacing: Theme.Spacing.small)
     }
 
     /// One after another, stopping at the first refusal (the queue limit,
@@ -219,6 +253,37 @@ struct Composer: View {
 }
 
 extension Composer {
+    private var sendTitle: LocalizedStringKey {
+        editing != nil ? "Save Edit" : recordsVoice ? "Record Voice Message" : "Send"
+    }
+
+    private var sendSymbol: String {
+        editing != nil ? "checkmark" : recordsVoice ? "mic.fill" : "arrow.up"
+    }
+
+    private func primary() {
+        if recordsVoice {
+            record()
+        } else {
+            submit()
+        }
+    }
+
+    private func record() {
+        refusal = nil
+        Task { await recorder.start() }
+    }
+
+    private func sendRecording() {
+        guard let pcm = recorder.finish(), let sendVoice else { return }
+        isSending = true
+        Task {
+            refusal = await sendVoice(pcm)
+            isSending = false
+            focused = true
+        }
+    }
+
     /// Unchanged text just ends editing; nothing is sent.
     private func saveEdit(_ message: ChatMessage) {
         let draft = text

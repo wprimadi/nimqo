@@ -13,6 +13,8 @@ struct MessageCommands {
     /// The account is an admin of this group, so it may delete members'
     /// messages too. Read inside the menu only: see `AdminDelete`.
     let isAdmin: @MainActor () -> Bool
+    /// Sends a recorded voice note to this chat; returns why it was refused.
+    var sendVoice: (@MainActor (Data) async -> String?)?
 }
 
 /// "Delete for Everyone…" on a member's message, for group admins. Its own

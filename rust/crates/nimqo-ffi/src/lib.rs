@@ -445,6 +445,22 @@ impl Core {
         Ok(())
     }
 
+    /// What an audio message's bubble shows before it is downloaded.
+    ///
+    /// # Errors
+    /// `Storage` if it cannot be read.
+    pub fn audio_info(&self, chat_id: &str, seq: i64) -> Result<Option<AudioInfo>, CoreError> {
+        Ok(self
+            .attachments
+            .audio(chat_id, seq)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .map(|(seconds, voice, waveform)| AudioInfo {
+                seconds,
+                voice,
+                waveform,
+            }))
+    }
+
     /// Message `seq`'s downloaded video, audio, or document, in memory; nil
     /// until `download_media` has stored it.
     ///
@@ -959,6 +975,28 @@ impl Core {
         Ok(())
     }
 
+    /// Sends a voice note recorded as 16 kHz mono 16-bit PCM, little-endian.
+    ///
+    /// # Errors
+    /// `SendRefused` for a chat that is not a person or group, or an empty
+    /// or too long recording; `Storage` if it cannot be queued.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "UniFFI passes byte buffers by value"
+    )]
+    pub fn send_voice_note(&self, chat_id: &str, pcm: Vec<u8>) -> Result<(), CoreError> {
+        let samples: Vec<i16> = pcm
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes(*b))
+            .collect();
+        self.sender.enqueue_voice(chat_id, &samples)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
     /// Queues a text message and starts sending it. Returns once it is
     /// stored; delivery state arrives through `on_chats_changed`.
     ///
@@ -1160,6 +1198,16 @@ async fn purge_expired(inbox: Inbox, attachments: Arc<Attachments>) {
             Err(e) => log::warn!("expiry task failed: {e}"),
         }
     }
+}
+
+/// An audio message as its bubble draws it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AudioInfo {
+    pub seconds: u32,
+    /// Recorded as a voice note rather than sent as a file.
+    pub voice: bool,
+    /// Up to 64 bars, 0 to 100; empty when the sender drew none.
+    pub waveform: Vec<u8>,
 }
 
 #[derive(uniffi::Record)]

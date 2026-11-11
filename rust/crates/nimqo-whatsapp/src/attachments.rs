@@ -149,6 +149,26 @@ impl Attachments {
         }
     }
 
+    /// An audio message's length, whether it is a voice note, and the
+    /// waveform its sender drew (64 bars, 0 to 100), from the message itself.
+    ///
+    /// # Errors
+    /// The store cannot be read, or the message does not decode.
+    pub fn audio(&self, chat: &str, seq: i64) -> Result<Option<(u32, bool, Vec<u8>)>> {
+        let Some(stored) = self.stored(chat, seq)? else {
+            return Ok(None);
+        };
+        if stored.kind != "audio" {
+            return Ok(None);
+        }
+        let a = wa::message::AudioMessage::decode_from_slice(&stored.media)?;
+        Ok(Some((
+            a.seconds.unwrap_or(0),
+            a.ptt.unwrap_or(false),
+            a.waveform.unwrap_or_default(),
+        )))
+    }
+
     /// The picture of message `seq` in `chat`, if it has one: a photo, or
     /// the still of a video (complete as it is, so `full`).
     ///

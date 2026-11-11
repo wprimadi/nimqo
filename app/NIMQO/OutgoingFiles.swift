@@ -150,6 +150,19 @@ extension CoreModel {
         }
     }
 
+    /// Sends a recorded voice note (16 kHz mono PCM) to `chat`; the core
+    /// encodes it. Returns why it was refused.
+    func sendVoice(_ pcm: Data, to chat: String) async -> String? {
+        guard let core else { return "Not connected." }
+        let result = await Task.detached {
+            Result { try core.sendVoiceNote(chatId: chat, pcm: pcm) }
+        }.value
+        if case let .failure(error) = result {
+            return Self.message(for: error)
+        }
+        return nil
+    }
+
     /// Sends a picked file to `chat`, with `caption` if given. Returns why
     /// it was refused.
     func sendFile(_ url: URL, caption: String?, to chat: String) async -> String? {

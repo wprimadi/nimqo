@@ -137,12 +137,37 @@ impl Sender {
                 ("document", Some(file.file_name.as_str()), d.encode_to_vec())
             }
         };
+        self.queue_file(chat_id, kind, body, &draft, &file.bytes)
+    }
+
+    /// Makes 16 kHz mono PCM into a voice note and queues it.
+    pub fn enqueue_voice(&self, chat_id: &str, pcm: &[i16]) -> Result<(), CoreError> {
+        Self::may_send(chat_id)?;
+        let note = super::voice::encode(pcm).ok_or_else(|| CoreError::SendRefused {
+            reason: "The recording is empty or longer than 30 minutes.".to_owned(),
+        })?;
+        let mut d = wa::message::AudioMessage::default();
+        d.mimetype = Some("audio/ogg; codecs=opus".to_owned());
+        d.seconds = Some(note.seconds);
+        d.ptt = Some(true);
+        d.waveform = Some(note.waveform);
+        self.queue_file(chat_id, "audio", None, &d.encode_to_vec(), &note.ogg)
+    }
+
+    fn queue_file(
+        &self,
+        chat_id: &str,
+        kind: &str,
+        body: Option<&str>,
+        draft: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), CoreError> {
         let id = self.client.generate_message_id();
         self.attachments
-            .store_outgoing(chat_id, id.as_str(), &file.bytes)
+            .store_outgoing(chat_id, id.as_str(), bytes)
             .map_err(storage)?;
         self.inbox
-            .enqueue_file(chat_id, id.as_str(), crate::unix_now(), kind, body, &draft)
+            .enqueue_file(chat_id, id.as_str(), crate::unix_now(), kind, body, draft)
             .map_err(storage)?;
         self.listener.on_chats_changed(vec![chat_id.to_owned()]);
         Ok(())
@@ -197,9 +222,12 @@ impl Sender {
                     .map_err(|e| e.to_string())?;
                 let mut options = AudioOptions::default()
                     .with_mimetype(d.mimetype.unwrap_or_default())
-                    .with_ptt(false);
+                    .with_ptt(d.ptt.unwrap_or(false));
                 if let Some(s) = d.seconds {
                     options = options.with_duration_seconds(s);
+                }
+                if let Some(w) = d.waveform {
+                    options = options.with_waveform(w);
                 }
                 audio_message(upload(MediaType::Audio).await?, options)
             }

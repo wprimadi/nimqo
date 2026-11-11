@@ -31,6 +31,7 @@ pub use actions::{EDIT_WINDOW_SECS, REVOKE_WINDOW_SECS};
 mod files;
 mod groups;
 mod status;
+mod voice;
 pub use files::OutgoingFile;
 pub use groups::{GroupSetting, MemberChange};
 pub use status::StatusFont;
