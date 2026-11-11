@@ -350,13 +350,16 @@ private struct PersonRow: View {
                 }
             }
             HStack(spacing: 6) {
+                // The chat is the vCard's WhatsApp number, which its name and
+                // shown number need not match: it opens under that number.
                 if let chat = person.chats.first, let openChat {
-                    Button("Message", systemImage: "message.fill") {
-                        openChat(ChatSummary(id: chat, title: person.name, isGroup: false,
-                                             phone: person.phones.first, preview: "", lastActivity: .now,
-                                             unread: 0, timer: nil, muted: false))
+                    let number = "+" + chat.prefix { $0 != "@" }
+                    Button("Message \(number)", systemImage: "message.fill") {
+                        openChat(ChatSummary(id: chat, title: number, isGroup: false, phone: number, preview: "",
+                                             lastActivity: .now, unread: 0, timer: nil, muted: false))
                     }
                     .buttonStyle(.borderedProminent)
+                    .help("Opens the chat with \(number), the WhatsApp number in this card")
                 }
                 if let phone = person.phones.first {
                     Button("Copy Number", systemImage: "doc.on.doc") {
