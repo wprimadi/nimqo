@@ -16,6 +16,8 @@ struct GifMessageView: View {
     @State private var loop: GifLoop?
     @State private var shown = false
     @State private var hovering = false
+    /// As the core's `GIF_AUTOPLAY_BYTES`.
+    static let maxBytes = 8 * 1024 * 1024
 
     var body: some View {
         Group {
@@ -65,6 +67,8 @@ struct GifMessageView: View {
             store.download(chat: chat, message: message)
             return
         }
+        // The core marks only small GIFs; a file larger than it said stays still.
+        guard data.count <= Self.maxBytes else { return }
         let made = GifLoop(data)
         withAnimation(.easeOut(duration: 0.2)) { loop = made }
         made.player.play()

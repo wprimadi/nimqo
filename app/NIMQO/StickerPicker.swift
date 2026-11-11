@@ -247,7 +247,7 @@ private struct StickerCell: View {
             if data == nil, await core.downloadMedia(chatId: chat, seq: seq) {
                 data = await read()
             }
-            guard let data, loop == nil else { return }
+            guard let data, data.count <= GifMessageView.maxBytes, loop == nil else { return }
             let made = GifLoop(data)
             loop = made
             if hovering {

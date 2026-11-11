@@ -82,7 +82,12 @@ pub fn recent_gifs(inbox: &Inbox, limit: usize) -> Result<Vec<(String, i64)>> {
     })
 }
 
-/// Of videos `seqs` in `chat`, those that play as GIFs.
+/// A GIF plays (and so downloads) by itself only up to this size; a larger
+/// one waits to be clicked, like any video.
+pub const GIF_AUTOPLAY_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Of videos `seqs` in `chat`, those that play as GIFs: marked so, and
+/// small enough to fetch unasked (`GIF_AUTOPLAY_BYTES`).
 ///
 /// # Errors
 /// The store cannot be read.
@@ -109,8 +114,10 @@ pub fn gifs(inbox: &Inbox, chat: &str, seqs: &[i64]) -> Result<std::collections:
     Ok(videos
         .into_iter()
         .filter(|v| {
-            wa::message::VideoMessage::decode_from_slice(&v.media)
-                .is_ok_and(|v| v.gif_playback == Some(true))
+            wa::message::VideoMessage::decode_from_slice(&v.media).is_ok_and(|v| {
+                v.gif_playback == Some(true)
+                    && v.file_length.is_some_and(|n| n <= GIF_AUTOPLAY_BYTES)
+            })
         })
         .map(|v| v.seq)
         .collect())
@@ -314,6 +321,11 @@ mod tests {
         let video = |id: &str, gif: bool| {
             let mut v = wa::message::VideoMessage::default();
             v.gif_playback = gif.then_some(true);
+            v.file_length = Some(if id == "big" {
+                GIF_AUTOPLAY_BYTES + 1
+            } else {
+                1000
+            });
             Row {
                 chat: "c@s.whatsapp.net".into(),
                 sender: "c@s.whatsapp.net".into(),
@@ -332,7 +344,10 @@ mod tests {
             }
         };
         inbox
-            .commit(vec![video("g", true), video("v", false)], &[])
+            .commit(
+                vec![video("g", true), video("v", false), video("big", true)],
+                &[],
+            )
             .unwrap();
         let rows = inbox.messages("c@s.whatsapp.net", 10).unwrap();
         let seq = |id: &str| rows.iter().find(|r| r.id == id).unwrap().seq;
