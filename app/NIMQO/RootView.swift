@@ -323,7 +323,15 @@ struct ChatRow: View {
                     .foregroundStyle(chat.unread > 0 && !chat.quiet ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
             HStack {
-                Text(chat.preview).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Group {
+                    if let activity = chat.activity {
+                        TypingLabel(text: activity, recording: chat.recording)
+                    } else {
+                        Text(chat.preview).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .font(.subheadline)
+                .animation(.snappy, value: chat.activity)
                 if chat.unread > 0 {
                     Spacer()
                     Text(chat.unread > 99 ? "99+" : "\(chat.unread)")

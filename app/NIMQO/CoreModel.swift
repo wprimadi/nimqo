@@ -197,6 +197,7 @@ final class CoreModel {
                 case let .success(chats):
                     self.chats = chats.map(ChatSummary.init)
                     self.notifier.update(self.chats, viewing: self.selectedChat)
+                    self.expireActivity()
                 case let .failure(error): self.log.error("chats: \(String(describing: error), privacy: .private)")
                 }
             }

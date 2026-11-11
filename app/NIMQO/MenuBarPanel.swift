@@ -220,8 +220,15 @@ private struct PanelChatRow: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     HStack {
-                        Text(chat.preview.isEmpty ? " " : chat.preview)
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Group {
+                            if let activity = chat.activity {
+                                TypingLabel(text: activity, recording: chat.recording)
+                            } else {
+                                Text(chat.preview.isEmpty ? " " : chat.preview)
+                                    .foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                        .font(.caption)
                         Spacer(minLength: 4)
                         if chat.unread > 0 {
                             Text("\(chat.unread)")

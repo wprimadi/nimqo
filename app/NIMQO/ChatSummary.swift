@@ -21,6 +21,9 @@ struct ChatSummary: Identifiable, Hashable {
     var pinned = false
     /// Out of the chat list, under Archived; quiet like a muted chat.
     var archived = false
+    /// "typing…" or "Ana is recording audio…" now; nil when quiet.
+    var activity: String?
+    var recording = false
 
     /// No notification and no count on the Dock.
     var quiet: Bool {
@@ -58,6 +61,8 @@ extension ChatSummary {
         muted = chat.muted
         pinned = chat.pinned
         archived = chat.archived
+        activity = Self.activityText(chat.activity)
+        recording = chat.activity?.recording ?? false
     }
 }
 

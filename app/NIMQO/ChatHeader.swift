@@ -242,7 +242,7 @@ extension View {
 func presenceText(_ status: ContactStatus?) -> Text? {
     guard let status else { return nil }
     if status.typing {
-        return Text("typing…").foregroundStyle(.tint)
+        return Text(status.recording ? "recording audio…" : "typing…").foregroundStyle(.tint)
     }
     if status.online {
         return Text("online").foregroundStyle(.green)
@@ -271,6 +271,10 @@ private struct HeaderLabel: View {
     }
 
     private var subtitle: Text? {
+        // A group's typing names who; a person's comes with their presence.
+        if chat.isGroup, let activity = chat.activity {
+            return Text(activity).foregroundStyle(.tint)
+        }
         let parts: [Text] = chat.isGroup
             ? [Text(members.map { "\($0) members" } ?? "Group")]
             : [phone.map { Text($0) }, presenceText(status) ?? status?.about.map { Text($0) }].compactMap(\.self)

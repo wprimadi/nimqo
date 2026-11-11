@@ -91,6 +91,16 @@ pub struct Chat {
     pub pinned: bool,
     /// Kept out of the list, under Archived.
     pub archived: bool,
+    /// Someone is typing or recording in it now.
+    pub activity: Option<Activity>,
+}
+
+/// Typing or recording a voice message, now.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Activity {
+    pub recording: bool,
+    /// Who, in a group; nil in a person's chat.
+    pub who: Option<String>,
 }
 
 impl From<ChatRow> for Chat {
@@ -110,6 +120,7 @@ impl From<ChatRow> for Chat {
             muted: r.muted,
             pinned: r.pinned > 0,
             archived: r.archived,
+            activity: None,
             id: r.chat,
         }
     }
@@ -201,6 +212,25 @@ pub struct Mention {
 
 /// The digits after each "@" in `body` that look like a WhatsApp user (a
 /// phone number or a LID), each once.
+/// `body` with each "@number" mention that `name` knows written "@Name".
+pub(crate) fn named_mentions(body: &str, name: &mut impl FnMut(&str) -> Option<String>) -> String {
+    let mut parts = body.split('@');
+    let mut out = parts.next().unwrap_or_default().to_owned();
+    for rest in parts {
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        let (digits, tail) = rest.split_at(end);
+        out.push('@');
+        match name(digits).filter(|_| (5..=20).contains(&digits.len())) {
+            Some(n) => out.push_str(&n),
+            None => out.push_str(digits),
+        }
+        out.push_str(tail);
+    }
+    out
+}
+
 pub(crate) fn mentioned_users(body: &str) -> Vec<&str> {
     let mut users: Vec<&str> = body
         .split('@')
@@ -288,6 +318,18 @@ impl From<nimqo_whatsapp::search::Hit> for SearchHit {
 
 #[cfg(test)]
 mod mention_tests {
+    use super::*;
+
+    #[test]
+    fn previews_name_mentions_they_know() {
+        let mut name = |u: &str| (u == "628111").then(|| "Ana".to_owned());
+        assert_eq!(
+            named_mentions("hi @628111, @628222 and a@b @12", &mut name),
+            "hi @Ana, @628222 and a@b @12"
+        );
+        assert_eq!(named_mentions("no mention", &mut name), "no mention");
+    }
+
     #[test]
     fn mentions_are_long_digit_runs_after_at() {
         assert_eq!(

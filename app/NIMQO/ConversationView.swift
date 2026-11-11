@@ -138,6 +138,9 @@ struct ConversationView: View {
                             .padding(.top, breaks.runs.contains(message.seq) ? Theme.Spacing.small : 0)
                             .contextMenu { menu(for: message) }
                     }
+                    if let activity = chat.activity {
+                        TypingBubble(text: activity, recording: chat.recording)
+                    }
                     Color.clear.frame(height: 1)
                         .onShownChange { atBottom = $0 }
                 }

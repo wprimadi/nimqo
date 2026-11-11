@@ -13,6 +13,10 @@ pub struct Status {
     pub online: bool,
     pub last_seen_secs: Option<i64>,
     pub typing: bool,
+    /// Typing is recording a voice message.
+    pub recording: bool,
+    /// In a group: the user part of who is typing.
+    pub typist: Option<String>,
     /// None until fetched, or when hidden by their privacy settings.
     pub about: Option<String>,
 }
@@ -22,6 +26,8 @@ struct Entry {
     online: bool,
     last_seen_secs: Option<i64>,
     typing_since: Option<i64>,
+    recording: bool,
+    typist: Option<String>,
     about: Option<String>,
     about_fetched: bool,
 }
@@ -54,7 +60,24 @@ impl Presences {
     }
 
     pub fn set_typing(&self, chat: &str, typing: bool, now: i64) {
-        self.with(chat, |e| e.typing_since = typing.then_some(now));
+        self.set_activity(chat, typing, false, None, now);
+    }
+
+    /// Typing or recording (`recording`), by `typist` in a group; neither
+    /// when `active` is false.
+    pub fn set_activity(
+        &self,
+        chat: &str,
+        active: bool,
+        recording: bool,
+        typist: Option<String>,
+        now: i64,
+    ) {
+        self.with(chat, |e| {
+            e.typing_since = active.then_some(now);
+            e.recording = active && recording;
+            e.typist = typist.filter(|_| active);
+        });
     }
 
     /// Whether the about text still needs fetching; marks it as fetched, so
@@ -74,11 +97,16 @@ impl Presences {
 
     #[must_use]
     pub fn status(&self, chat: &str, now: i64) -> Status {
-        self.with(chat, |e| Status {
-            online: e.online,
-            last_seen_secs: e.last_seen_secs,
-            typing: e.typing_since.is_some_and(|t| now - t < TYPING_SECS),
-            about: e.about.clone(),
+        self.with(chat, |e| {
+            let typing = e.typing_since.is_some_and(|t| now - t < TYPING_SECS);
+            Status {
+                online: e.online,
+                last_seen_secs: e.last_seen_secs,
+                typing,
+                recording: typing && e.recording,
+                typist: e.typist.clone().filter(|_| typing),
+                about: e.about.clone(),
+            }
         })
     }
 }
@@ -100,6 +128,15 @@ mod tests {
         let s = p.status("a", 206);
         assert!(!s.online && !s.typing);
         assert_eq!(s.last_seen_secs, Some(205));
+        p.set_activity("g", true, true, Some("62".into()), 300);
+        let g = p.status("g", 301);
+        assert!(g.typing && g.recording);
+        assert_eq!(g.typist.as_deref(), Some("62"));
+        assert_eq!(
+            p.status("g", 300 + TYPING_SECS),
+            Status::default(),
+            "all of it expires"
+        );
         assert!(p.claim_about("a"));
         assert!(!p.claim_about("a"), "asked once");
         p.set_about("a", Some("  ".into()));

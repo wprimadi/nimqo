@@ -91,6 +91,8 @@ pub struct ContactStatus {
     pub online: bool,
     pub last_seen_secs: Option<i64>,
     pub typing: bool,
+    /// The typing is recording a voice message.
+    pub recording: bool,
     /// Their "about" text; nil until fetched or when hidden.
     pub about: Option<String>,
 }
@@ -283,13 +285,45 @@ impl Core {
     /// The encrypted store cannot be read.
     pub fn chats(&self) -> Result<Vec<Chat>, CoreError> {
         const LIMIT: i64 = 500;
-        Ok(self
+        let now = unix_now();
+        let mut names = self.own_mention_names();
+        let mut name = |user: &str| {
+            names
+                .entry(user.to_owned())
+                .or_insert_with(|| self.inbox.mention_name(user).ok().flatten())
+                .clone()
+        };
+        let mut chats: Vec<Chat> = self
             .inbox
             .chats(LIMIT)
             .map_err(err(|detail| CoreError::Storage { detail }))?
             .into_iter()
             .map(Chat::from)
-            .collect())
+            .collect();
+        for chat in &mut chats {
+            // "@628…" in the preview reads as the person's name.
+            if let Some(body) = &chat.last_body {
+                chat.last_body = Some(chats::named_mentions(body, &mut name));
+            }
+            let status = self.presences.status(&chat.id, now);
+            if status.typing {
+                chat.activity = Some(chats::Activity {
+                    recording: status.recording,
+                    who: status.typist.map(|user| name(&user).unwrap_or(user)),
+                });
+            }
+        }
+        Ok(chats)
+    }
+
+    /// A mention of this account carries its own number or LID, which no
+    /// contact or push name lists.
+    fn own_mention_names(&self) -> std::collections::HashMap<String, Option<String>> {
+        [self.client.pn(), self.client.lid()]
+            .into_iter()
+            .flatten()
+            .map(|me| (me.user.to_string(), Some("You".to_owned())))
+            .collect()
     }
 
     /// The latest messages of one chat, oldest first.
@@ -327,12 +361,7 @@ impl Core {
         if chat_id == nimqo_whatsapp::inbox::STATUS {
             messages.retain(|m| m.from_me || self.inbox.is_contact(&m.sender).unwrap_or(false));
         }
-        let mut names = std::collections::HashMap::new();
-        // A mention of this account carries its own number or LID, which
-        // no contact or push name lists.
-        for me in [self.client.pn(), self.client.lid()].into_iter().flatten() {
-            names.insert(me.user.to_string(), Some("You".to_owned()));
-        }
+        let mut names = self.own_mention_names();
         for m in &mut messages {
             let Some(body) = &m.body else { continue };
             for user in chats::mentioned_users(body) {
@@ -538,6 +567,7 @@ impl Core {
             online: s.online,
             last_seen_secs: s.last_seen_secs,
             typing: s.typing,
+            recording: s.recording,
             about: s.about,
         }
     }
@@ -1476,11 +1506,21 @@ fn presence_handlers<B, T, H, R>(
                         presences.set_online(&chat, online, p.last_seen.map(|t| t.timestamp()));
                         chat
                     }
-                    // ponytail: people only; group typing needs the sender.
-                    Event::ChatPresence(c) if !c.source.is_group => {
-                        let chat = lids::phone_chat(&inbox, &client, &c.source.chat).await;
-                        let typing = !matches!(c.state, ChatActivity::Idle);
-                        presences.set_typing(&chat, typing, unix_now());
+                    Event::ChatPresence(c) => {
+                        let active = !matches!(c.state, ChatActivity::Idle);
+                        let recording = matches!(c.state, ChatActivity::RecordingAudio);
+                        let (chat, typist) = if c.source.is_group {
+                            (
+                                c.source.chat.to_string(),
+                                Some(c.source.sender.user.to_string()),
+                            )
+                        } else {
+                            (
+                                lids::phone_chat(&inbox, &client, &c.source.chat).await,
+                                None,
+                            )
+                        };
+                        presences.set_activity(&chat, active, recording, typist, unix_now());
                         chat
                     }
                     _ => return,
