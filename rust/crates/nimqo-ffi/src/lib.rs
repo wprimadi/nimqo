@@ -264,6 +264,10 @@ impl Core {
             session.inbox.clone(),
             Arc::clone(&session.attachments),
         ));
+        runtime.spawn(keep_reconnecting(
+            Arc::clone(&machine),
+            Arc::clone(&session.client),
+        ));
         Ok(Arc::new(Self {
             runtime,
             handle: Mutex::new(Some(session.handle)),
@@ -1299,8 +1303,7 @@ impl Core {
             return;
         }
         let client = Arc::clone(&self.client);
-        self.runtime
-            .spawn(async move { client.reconnect_immediately().await });
+        self.runtime.spawn(async move { restart(&client).await });
     }
 
     /// Unlinks this Mac (when still linked), then destroys the Keychain key
@@ -1356,6 +1359,34 @@ fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+}
+
+/// Connects again at once. A pause and resume, not
+/// `reconnect_immediately`: that only drops a live socket, so while
+/// upstream waits out a backoff after failed attempts it changes nothing,
+/// and the wait grows to 15 minutes.
+async fn restart(client: &Arc<Client>) {
+    client.pause().await;
+    client.resume();
+}
+
+/// Upstream's backoff doubles up to 15 minutes; a network back without the
+/// Mac saying so (DNS was down, a hotspot came back) would wait that long.
+/// Still reconnecting after a tick, it tries again every 30 s instead,
+/// which leaves an attempt in flight time to finish. Ends with the runtime.
+async fn keep_reconnecting(machine: Arc<Machine>, client: Arc<Client>) {
+    const EVERY: Duration = Duration::from_secs(30);
+    let mut tick = tokio::time::interval(EVERY);
+    let mut waited = false;
+    loop {
+        tick.tick().await;
+        let stuck = machine.current() == ConnectionState::Reconnecting;
+        if stuck && waited {
+            log::info!("still reconnecting; trying again now");
+            restart(&client).await;
+        }
+        waited = stuck;
+    }
 }
 
 /// Deletes disappearing messages when due, now and then every minute. Ends
