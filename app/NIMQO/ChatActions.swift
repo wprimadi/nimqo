@@ -24,6 +24,10 @@ extension CoreModel {
         await run { try await $0.deleteForEveryone(chatId: chat, seq: seq) }
     }
 
+    func deleteForMe(_ seq: Int64, in chat: String) async {
+        await run { try await $0.deleteForMe(chatId: chat, seq: seq) }
+    }
+
     /// Replaces the text of own message `seq`. Returns why it was refused.
     func edit(_ seq: Int64, in chat: String, to text: String) async -> String? {
         guard let core else { return "Not connected." }

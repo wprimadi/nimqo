@@ -846,6 +846,18 @@ impl Core {
             .await
     }
 
+    /// Deletes message `seq` from this account's devices only; others
+    /// still have it.
+    ///
+    /// # Errors
+    /// `SendRefused` when the other devices could not be told, or the
+    /// message is gone; `Storage` if it cannot be deleted here.
+    pub async fn delete_for_me(&self, chat_id: String, seq: i64) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.delete_for_me(&chat_id, seq).await })
+            .await
+    }
+
     /// Queues a forwarded copy of message `seq` in each of `to` (one to
     /// five chats) and starts sending, like `send_text`.
     ///
@@ -1511,6 +1523,7 @@ fn message_handlers<B, T, H, R>(
                 EventKind::PinUpdate,
                 EventKind::ArchiveUpdate,
                 EventKind::StarUpdate,
+                EventKind::DeleteMessageForMeUpdate,
                 EventKind::GroupUpdate,
             ],
             move |event, _| {
@@ -1587,6 +1600,11 @@ async fn on_account_event(sender: Arc<outbox::Sender>, event: &Event) {
                     &s.message_id,
                     s.action.starred.unwrap_or(false),
                 )
+                .await;
+        }
+        Event::DeleteMessageForMeUpdate(d) => {
+            sender
+                .on_deleted_for_me(&d.chat_jid, &d.message_id, d.from_me)
                 .await;
         }
         Event::GroupUpdate(g) => sender.on_group_update(&g.group_jid, &g.action),

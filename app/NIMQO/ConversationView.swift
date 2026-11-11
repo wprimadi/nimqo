@@ -91,7 +91,7 @@ struct ConversationView: View {
                 }
             }
             .environment(lightbox)
-            .modifier(DeleteConfirmation(deleting: $deleting, delete: commands.delete))
+            .modifier(DeleteConfirmation(deleting: $deleting, commands: commands, isGroup: chat.isGroup))
             .navigationTitle(chat.title)
     }
 

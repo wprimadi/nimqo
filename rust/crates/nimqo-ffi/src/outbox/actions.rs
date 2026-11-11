@@ -54,6 +54,37 @@ impl Sender {
         }
     }
 
+    /// Another device of the account deleted a message for itself.
+    pub async fn on_deleted_for_me(&self, jid: &Jid, id: &str, from_me: bool) {
+        let chat = nimqo_whatsapp::lids::phone_chat(&self.inbox, &self.client, jid).await;
+        match self.attachments.delete_for_me(&chat, id, Some(from_me)) {
+            Ok(true) => self.listener.on_chats_changed(vec![chat]),
+            Ok(false) => {}
+            Err(e) => log::warn!("deletion not applied: {e:#}"),
+        }
+    }
+
+    /// Deletes message `seq` on this account's devices, not for the others
+    /// in the chat.
+    pub async fn delete_for_me(&self, chat: &str, seq: i64) -> Result<(), CoreError> {
+        let jid = Self::may_send(chat)?;
+        let m = self.original(chat, seq)?;
+        let sender = Self::author(&jid, &m)?;
+        let id = MessageId::new(&m.id).map_err(|e| refused(format!("{e:?}")))?;
+        let target = MessageRef::new(&jid, id, sender.as_ref(), m.from_me)
+            .map_err(|e| refused(format!("{e:?}")))?;
+        self.client
+            .chat_actions()
+            .delete_message_for_me(&target, true, Some(m.ts))
+            .await
+            .map_err(|e| refused(format!("Not deleted on your other devices: {e}")))?;
+        self.attachments
+            .delete_for_me(chat, &m.id, Some(m.from_me))
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
     pub async fn set_pinned(&self, chat: &str, pinned: bool) -> Result<(), CoreError> {
         let jid = Self::may_send(chat)?;
         let actions = self.client.chat_actions();

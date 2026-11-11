@@ -149,6 +149,58 @@ impl Attachments {
         }
     }
 
+    /// Deletes message `id` of `chat` here only: its row, star, reactions
+    /// no other message keeps, and its file. `from_me` narrows it when the
+    /// id could be another sender's too. True if anything was deleted.
+    ///
+    /// # Errors
+    /// The store cannot be written.
+    pub fn delete_for_me(&self, chat: &str, id: &str, from_me: Option<bool>) -> Result<bool> {
+        #[derive(diesel::QueryableByName)]
+        struct Gone {
+            #[diesel(sql_type = Text)]
+            sender: String,
+        }
+        let gone: Vec<Gone> = {
+            let mut conn = self.inbox.lock()?;
+            conn.transaction(|c| {
+                let gone: Vec<Gone> = diesel::sql_query(
+                    "DELETE FROM messages WHERE chat = ? AND id = ?
+                       AND (? IS NULL OR from_me = ?) AND status <> 'pending'
+                     RETURNING sender",
+                )
+                .bind::<Text, _>(chat)
+                .bind::<Text, _>(id)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Bool>, _>(from_me)
+                .bind::<diesel::sql_types::Nullable<diesel::sql_types::Bool>, _>(from_me)
+                .load(c)?;
+                diesel::sql_query(
+                    "DELETE FROM reactions WHERE chat = ? AND target = ?
+                       AND NOT EXISTS (SELECT 1 FROM messages WHERE chat = ? AND id = ?)",
+                )
+                .bind::<Text, _>(chat)
+                .bind::<Text, _>(id)
+                .bind::<Text, _>(chat)
+                .bind::<Text, _>(id)
+                .execute(c)?;
+                diesel::sql_query(
+                    "DELETE FROM starred WHERE chat = ? AND id = ?
+                       AND NOT EXISTS (SELECT 1 FROM messages WHERE chat = ? AND id = ?)",
+                )
+                .bind::<Text, _>(chat)
+                .bind::<Text, _>(id)
+                .bind::<Text, _>(chat)
+                .bind::<Text, _>(id)
+                .execute(c)?;
+                Ok::<_, diesel::result::Error>(gone)
+            })?
+        };
+        for g in &gone {
+            let _ = std::fs::remove_file(self.dir.join(file_name(chat, &g.sender, id)));
+        }
+        Ok(!gone.is_empty())
+    }
+
     /// An audio message's length, whether it is a voice note, and the
     /// waveform its sender drew (64 bars, 0 to 100), from the message itself.
     ///
@@ -493,6 +545,49 @@ fn waveforms_are_bounded() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deleting_for_me_takes_the_message_its_star_and_its_file() {
+        let base = std::env::temp_dir().join(format!("nimqo-dfm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let key = Key::new([7; 32]);
+        let inbox = Inbox::open(&base.join("app.db"), &key, crate::inbox::Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        let audio = wa::message::AudioMessage::default();
+        inbox.insert_kind_for_test(chat, "a", "audio", audio.encode_to_vec());
+        inbox.insert_kind_for_test(chat, "b", "text", Vec::new());
+        inbox.set_starred(chat, "a", true).unwrap();
+        let store = Attachments::new(inbox, base.clone(), Key::new([8; 32]));
+        let seq = store
+            .inbox
+            .messages(chat, 10)
+            .unwrap()
+            .iter()
+            .find(|r| r.id == "a")
+            .unwrap()
+            .seq;
+        let stored = store.stored(chat, seq).unwrap().unwrap();
+        crate::avatars::write_private(&store.file(&stored), b"x").unwrap();
+
+        assert!(
+            !store.delete_for_me(chat, "a", Some(true)).unwrap(),
+            "not mine"
+        );
+        assert!(store.delete_for_me(chat, "a", None).unwrap());
+        assert!(!store.file(&stored).exists());
+        let left = store.inbox.messages(chat, 10).unwrap();
+        assert_eq!(
+            left.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["b"]
+        );
+        assert!(store.inbox.starred(10).unwrap().is_empty());
+        assert!(
+            !store.delete_for_me(chat, "a", None).unwrap(),
+            "already gone"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn downloads_get_more_time_when_larger() {

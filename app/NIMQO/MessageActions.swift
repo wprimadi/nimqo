@@ -8,37 +8,30 @@ struct MessageCommands {
     /// Returns why the edit was refused.
     let edit: @MainActor (Int64, String) async -> String?
     let delete: @MainActor (Int64) -> Void
+    /// Deletes a message (seq) from this account's devices only.
+    var deleteForMe: (@MainActor (Int64) -> Void)?
     /// Opens the chat picker for it.
     let forward: @MainActor (ChatMessage) -> Void
     /// The account is an admin of this group, so it may delete members'
-    /// messages too. Read inside the menu only: see `AdminDelete`.
+    /// messages too. Read only once asked: see `DeleteConfirmation`.
     let isAdmin: @MainActor () -> Bool
     /// Sends a recorded voice note to this chat; returns why it was refused.
     var sendVoice: (@MainActor (Data) async -> String?)?
     var stickers: StickerPicking?
 }
 
-/// "Delete for Everyone…" on a member's message, for group admins. Its own
-/// view, so reading the group's info does not rebuild the timeline.
-struct AdminDelete: View {
-    let message: ChatMessage
-    let isAdmin: @MainActor () -> Bool
-    let delete: () -> Void
-
-    var body: some View {
-        if isAdmin() {
-            Divider()
-            Button("Delete for Everyone…", systemImage: "trash", role: .destructive, action: delete)
-        }
-    }
-}
-
-/// Asks before a message is deleted for everyone; it cannot be undone.
+/// Asks how a message goes: for everyone (when its sender, or a group's
+/// admin, still may), or from this account's devices only. Neither can be
+/// undone.
 struct DeleteConfirmation: ViewModifier {
     @Binding var deleting: ChatMessage?
-    let delete: @MainActor (Int64) -> Void
+    let commands: MessageCommands
+    let isGroup: Bool
 
-    private static let title: LocalizedStringKey = "Delete this message for everyone?"
+    /// Group info is read only once the dialog is up: see `isAdmin`.
+    private func forEveryone(_ message: ChatMessage) -> Bool {
+        message.canDeleteForEveryone || (isGroup && message.canAdminDelete && commands.isAdmin())
+    }
 
     func body(content: Content) -> some View {
         let shown = Binding { deleting != nil } set: {
@@ -46,10 +39,22 @@ struct DeleteConfirmation: ViewModifier {
                 deleting = nil
             }
         }
-        content.confirmationDialog(Self.title, isPresented: shown, presenting: deleting) { message in
-            Button("Delete for Everyone", role: .destructive) { delete(message.seq) }
-        } message: { _ in
-            Text("It is replaced by “This message was deleted” for everyone in this chat.")
+        content.confirmationDialog("Delete this message?", isPresented: shown, presenting: deleting) { message in
+            if forEveryone(message) {
+                Button("Delete for Everyone", role: .destructive) { commands.delete(message.seq) }
+            }
+            if let deleteForMe = commands.deleteForMe {
+                Button("Delete for Me", role: .destructive) { deleteForMe(message.seq) }
+            }
+        } message: { message in
+            if forEveryone(message) {
+                Text("""
+                For everyone, it becomes “This message was deleted” in this chat. \
+                For you, it goes from your devices only.
+                """)
+            } else {
+                Text("It goes from your devices only. Others in the chat still have it.")
+            }
         }
     }
 }
@@ -266,11 +271,9 @@ extension ConversationView {
         if send != nil, message.delivery == .failed {
             Button("Try Again", systemImage: "arrow.clockwise") { retry(message.seq) }
         }
-        if send != nil, message.canDeleteForEveryone {
+        if send != nil, message.kind != .call, message.delivery != .pending {
             Divider()
-            Button("Delete for Everyone…", systemImage: "trash", role: .destructive) { deleting = message }
-        } else if send != nil, chat.isGroup, message.canAdminDelete {
-            AdminDelete(message: message, isAdmin: commands.isAdmin) { deleting = message }
+            Button("Delete…", systemImage: "trash", role: .destructive) { deleting = message }
         }
     }
 
