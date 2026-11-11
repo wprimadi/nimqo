@@ -24,6 +24,10 @@
   <a href="https://sonarcloud.io/summary/overall?id=wprimadi_nimqo"><img alt="Maintainability" src="https://sonarcloud.io/api/project_badges/measure?project=wprimadi_nimqo&metric=sqale_rating"></a>
 </p>
 
+<p align="center">
+  <img src="screenshots/screenshot-01.png" alt="NIMQO on macOS: the chat list beside an open group conversation, over a translucent window" width="900">
+</p>
+
 > [!WARNING]
 > **NIMQO is unofficial.** It is an independent, open-source app that is not
 > affiliated with, endorsed by, or sponsored by WhatsApp or Meta. It speaks the
