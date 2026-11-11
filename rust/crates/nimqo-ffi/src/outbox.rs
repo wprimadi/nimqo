@@ -563,13 +563,17 @@ impl Sender {
         };
         // Who it was: the member in a group, the other side in a chat.
         let who = lids::phone_chat(&self.inbox, &self.client, &receipt.source.sender).await;
+        let chat = lids::phone_chat(&self.inbox, &self.client, &receipt.source.chat).await;
         let at = receipt.timestamp.timestamp();
         let mut changed = Vec::new();
         for id in &receipt.message_ids {
             // Message Info's list, per recipient; the bubble's tick below.
-            match self.inbox.record_receipt(id.as_str(), &who, seen, at) {
-                Ok(Some(chat)) => changed.push(chat),
-                Ok(None) => {}
+            match self
+                .inbox
+                .record_receipt(&chat, id.as_str(), &who, seen, at)
+            {
+                Ok(true) => changed.push(chat.clone()),
+                Ok(false) => {}
                 Err(e) => log::warn!("receipt not kept: {e:#}"),
             }
             match self.inbox.advance(id.as_str(), to) {

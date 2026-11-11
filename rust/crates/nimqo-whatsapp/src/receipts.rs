@@ -28,34 +28,43 @@ pub struct Recipient {
 }
 
 impl Inbox {
-    /// Notes that `who` (a chat id) `seen` own message `id` at `ts`; the
-    /// first time of each counts. Returns the message's chat, or None when
-    /// it is no own message here.
+    /// Notes that `who` (a chat id) `seen` own message `id` in `chat` at
+    /// `ts`; the first time of each counts, and none before it was sent.
+    /// Only for an own message of that chat, and in a one-to-one chat only
+    /// from the other side: a receipt cannot speak for another chat.
+    /// Returns whether it was kept.
     ///
     /// # Errors
     /// The store cannot be written.
     pub fn record_receipt(
         &self,
+        chat: &str,
         id: &str,
         who: &str,
         seen: Seen,
         ts: i64,
-    ) -> Result<Option<String>> {
+    ) -> Result<bool> {
         #[derive(diesel::QueryableByName)]
-        struct Chat {
-            #[diesel(sql_type = Text)]
-            chat: String,
+        struct Sent {
+            #[diesel(sql_type = BigInt)]
+            ts: i64,
+        }
+        if !chat.ends_with("@g.us") && who != chat {
+            return Ok(false);
         }
         let mut conn = self.lock()?;
-        let Some(Chat { chat }) =
-            diesel::sql_query("SELECT chat FROM messages WHERE sender = ? AND id = ? LIMIT 1")
-                .bind::<Text, _>(ME)
-                .bind::<Text, _>(id)
-                .get_result(&mut *conn)
-                .optional()?
+        let Some(Sent { ts: sent }) = diesel::sql_query(
+            "SELECT ts FROM messages WHERE chat = ? AND sender = ? AND id = ? LIMIT 1",
+        )
+        .bind::<Text, _>(chat)
+        .bind::<Text, _>(ME)
+        .bind::<Text, _>(id)
+        .get_result(&mut *conn)
+        .optional()?
         else {
-            return Ok(None);
+            return Ok(false);
         };
+        let ts = ts.max(sent);
         let at = |level: Seen| (seen as u8 >= level as u8).then_some(ts);
         diesel::sql_query(
             "INSERT INTO receipts (chat, id, who, delivered, read, played) VALUES (?, ?, ?, ?, ?, ?)
@@ -64,14 +73,14 @@ impl Inbox {
                read = coalesce(read, excluded.read),
                played = coalesce(played, excluded.played)",
         )
-        .bind::<Text, _>(&chat)
+        .bind::<Text, _>(chat)
         .bind::<Text, _>(id)
         .bind::<Text, _>(who)
         .bind::<Nullable<BigInt>, _>(at(Seen::Delivered))
         .bind::<Nullable<BigInt>, _>(at(Seen::Read))
         .bind::<Nullable<BigInt>, _>(at(Seen::Played))
         .execute(&mut *conn)?;
-        Ok(Some(chat))
+        Ok(true)
     }
 
     /// The recipients of own message `seq` in `chat`, as their receipts
@@ -113,23 +122,37 @@ mod tests {
         let group = "1203@g.us";
         inbox.insert_for_test(group, ME, "m1");
         let (ana, bo) = ("62811@s.whatsapp.net", "62812@s.whatsapp.net");
-        assert_eq!(
-            inbox.record_receipt("nope", ana, Seen::Read, 1).unwrap(),
-            None,
+        assert!(
+            !inbox
+                .record_receipt(group, "nope", ana, Seen::Read, 1)
+                .unwrap(),
             "not ours"
         );
-        assert_eq!(
-            inbox
-                .record_receipt("m1", ana, Seen::Delivered, 10)
-                .unwrap()
-                .as_deref(),
-            Some(group)
+        assert!(
+            !inbox
+                .record_receipt("9@g.us", "m1", ana, Seen::Read, 1)
+                .unwrap(),
+            "another chat"
         );
-        inbox.record_receipt("m1", ana, Seen::Read, 20).unwrap();
+        inbox.insert_for_test(ana, ME, "d1");
+        assert!(
+            !inbox.record_receipt(ana, "d1", bo, Seen::Read, 1).unwrap(),
+            "not the other side"
+        );
+        assert!(
+            inbox
+                .record_receipt(group, "m1", ana, Seen::Delivered, 10)
+                .unwrap()
+        );
         inbox
-            .record_receipt("m1", ana, Seen::Delivered, 30)
+            .record_receipt(group, "m1", ana, Seen::Read, 20)
             .unwrap();
-        inbox.record_receipt("m1", bo, Seen::Read, 15).unwrap();
+        inbox
+            .record_receipt(group, "m1", ana, Seen::Delivered, 30)
+            .unwrap();
+        inbox
+            .record_receipt(group, "m1", bo, Seen::Read, 15)
+            .unwrap();
         let seq = inbox.messages(group, 1).unwrap()[0].seq;
         let all = inbox.recipients(group, seq).unwrap();
         assert_eq!(all.len(), 2);
