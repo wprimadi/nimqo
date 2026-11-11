@@ -36,3 +36,6 @@ evidence/
 
 # Code-signing certificate, private key and keychain: never commit
 Secret/
+
+# Packaged disk images (make dmg)
+dist/

@@ -250,12 +250,20 @@ There are no signed releases yet; build it from source.
 git clone https://github.com/wprimadi/nimqo.git
 cd nimqo
 brew install xcodegen
-./scripts/run-app.sh
+make run
 ```
 
-`run-app.sh` builds the Rust core, generates the Xcode project from
-[`app/project.yml`](app/project.yml), builds the app, and opens it. The other
-scripts:
+| Make target | What it does |
+| --- | --- |
+| `make run` | Builds the app (Debug) and opens it |
+| `make build` | Builds the app; `make build CONFIG=Release` for an optimised one |
+| `make dmg` | Builds Release and packages it as `dist/NIMQO-<version>.dmg` |
+| `make test` | Builds and runs the app's unit tests |
+| `make clean` | Removes the app build, the generated core, and `dist/` |
+
+The targets call the scripts below, which build the Rust core, generate the
+Xcode project from [`app/project.yml`](app/project.yml), and build the app
+(Apple silicon only):
 
 | Script | What it does |
 | --- | --- |
