@@ -42,13 +42,13 @@ struct GroupCard: View {
         Group {
             if adding, let info {
                 AddMembers(chat: chat.id, info: info, avatars: avatars, contacts: contacts) { adding = false }
+                    .padding(14)
                     .transition(slide(from: .trailing))
             } else {
-                card.transition(slide(from: .leading))
+                card.fitsScreen(padding: 14).transition(slide(from: .leading))
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: adding)
-        .padding(14)
         .frame(width: 360)
         .confirmationDialog(removalTitle, isPresented: removingShown, presenting: removing) { member in
             Button("Remove", role: .destructive) { change([member.id], .remove) }

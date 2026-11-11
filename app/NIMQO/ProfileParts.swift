@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// A picture blown up and blurred into a wash of its colours, over the
@@ -144,5 +145,30 @@ struct HeroChip: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(.ultraThinMaterial, in: .capsule)
+    }
+}
+
+extension View {
+    /// Scrolls rather than run off the screen: a popover taller than the
+    /// screen is cut at its edges, its margins with it.
+    func fitsScreen(padding: CGFloat) -> some View {
+        modifier(ScreenFit(padding: padding))
+    }
+}
+
+private struct ScreenFit: ViewModifier {
+    let padding: CGFloat
+    @State private var height: CGFloat?
+
+    func body(content: Content) -> some View {
+        // Room under the window's toolbar for the arrow and a margin.
+        let cap = (NSScreen.main?.visibleFrame.height ?? 800) - 160
+        ScrollView {
+            content
+                .padding(padding)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: min(height ?? cap, cap))
     }
 }
