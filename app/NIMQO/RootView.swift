@@ -61,7 +61,8 @@ struct MainView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
+            // Room under the bar, so the top row's selection does not touch it.
+            .safeAreaInset(edge: .top, spacing: Theme.Spacing.small) {
                 PaneBar(section: $section, chatsUnread: model.chats.contains { $0.unread > 0 && !$0.quiet },
                         composing: $composing, starred: $starred, enabled: model.core != nil)
             }

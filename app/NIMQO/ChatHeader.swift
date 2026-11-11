@@ -129,9 +129,9 @@ private struct ChatHeader: ViewModifier {
         }
         .popover(isPresented: $showsCard, arrowEdge: .bottom) {
             if chat.isGroup {
-                GroupCardOf(chat: chat, contacts: contacts, avatars: avatars)
+                GroupCardOf(chat: chat, contacts: contacts, avatars: avatars, calls: calls)
             } else {
-                ContactCard(chat: chat, status: status, avatars: avatars)
+                ContactCard(chat: chat, status: status, avatars: avatars, calls: calls)
             }
         }
     }
@@ -230,7 +230,7 @@ extension View {
 }
 
 /// "online", "typing…" or when last seen; nil when unknown.
-private func presenceText(_ status: ContactStatus?) -> Text? {
+func presenceText(_ status: ContactStatus?) -> Text? {
     guard let status else { return nil }
     if status.typing {
         return Text("typing…").foregroundStyle(.tint)
@@ -304,58 +304,16 @@ private struct HeaderLabel: View {
     }
 }
 
-/// The picture, name, number and about text, larger.
-private struct ContactCard: View {
-    let chat: ChatSummary
-    let status: ContactStatus?
-    let avatars: AvatarStore
-
-    var body: some View {
-        VStack(spacing: Theme.Spacing.small) {
-            Avatar(chat: chat, store: avatars, size: 96, online: status?.online == true)
-            Text(chat.title).font(.title2.bold()).multilineTextAlignment(.center)
-            if let phone = chat.phone {
-                Text(phone).font(.title3).monospacedDigit().foregroundStyle(.secondary).textSelection(.enabled)
-            }
-            if let presence = presenceText(status) {
-                presence.font(.callout)
-            }
-            if let about = status?.about {
-                Divider()
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("About").font(.caption.bold()).foregroundStyle(.secondary)
-                    Text(about).textSelection(.enabled)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if chat.timer != nil || chat.muted {
-                Divider()
-                VStack(alignment: .leading, spacing: 4) {
-                    if let timer = chat.timer {
-                        Label("Disappearing messages: \(timer)", systemImage: "timer")
-                    }
-                    if chat.muted {
-                        Label("Muted", systemImage: "bell.slash")
-                    }
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(Theme.Spacing.medium + 4)
-        .frame(width: 300)
-    }
-}
-
 /// The group card, reading the group's info here rather than in the
 /// header's modifier (see `header`).
 private struct GroupCardOf: View {
     let chat: ChatSummary
     let contacts: ContactStore
     let avatars: AvatarStore
+    let calls: CallStore
 
     var body: some View {
-        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars, contacts: contacts)
+        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars, contacts: contacts, calls: calls)
             // Members and settings change from other phones too.
             .task { await contacts.refresh(chat.id) }
     }

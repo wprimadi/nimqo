@@ -48,7 +48,9 @@ struct PaneBar: View {
         .glassGroup(spacing: Theme.Spacing.small)
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(WindowBar())
+        // Up to the window's top edge: one blur from the toolbar to the
+        // hairline, with no gap above the bar for the list to show through.
+        .background(WindowBar().ignoresSafeArea(edges: .top))
     }
 
     private func tabs(titled: Bool) -> some View {

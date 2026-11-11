@@ -144,30 +144,6 @@ struct CommunityView: View {
     }
 }
 
-/// The community's picture, blown up and blurred into a wash of its colours.
-private struct HeroBackdrop: View {
-    let id: String
-    let avatars: AvatarStore
-
-    var body: some View {
-        ZStack {
-            LinearGradient(colors: [.accentColor.opacity(0.55), .accentColor.opacity(0.12)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing)
-            if let image = avatars.image(for: id) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 48)
-                    .opacity(0.7)
-                    .saturation(1.4)
-            }
-            // Darker at the bottom, so the text stays legible on any picture.
-            LinearGradient(colors: [.clear, .black.opacity(0.25)], startPoint: .top, endPoint: .bottom)
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 private struct Chip: View {
     let text: String
     let symbol: String

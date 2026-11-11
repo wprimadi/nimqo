@@ -10,6 +10,7 @@ struct GroupCard: View {
     let info: GroupInfo?
     let avatars: AvatarStore
     let contacts: ContactStore
+    let calls: CallStore
     @State private var filter = ""
     @State private var adding = false
     @State private var problem: String?
@@ -46,8 +47,8 @@ struct GroupCard: View {
             }
         }
         .animation(reduceMotion ? .easeInOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0), value: adding)
-        .padding(Theme.Spacing.medium + 4)
-        .frame(width: 340)
+        .padding(14)
+        .frame(width: 360)
         .confirmationDialog(removalTitle, isPresented: removingShown, presenting: removing) { member in
             Button("Remove", role: .destructive) { change([member.id], .remove) }
         }
@@ -80,21 +81,10 @@ struct GroupCard: View {
     }
 
     private var card: some View {
-        VStack(spacing: Theme.Spacing.small) {
-            Avatar(chat: chat, store: avatars, size: 96)
-            if let info, !isMember {
-                Text(info.subject ?? chat.title).font(.title2.bold()).multilineTextAlignment(.center)
-                Label("You're no longer a member of this group.", systemImage: "person.crop.circle.badge.xmark")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let info {
-                let subject = info.subject ?? chat.title
-                EditableText(text: subject, placeholder: "Group name", editable: canEditInfo(info)) { name in
-                    await save { try await $0.setGroupSubject(chatId: chat.id, subject: name) }
-                }
-                .font(.title2.bold())
-                .multilineTextAlignment(.center)
-                Text("Group · \(info.members.count) members").foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            ProfileHero(chat: chat, avatars: avatars) { heroText }
+            if let info, isMember {
+                actions
                 if let problem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
@@ -106,9 +96,12 @@ struct GroupCard: View {
                 details(info)
                 memberList
                 footer
+            } else if info != nil {
+                Label("You're no longer a member of this group.", systemImage: "person.crop.circle.badge.xmark")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
-                Text(chat.title).font(.title2.bold()).multilineTextAlignment(.center)
-                ProgressView().controlSize(.small).padding()
+                ProgressView().controlSize(.small).padding(.top, 4)
                 Text("Members appear once the group's info arrives.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -122,42 +115,41 @@ struct GroupCard: View {
     @ViewBuilder
     private func details(_ info: GroupInfo) -> some View {
         if info.description != nil || canEditInfo(info) {
-            Divider()
-            ScrollView {
-                EditableText(text: info.description, placeholder: "Add a group description",
-                             editable: canEditInfo(info), multiline: true,
-                             save: { text in
-                                 await save { try await $0.setGroupDescription(chatId: chat.id, text: text) }
-                             })
-                             .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: 120)
-            .fixedSize(horizontal: false, vertical: true)
-        }
-        Divider()
-        VStack(alignment: .leading, spacing: 4) {
-            if isAdmin {
-                setting("Only admins can send messages", isOn: info.announceOnly, .announceOnly)
-                setting("Only admins can edit group info", isOn: info.locked, .locked)
-            } else {
-                if info.announceOnly {
-                    Label("Only admins can send messages", systemImage: "megaphone")
+            InfoSection("Description", symbol: "text.alignleft") {
+                ScrollView {
+                    EditableText(text: info.description, placeholder: "Add a group description",
+                                 editable: canEditInfo(info), multiline: true,
+                                 save: { text in
+                                     await save { try await $0.setGroupDescription(chatId: chat.id, text: text) }
+                                 })
+                                 .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if info.locked {
-                    Label("Only admins can edit group info", systemImage: "lock")
-                }
-            }
-            if let timer = chat.timer {
-                Label("Disappearing messages: \(timer)", systemImage: "timer")
-            }
-            if let secs = info.createdSecs {
-                let date = Date(timeIntervalSince1970: TimeInterval(secs))
-                Label("Created \(date.formatted(date: .long, time: .omitted))", systemImage: "calendar")
+                .frame(maxHeight: 120)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        InfoSection("Settings", symbol: "slider.horizontal.3") {
+            VStack(alignment: .leading, spacing: 6) {
+                if isAdmin {
+                    setting("Only admins can send messages", isOn: info.announceOnly, .announceOnly)
+                    setting("Only admins can edit group info", isOn: info.locked, .locked)
+                } else {
+                    Label(info.announceOnly ? "Only admins can send messages" : "Everyone can send messages",
+                          systemImage: "megaphone")
+                    Label(info.locked ? "Only admins can edit group info" : "Everyone can edit group info",
+                          systemImage: info.locked ? "lock.fill" : "lock.open")
+                }
+                if let timer = chat.timer {
+                    Label("Disappearing messages: \(timer)", systemImage: "timer")
+                }
+                if let secs = info.createdSecs {
+                    let date = Date(timeIntervalSince1970: TimeInterval(secs))
+                    Label("Created \(date.formatted(date: .long, time: .omitted))", systemImage: "calendar")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.callout)
+        }
     }
 
     private func setting(_ title: LocalizedStringKey, isOn: Bool, _ setting: GroupSetting) -> some View {
@@ -170,29 +162,29 @@ struct GroupCard: View {
     }
 
     private var memberList: some View {
-        VStack(spacing: 6) {
-            Divider()
-            HStack {
-                Text("Members").font(.headline)
-                Spacer()
-                if isAdmin {
-                    Button("Add Members", systemImage: "person.badge.plus") {
-                        problem = nil
-                        adding = true
-                    }
-                    .buttonStyle(.borderless)
+        InfoSection(title: "\(info?.members.count ?? 0) Members", symbol: "person.2.fill") {
+            if isAdmin {
+                Button("Add", systemImage: "person.badge.plus") {
+                    problem = nil
+                    adding = true
                 }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.semibold))
             }
+        } content: {
             if (info?.members.count ?? 0) > 8 {
                 TextField("Find a member", text: $filter)
                     .textFieldStyle(.roundedBorder)
             }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(members, id: \.id) { member in
-                        MemberRow(member: member, manageable: isAdmin && !member.isMe && member.role != .owner) {
-                            MemberMenu(member: member) { change([member.id], $0) } remove: { removing = member }
-                        }
+                        MemberRow(member: member, avatars: avatars,
+                                  manageable: isAdmin && !member.isMe && member.role != .owner, actions: {
+                                      MemberMenu(member: member) { change([member.id], $0) } remove: {
+                                          removing = member
+                                      }
+                                  })
                     }
                 }
             }
@@ -201,28 +193,19 @@ struct GroupCard: View {
         }
     }
 
-    @ViewBuilder
     private var footer: some View {
-        Divider()
         HStack {
             if isAdmin {
-                Button(copied ? "Copied" : "Copy Invite Link",
-                       systemImage: copied ? "checkmark" : "link") { copyLink(reset: false) }
-                    .contentTransition(.symbolEffect(.replace))
-                Menu {
-                    Button("Reset Link…", systemImage: "arrow.clockwise") { resetting = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("More link options")
+                Button("Reset Invite Link…", systemImage: "arrow.clockwise") { resetting = true }
+                    .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Leave Group", role: .destructive) { leaving = true }
-                .foregroundStyle(.red)
+            Button("Leave Group", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                leaving = true
+            }
+            .foregroundStyle(.red)
         }
+        .font(.callout)
         .buttonStyle(.borderless)
     }
 
@@ -272,28 +255,70 @@ struct GroupCard: View {
     }
 }
 
+extension GroupCard {
+    private var heroText: some View {
+        VStack(spacing: 6) {
+            if let info, isMember {
+                EditableText(text: info.subject ?? chat.title, placeholder: "Group name",
+                             editable: canEditInfo(info), save: { name in
+                                 await save { try await $0.setGroupSubject(chatId: chat.id, subject: name) }
+                             })
+                             .font(.title2.bold())
+                             .multilineTextAlignment(.center)
+            } else {
+                Text(info?.subject ?? chat.title).font(.title2.bold()).multilineTextAlignment(.center)
+            }
+            if let info {
+                HStack(spacing: 6) {
+                    HeroChip(text: Text("\(info.members.count) members"), symbol: "person.2.fill")
+                    if isAdmin {
+                        HeroChip(text: Text("Admin"), symbol: "star.fill")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Calls, and the invite link for admins.
+    private var actions: some View {
+        HStack(spacing: 8) {
+            let canCall = calls.current == nil && calls.core != nil
+            QuickAction(title: "Voice", symbol: "phone.fill") { calls.place(chat.id, video: false) }
+                .disabled(!canCall)
+            QuickAction(title: "Video", symbol: "video.fill") { calls.place(chat.id, video: true) }
+                .disabled(!canCall)
+            if isAdmin {
+                QuickAction(title: copied ? "Copied" : "Invite", symbol: copied ? "checkmark" : "link") {
+                    copyLink(reset: false)
+                }
+                .help("Copy the invite link")
+            }
+        }
+    }
+}
+
 private struct MemberRow<Actions: View>: View {
     let member: GroupMember
+    let avatars: AvatarStore
     let manageable: Bool
     @ViewBuilder let actions: () -> Actions
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "person.fill")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .frame(width: 28, height: 28)
-                .background(.quaternary, in: .circle)
+            Avatar(chat: ChatSummary(id: member.id, title: member.displayName, isGroup: false, phone: member.phone,
+                                     preview: "", lastActivity: .now, unread: 0, timer: nil, muted: false),
+                   store: avatars, size: 30)
             VStack(alignment: .leading, spacing: 1) {
-                Text(member.displayName).lineLimit(1)
+                Text(member.isMe ? String(localized: "You") : member.displayName).lineLimit(1)
                 if member.savedName != nil || member.isMe, let phone = member.phone {
                     Text(phone).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 }
             }
             Spacer()
             switch member.role {
-            case .owner: RoleBadge(title: "Owner", fill: AnyShapeStyle(.orange))
-            case .admin: RoleBadge(title: "Admin", fill: AnyShapeStyle(.tint))
+            case .owner: RoleBadge(title: "Owner", fill: AnyShapeStyle(Color.orange.gradient))
+            case .admin: RoleBadge(title: "Admin", fill: AnyShapeStyle(Color.accentColor.gradient))
             case .member: EmptyView()
             }
             if manageable {
@@ -303,10 +328,15 @@ private struct MemberRow<Actions: View>: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
+                .opacity(hovering ? 1 : 0.4)
                 .help("Member options")
             }
         }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(.primary.opacity(hovering ? 0.07 : 0), in: .rect(cornerRadius: 9, style: .continuous))
         .contentShape(.rect)
+        .onHover { hovering = $0 }
         .contextMenu {
             if manageable {
                 actions()
