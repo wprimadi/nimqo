@@ -102,12 +102,14 @@ impl Sender {
         })
     }
 
-    /// Validates and stores the message as pending. The caller then flushes.
+    /// Validates and stores the message as pending, with `link`'s preview
+    /// when it names a link in the text. The caller then flushes.
     pub fn enqueue(
         &self,
         chat_id: &str,
         text: &str,
         reply_to: Option<i64>,
+        link: Option<nimqo_whatsapp::links::Link>,
     ) -> Result<(), CoreError> {
         let refused = |reason: &str| CoreError::SendRefused {
             reason: reason.to_owned(),
@@ -137,6 +139,11 @@ impl Sender {
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e:#}"),
             })?;
+        if let Some(link) = link.and_then(|l| l.checked(text))
+            && let Err(e) = self.inbox.set_pending_link(id.as_str(), &link)
+        {
+            log::warn!("link preview not kept: {e:#}");
+        }
         self.listener.on_chats_changed(vec![chat_id.to_owned()]);
         Ok(())
     }
@@ -201,10 +208,14 @@ impl Sender {
                 .ok_or("sticker not sendable")?
         } else if p.kind == "text" {
             let body = p.body.clone().unwrap_or_default();
-            match self.quote_context(p) {
+            let mut text = match self.quote_context(p) {
                 Some(context) => wa::Message::text_with_context(body, context),
                 None => wa::Message::text(body),
+            };
+            if let Some(link) = nimqo_whatsapp::links::pending_link(p.media.as_deref()) {
+                link.attach(&mut text);
             }
+            text
         } else {
             self.file_message(p).await?
         };

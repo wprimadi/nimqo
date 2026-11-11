@@ -242,23 +242,6 @@ struct MessageBubble: View {
         isVisual && message.body == nil
     }
 
-    private struct Badge {
-        let name: String
-        let tint: Color
-        let label: String
-    }
-
-    private var deliverySymbol: Badge? {
-        switch message.delivery {
-        case .none: nil
-        case .pending: Badge(name: "clock", tint: .secondary, label: "Sending")
-        case .sent: Badge(name: "checkmark", tint: .secondary, label: "Sent")
-        case .delivered: Badge(name: "checkmark.circle", tint: .secondary, label: "Delivered")
-        case .read: Badge(name: "checkmark.circle.fill", tint: .blue, label: "Read")
-        case .failed: Badge(name: "exclamationmark.circle.fill", tint: .red, label: "Not sent")
-        }
-    }
-
     /// A sticker stands on its own, like in WhatsApp: no bubble.
     private var bubbleStyle: AnyShapeStyle {
         if message.kind == .sticker, message.hasMedia {
@@ -356,6 +339,9 @@ struct MessageBubble: View {
                         .italic(message.kind != .text && !message.hasMedia)
                         .textSelection(.enabled)
                         .padding(.horizontal, isVisual ? 8 : 0)
+                    if message.hasLink {
+                        LinkPreviewView(chat: chat, message: message, store: pictures)
+                    }
                 }
                 if !timeOnPicture {
                     stamp

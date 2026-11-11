@@ -1049,10 +1049,35 @@ impl Core {
         text: &str,
         reply_to: Option<i64>,
     ) -> Result<(), CoreError> {
-        self.sender.enqueue(chat_id, text, reply_to)?;
+        self.sender.enqueue(chat_id, text, reply_to, None)?;
         let sender = Arc::clone(&self.sender);
         self.runtime.spawn(async move { sender.flush(false).await });
         Ok(())
+    }
+
+    /// `send_text` with a link preview the app made (see Settings: off
+    /// unless turned on). Dropped when its link is not in the text.
+    ///
+    /// # Errors
+    /// As `send_text`.
+    pub fn send_text_with_link(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to: Option<i64>,
+        link: chats::LinkPreview,
+    ) -> Result<(), CoreError> {
+        self.sender
+            .enqueue(chat_id, text, reply_to, Some(link.into()))?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
+    /// The preview a text message carries, as its sender made it.
+    #[must_use]
+    pub fn link_preview(&self, chat_id: &str, seq: i64) -> Option<chats::LinkPreview> {
+        self.inbox.link(chat_id, seq).ok()?.map(Into::into)
     }
 
     #[must_use]

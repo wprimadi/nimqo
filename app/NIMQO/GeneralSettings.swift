@@ -6,6 +6,7 @@ import SwiftUI
 struct GeneralSection: View {
     @State private var opensAtLogin = SMAppService.mainApp.status == .enabled
     @State private var problem: String?
+    @AppStorage(LinkPreviews.key) private var sendsLinkPreviews = false
 
     var body: some View {
         Section {
@@ -13,11 +14,19 @@ struct GeneralSection: View {
             if SMAppService.mainApp.status == .requiresApproval {
                 Button("Allow in Login Items…") { SMAppService.openSystemSettingsLoginItems() }
             }
+            Toggle("Make previews for links I send", isOn: $sendsLinkPreviews)
         } header: {
             Text("General")
         } footer: {
-            Text(problem ?? String(localized: "Starts in the menu bar when you log in, so messages arrive right away."))
-                .foregroundStyle(problem == nil ? .secondary : Color.red)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(problem ?? String(localized: "Starts in the menu bar at login, so messages arrive right away."))
+                    .foregroundStyle(problem == nil ? .secondary : Color.red)
+                Text("""
+                A link preview is made by opening the page from this Mac, which tells that site your address. \
+                Previews others send are always shown; nothing is fetched for them.
+                """)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 

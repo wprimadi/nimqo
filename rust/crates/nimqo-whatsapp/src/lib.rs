@@ -15,6 +15,7 @@ pub mod groups;
 pub mod history;
 pub mod inbox;
 pub mod lids;
+pub mod links;
 pub mod media;
 pub mod mutes;
 pub mod outbox;

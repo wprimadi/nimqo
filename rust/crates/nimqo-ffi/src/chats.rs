@@ -149,6 +149,40 @@ pub struct ChatMessage {
     pub starred: bool,
     /// Changes when a poll's votes do.
     pub revision: i64,
+    /// A text with a link preview (`Core::link_preview`).
+    pub has_link: bool,
+}
+
+/// A link's title, description and picture, shown under a text.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct LinkPreview {
+    /// As written in the text.
+    pub url: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub thumbnail: Option<Vec<u8>>,
+}
+
+impl From<nimqo_whatsapp::links::Link> for LinkPreview {
+    fn from(l: nimqo_whatsapp::links::Link) -> Self {
+        Self {
+            url: l.url,
+            title: l.title,
+            description: l.description,
+            thumbnail: l.thumbnail,
+        }
+    }
+}
+
+impl From<LinkPreview> for nimqo_whatsapp::links::Link {
+    fn from(l: LinkPreview) -> Self {
+        Self {
+            url: l.url,
+            title: l.title,
+            description: l.description,
+            thumbnail: l.thumbnail,
+        }
+    }
 }
 
 /// Someone in the address book.
@@ -208,6 +242,7 @@ impl From<MessageRow> for ChatMessage {
             reactions: r.reactions,
             my_reaction: r.my_reaction,
             revision: r.revision,
+            has_link: r.has_link,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),

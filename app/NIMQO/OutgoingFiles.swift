@@ -123,8 +123,15 @@ extension CoreModel {
     /// the main thread.
     func send(_ text: String, replyTo: Int64?, to chat: String) async -> String? {
         guard let core else { return "Not connected." }
+        let link = await LinkPreviews.make(for: text)
         let result = await Task.detached {
-            Result { try core.sendText(chatId: chat, text: text, replyTo: replyTo) }
+            Result {
+                if let link {
+                    try core.sendTextWithLink(chatId: chat, text: text, replyTo: replyTo, link: link)
+                } else {
+                    try core.sendText(chatId: chat, text: text, replyTo: replyTo)
+                }
+            }
         }.value
         if case let .failure(error) = result {
             return Self.message(for: error)

@@ -111,6 +111,9 @@ pub struct MessageRow {
     /// This account's own reaction, if any.
     #[diesel(sql_type = Nullable<Text>)]
     pub my_reaction: Option<String>,
+    /// A text with a link preview (`Inbox::link`).
+    #[diesel(sql_type = Bool)]
+    pub has_link: bool,
     /// Changes when a poll's votes do, so it is drawn again.
     #[diesel(sql_type = BigInt)]
     pub revision: i64,
@@ -251,7 +254,7 @@ impl Inbox {
         Ok(diesel::sql_query(
             "SELECT * FROM (
                SELECT m.id, m.sender, m.sender_name, m.ts, m.kind, m.body, m.from_me, m.status,
-                 m.edited, m.forwarded,
+                 m.edited, m.forwarded, m.kind = 'text' AND m.media IS NOT NULL AS has_link,
                  EXISTS (SELECT 1 FROM starred s WHERE s.chat = m.chat AND s.id = m.id) AS starred, m.rowid AS seq, m.media IS NOT NULL AND m.kind IN ('image', 'video', 'audio', 'document', 'sticker') AS has_media,
                  m.reply_to,
                  -- A quote's copy is the replier's claim: when the original is
@@ -776,14 +779,16 @@ impl Row {
                     .get_ephemeral_expiration()
                     .map(|s| ts + i64::from(s))
             },
-            media: media_of(&m.message).or_else(|| {
-                let creator = if src.is_from_me {
-                    String::new()
-                } else {
-                    src.sender.to_non_ad_string()
-                };
-                crate::cards::card_of(&m.message, &creator)
-            }),
+            media: media_of(&m.message)
+                .or_else(|| {
+                    let creator = if src.is_from_me {
+                        String::new()
+                    } else {
+                        src.sender.to_non_ad_string()
+                    };
+                    crate::cards::card_of(&m.message, &creator)
+                })
+                .or_else(|| crate::links::link_of(&m.message)),
             quote: crate::replies::quote_of(&m.message),
             forwarded: is_forwarded(&m.message),
         })

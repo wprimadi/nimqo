@@ -129,7 +129,9 @@ impl Effect {
                 kind,
                 body,
             } => diesel::sql_query(
-                "UPDATE messages SET kind = ?, body = ?, edited = 1
+                // A text's old link preview may not fit the new text.
+                "UPDATE messages SET kind = ?, body = ?, edited = 1,
+                   media = CASE WHEN kind = 'text' THEN NULL ELSE media END
                  WHERE chat = ? AND sender = ? AND id = ? AND kind <> 'deleted'",
             )
             .bind::<Text, _>(*kind)
