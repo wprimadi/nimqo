@@ -326,6 +326,8 @@ struct MessageBubble: View {
                 .padding(.top, isVisual ? 4 : 0)
                 if message.hasMedia {
                     switch message.kind {
+                    case .video where message.gif: GifMessageView(chat: chat, message: message, store: pictures)
+                        .overlay(alignment: .bottomTrailing) { pictureStamp }
                     case .video: VideoMessageView(chat: chat, message: message, store: pictures)
                         .overlay(alignment: .bottomTrailing) { pictureStamp }
                     case .audio: AudioMessageView(chat: chat, message: message, store: pictures)

@@ -82,6 +82,40 @@ pub fn recent_gifs(inbox: &Inbox, limit: usize) -> Result<Vec<(String, i64)>> {
     })
 }
 
+/// Of videos `seqs` in `chat`, those that play as GIFs.
+///
+/// # Errors
+/// The store cannot be read.
+pub fn gifs(inbox: &Inbox, chat: &str, seqs: &[i64]) -> Result<std::collections::HashSet<i64>> {
+    #[derive(diesel::QueryableByName)]
+    struct Video {
+        #[diesel(sql_type = BigInt)]
+        seq: i64,
+        #[diesel(sql_type = Binary)]
+        media: Vec<u8>,
+    }
+    let list = seqs
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut conn = inbox.lock()?;
+    let videos: Vec<Video> = diesel::sql_query(format!(
+        "SELECT rowid AS seq, media FROM messages
+         WHERE chat = ? AND kind = 'video' AND media IS NOT NULL AND rowid IN ({list})"
+    ))
+    .bind::<Text, _>(chat)
+    .load(&mut *conn)?;
+    Ok(videos
+        .into_iter()
+        .filter(|v| {
+            wa::message::VideoMessage::decode_from_slice(&v.media)
+                .is_ok_and(|v| v.gif_playback == Some(true))
+        })
+        .map(|v| v.seq)
+        .collect())
+}
+
 /// The newest messages of `kind` whose media `identity` accepts, each
 /// identity once. Favorite stickers and status updates are not "seen".
 fn recent(
@@ -263,5 +297,52 @@ mod tests {
         assert!(!crate::inbox::is_forwarded(&m));
         s.mimetype = Some("application/was".into());
         assert!(sticker(&s.encode_to_vec()).is_none(), "animated");
+    }
+
+    #[test]
+    fn only_videos_marked_for_gif_playback_are_gifs() {
+        use crate::inbox::{Fault, Row};
+        let base = std::env::temp_dir().join(format!("nimqo-gifs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let inbox = Inbox::open(
+            &base.join("app.db"),
+            &crate::vault::Key::new([3; 32]),
+            Fault::None,
+        )
+        .unwrap();
+        let video = |id: &str, gif: bool| {
+            let mut v = wa::message::VideoMessage::default();
+            v.gif_playback = gif.then_some(true);
+            Row {
+                chat: "c@s.whatsapp.net".into(),
+                sender: "c@s.whatsapp.net".into(),
+                id: id.into(),
+                ts: 1,
+                body: None,
+                from_me: false,
+                kind: "video".into(),
+                sender_name: String::new(),
+                status: "",
+                read: true,
+                expires_at: None,
+                media: Some(v.encode_to_vec()),
+                quote: None,
+                forwarded: false,
+            }
+        };
+        inbox
+            .commit(vec![video("g", true), video("v", false)], &[])
+            .unwrap();
+        let rows = inbox.messages("c@s.whatsapp.net", 10).unwrap();
+        let seq = |id: &str| rows.iter().find(|r| r.id == id).unwrap().seq;
+        let all: Vec<i64> = rows.iter().map(|r| r.seq).collect();
+        let found = gifs(&inbox, "c@s.whatsapp.net", &all).unwrap();
+        assert_eq!(found.into_iter().collect::<Vec<_>>(), [seq("g")]);
+        assert!(
+            gifs(&inbox, "other@s.whatsapp.net", &all)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

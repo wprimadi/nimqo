@@ -162,6 +162,8 @@ pub struct ChatMessage {
     pub revision: i64,
     /// A text with a link preview (`Core::link_preview`).
     pub has_link: bool,
+    /// A video that plays as a GIF: looping, silent, without controls.
+    pub gif: bool,
 }
 
 /// A link's title, description and picture, shown under a text.
@@ -273,6 +275,7 @@ impl From<MessageRow> for ChatMessage {
             my_reaction: r.my_reaction,
             revision: r.revision,
             has_link: r.has_link,
+            gif: false,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),

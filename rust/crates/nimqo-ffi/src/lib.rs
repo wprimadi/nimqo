@@ -358,6 +358,18 @@ impl Core {
             .into_iter()
             .map(ChatMessage::from)
             .collect();
+        let videos: Vec<i64> = messages
+            .iter()
+            .filter(|m| m.kind == MessageKind::Video)
+            .map(|m| m.seq)
+            .collect();
+        if !videos.is_empty() {
+            let gifs =
+                nimqo_whatsapp::forward::gifs(&self.inbox, chat_id, &videos).unwrap_or_default();
+            for m in &mut messages {
+                m.gif = gifs.contains(&m.seq);
+            }
+        }
         // As on the phone, a status shows only when its poster is saved.
         if chat_id == nimqo_whatsapp::inbox::STATUS {
             messages.retain(|m| m.from_me || self.inbox.is_contact(&m.sender).unwrap_or(false));

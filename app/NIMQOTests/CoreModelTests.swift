@@ -102,7 +102,7 @@ struct CoreModelTests {
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil,
                 delivery: .none,
-                reply: nil, mentions: [], forwarded: false, starred: false, revision: 0, hasLink: false
+                reply: nil, mentions: [], forwarded: false, starred: false, revision: 0, hasLink: false, gif: false
             )
         }
         let loaded = [msg(1, 1), msg(2, 5), msg(2, 6), msg(3, 2)]

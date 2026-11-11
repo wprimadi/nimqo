@@ -149,6 +149,8 @@ private struct StickerCell: View {
     let sending: Bool
     let pick: () -> Void
     @State private var image: NSImage?
+    /// A GIF plays while the pointer is over it.
+    @State private var loop: GifLoop?
     @State private var hovering = false
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -163,6 +165,11 @@ private struct StickerCell: View {
                         .resizable()
                         .scaledToFill()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .overlay {
+                            if let loop, hovering {
+                                LoopView(player: loop.player).allowsHitTesting(false)
+                            }
+                        }
                         .clipShape(.rect(cornerRadius: 12, style: .continuous))
                         .overlay(alignment: .bottomLeading) {
                             Text("GIF")
@@ -194,6 +201,13 @@ private struct StickerCell: View {
         .buttonStyle(.plain)
         .onHover { over in
             withAnimation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.5)) { hovering = over }
+            if gif, !reduceMotion {
+                if over {
+                    play()
+                } else {
+                    loop?.player.pause()
+                }
+            }
         }
         .animation(reduceMotion ? nil : .spring(duration: 0.25, bounce: 0.6), value: sending)
         .accessibilityLabel(gif ? "GIF" : "Sticker")
@@ -218,6 +232,28 @@ private struct StickerCell: View {
             return 0.4
         }
         return hovering ? 1.12 : 1
+    }
+
+    /// Fetches the GIF the first time, then plays it while still hovered.
+    private func play() {
+        if let loop {
+            loop.player.play()
+            return
+        }
+        let (chat, seq, core) = (sticker.chatId, sticker.seq, core)
+        Task {
+            let read = { await Task.detached { (try? core.mediaFile(chatId: chat, seq: seq)) ?? nil }.value }
+            var data = await read()
+            if data == nil, await core.downloadMedia(chatId: chat, seq: seq) {
+                data = await read()
+            }
+            guard let data, loop == nil else { return }
+            let made = GifLoop(data)
+            loop = made
+            if hovering {
+                made.player.play()
+            }
+        }
     }
 
     /// The sticker's file, downloading it first when it is not here yet.
