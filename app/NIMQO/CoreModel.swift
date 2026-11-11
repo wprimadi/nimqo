@@ -195,7 +195,11 @@ final class CoreModel {
             await MainActor.run {
                 switch result {
                 case let .success(chats):
-                    self.chats = chats.map(ChatSummary.init)
+                    // Unchanged (a receipt, a message elsewhere): nothing
+                    // to redraw, which in a busy account is most rereads.
+                    let fresh = chats.map(ChatSummary.init)
+                    guard fresh != self.chats else { break }
+                    self.chats = fresh
                     self.notifier.update(self.chats, viewing: self.selectedChat)
                     self.expireActivity()
                 case let .failure(error): self.log.error("chats: \(String(describing: error), privacy: .private)")
@@ -236,7 +240,9 @@ final class CoreModel {
                         self.hasOlderMessages = !latest.isEmpty && !self.historyExhausted.contains(id)
                         self.askedPhoneBefore = nil
                     }
-                    self.messages = kept + latest
+                    if kept + latest != self.messages {
+                        self.messages = kept + latest
+                    }
                     self.messagesChat = id
                     let (count, older) = (self.messages.count, self.hasOlderMessages)
                     self.log.notice("chat loaded: \(count, privacy: .public), older: \(older, privacy: .public)")
@@ -248,31 +254,6 @@ final class CoreModel {
 
     func update(qrPayload payload: String) {
         qrPayload = payload
-    }
-
-    func requestPairCode(phoneNumber: String) {
-        pairCode = nil
-        do {
-            try core?.requestPairCode(phoneNumber: phoneNumber)
-            pairCodeMessage = "Requesting a code…"
-        } catch {
-            pairCodeMessage = Self.message(for: error)
-        }
-    }
-
-    func update(pairCode code: String) {
-        // Shown in two groups of four, the way WhatsApp displays it.
-        pairCode = code.count == 8 ? "\(code.prefix(4))-\(code.suffix(4))" : code
-        pairCodeMessage = nil
-    }
-
-    func pairCodeFailed(throttled: Bool, retryAfterSecs: UInt64?) {
-        pairCode = nil
-        pairCodeMessage = if throttled {
-            "Too many requests. Try again in \(Self.duration(retryAfterSecs ?? 60))."
-        } else {
-            "WhatsApp did not issue a code. Check the number, or use the QR code."
-        }
     }
 
     func fail(_ error: Error) {
@@ -314,6 +295,34 @@ final class CoreModel {
             networkChanged: { [weak self] available in self?.networkReported(available) },
             didWake: { [weak self] in self?.core?.reconnectNow() }
         )
+    }
+}
+
+/// Linking with a code instead of the QR code.
+extension CoreModel {
+    func requestPairCode(phoneNumber: String) {
+        pairCode = nil
+        do {
+            try core?.requestPairCode(phoneNumber: phoneNumber)
+            pairCodeMessage = "Requesting a code…"
+        } catch {
+            pairCodeMessage = Self.message(for: error)
+        }
+    }
+
+    func update(pairCode code: String) {
+        // Shown in two groups of four, the way WhatsApp displays it.
+        pairCode = code.count == 8 ? "\(code.prefix(4))-\(code.suffix(4))" : code
+        pairCodeMessage = nil
+    }
+
+    func pairCodeFailed(throttled: Bool, retryAfterSecs: UInt64?) {
+        pairCode = nil
+        pairCodeMessage = if throttled {
+            "Too many requests. Try again in \(Self.duration(retryAfterSecs ?? 60))."
+        } else {
+            "WhatsApp did not issue a code. Check the number, or use the QR code."
+        }
     }
 }
 

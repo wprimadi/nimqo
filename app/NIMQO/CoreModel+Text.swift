@@ -97,8 +97,8 @@ final class Listener: CoreListener, Sendable {
     }
 }
 
-/// Chat changes gathered for a moment: a busy group reports one per message
-/// and receipt, and each reread the chat list and the open chat.
+/// Chat changes gathered for a moment (0.3 s): a busy group reports one per
+/// message and receipt, and each rereads the chat list and the open chat.
 @MainActor
 final class ChangeBatch {
     private var pending: Set<String> = []
@@ -110,7 +110,7 @@ final class ChangeBatch {
         pending.formUnion(ids)
         guard first else { return }
         Task {
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await Task.sleep(for: .milliseconds(300))
             let ids = Array(pending)
             pending = []
             await apply(ids)

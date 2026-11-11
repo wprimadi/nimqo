@@ -55,7 +55,7 @@ private struct RecordingDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        TimelineView(.animation(paused: reduceMotion)) { context in
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
             let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
             ZStack {
                 Circle()

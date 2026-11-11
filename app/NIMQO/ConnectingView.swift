@@ -12,7 +12,7 @@ struct ConnectingView: View {
             if reduceMotion {
                 emblem(at: 0)
             } else {
-                TimelineView(.animation) { context in
+                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
                     emblem(at: context.date.timeIntervalSinceReferenceDate)
                 }
             }
@@ -20,7 +20,7 @@ struct ConnectingView: View {
                 if reduceMotion {
                     Text(text).font(.title3.weight(.semibold))
                 } else {
-                    TimelineView(.animation) { context in
+                    TimelineView(.animation(minimumInterval: 1 / 30)) { context in
                         Shimmer(text: text, time: context.date.timeIntervalSinceReferenceDate)
                     }
                 }

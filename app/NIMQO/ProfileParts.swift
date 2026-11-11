@@ -191,7 +191,7 @@ struct ProfileRing: View {
                 .fill(ring)
                 .shadow(color: .accentColor.opacity(glowing ? 0.6 : 0), radius: 14)
             if busy {
-                TimelineView(.animation(paused: reduceMotion)) { context in
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { context in
                     Circle()
                         .trim(from: 0, to: 0.25)
                         .stroke(.white, style: StrokeStyle(lineWidth: 3, lineCap: .round))

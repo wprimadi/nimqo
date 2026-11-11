@@ -24,7 +24,7 @@ struct TypingDots: View {
         if reduceMotion {
             dots(phase: -1)
         } else {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
                 dots(phase: context.date.timeIntervalSinceReferenceDate)
             }
         }

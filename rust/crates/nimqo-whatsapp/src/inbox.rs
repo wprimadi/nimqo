@@ -169,6 +169,8 @@ impl Inbox {
     /// The query fails.
     pub fn chats(&self, limit: i64) -> Result<Vec<ChatRow>> {
         let mut conn = self.lock()?;
+        // One latest-message lookup per chat, not per message: the list is
+        // reread on every change, and a pass over all messages cost a core.
         // ponytail: correlated subqueries on the (chat, ts) index; add a
         // chats table if large accounts make this slow.
         Ok(diesel::sql_query(
@@ -193,9 +195,10 @@ impl Inbox {
                        OR until > CAST(strftime('%s', 'now') AS INTEGER) * 1000)) AS muted,
                COALESCE((SELECT ts FROM chat_pins WHERE chat = m.chat), 0) AS pinned,
                EXISTS (SELECT 1 FROM chat_archives WHERE chat = m.chat) AS archived
-             FROM messages m
-             WHERE m.chat NOT IN ('status@broadcast', 'favorites@stickers.nimqo') AND m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = m.chat
-                              ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
+             FROM (SELECT DISTINCT chat FROM messages
+                   WHERE chat NOT IN ('status@broadcast', 'favorites@stickers.nimqo')) c
+             JOIN messages m ON m.rowid = (SELECT x.rowid FROM messages x WHERE x.chat = c.chat
+                                           ORDER BY x.ts DESC, x.rowid DESC LIMIT 1)
              -- Pinned first, the latest pin on top, so no limit hides them.
              ORDER BY pinned DESC, m.ts DESC LIMIT ?",
         )

@@ -67,7 +67,12 @@ final class PictureStore {
         }
         let picture = (try? core?.picture(chatId: chat, seq: message.seq)) ?? nil
         let found = picture.flatMap { picture in
-            Self.downscaled(picture.bytes, maxPixels: 720).map { ($0, picture.full) }
+            Self.downscaled(picture.bytes, maxPixels: 640).map { ($0, picture.full) }
+        }
+        // ponytail: past 150 decoded pictures (~1 MB each), keep only this
+        // chat's; an LRU if switching back and forth reads too often.
+        if images.count > 150 {
+            images = images.filter { $0.key.hasPrefix(chat + "\n") }
         }
         images[key] = .some(found)
         return found
@@ -270,19 +275,23 @@ struct MediaTile: ViewModifier {
     }
 }
 
-/// An animated sticker, looping; still under Reduce Motion.
+/// An animated sticker, looping while on screen; still under Reduce Motion.
+/// The timeline lays out every loaded message, so one scrolled away would
+/// otherwise keep drawing.
 private struct StickerAnimation: View {
     let animation: LottieAnimation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var shown = false
 
     var body: some View {
         LottieView(animation: animation)
-            .playbackMode(reduceMotion
+            .playbackMode(reduceMotion || !shown
                 ? .paused(at: .progress(0))
                 : .playing(.fromProgress(0, toProgress: 1, loopMode: .loop)))
             .resizable()
             .scaledToFit()
             .frame(width: 160, height: 160)
+            .onShownChange { shown = $0 }
     }
 }
 

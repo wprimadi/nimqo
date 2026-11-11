@@ -12,6 +12,7 @@ final class AvatarStore {
     var core: Core? {
         didSet {
             images = [:]
+            stored = [:]
             requested = []
             generation += 1
         }
@@ -22,6 +23,8 @@ final class AvatarStore {
     private var generation = 0
     /// nil value: looked up, no picture stored.
     @ObservationIgnored private var images: [String: NSImage?] = [:]
+    /// The bytes each cached image came from (previews are a few KB).
+    @ObservationIgnored private var stored: [String: Data?] = [:]
     @ObservationIgnored private var requested: Set<String> = []
 
     func image(for chat: String) -> NSImage? {
@@ -32,6 +35,7 @@ final class AvatarStore {
         let data = (try? core?.avatar(chatId: chat)) ?? nil
         let image = data.flatMap(NSImage.init(data:))
         images[chat] = .some(image)
+        stored[chat] = .some(data)
         return image
     }
 
@@ -42,11 +46,21 @@ final class AvatarStore {
     }
 
     /// The core reported these chats changed; a new picture may be stored.
+    /// Most changes are messages, so every avatar is redrawn only when one
+    /// of the pictures shown really is different.
     func invalidate(_ chats: [String]) {
+        var changed = false
         for chat in chats {
-            images[chat] = nil
+            guard let old = stored[chat] else { continue }
+            if ((try? core?.avatar(chatId: chat)) ?? nil) != old {
+                images[chat] = nil
+                stored[chat] = nil
+                changed = true
+            }
         }
-        generation += 1
+        if changed {
+            generation += 1
+        }
     }
 }
 
