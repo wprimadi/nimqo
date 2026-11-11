@@ -57,7 +57,7 @@ struct NimqoApp: App {
         }
 
         MenuBarExtra {
-            StatusMenu(model: model, panels: panels)
+            MenuBarPanel(model: model, panels: panels)
         } label: {
             let unread = model.chats.filter { !$0.quiet }.reduce(0) { $0 + $1.unread }
             Label("NIMQO", systemImage: model.statusSymbol)
@@ -69,6 +69,7 @@ struct NimqoApp: App {
                 Text("\(unread)")
             }
         }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -118,43 +119,5 @@ struct ResetCommand: View {
             model.confirmingReset = true
         }
         .disabled(!model.canReset)
-    }
-}
-
-/// Kept small on purpose (plan 7.5): status, the latest chats, open,
-/// Settings, quit. Not a second app.
-struct StatusMenu: View {
-    let model: CoreModel
-    let panels: Panels
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Text(model.statusText)
-        Divider()
-        if !model.listed.isEmpty {
-            Section("Recent") {
-                ForEach(model.listed.prefix(5)) { chat in
-                    Button(chat.unread > 0 ? "\(chat.title) (\(chat.unread))" : chat.title) {
-                        open(chat.id)
-                    }
-                }
-            }
-            Divider()
-        }
-        Button("Open NIMQO") { open(nil) }
-            .keyboardShortcut("o")
-        PanelCommand(title: "Settings…", panel: .settings, panels: panels)
-            .keyboardShortcut(",")
-        Button("Quit NIMQO") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
-    }
-
-    /// Brings the window forward, on `chat` if given.
-    private func open(_ chat: ChatSummary.ID?) {
-        openWindow(id: MainWindow.id)
-        NSApp.activate()
-        if let chat {
-            model.selectedChat = chat
-        }
     }
 }
