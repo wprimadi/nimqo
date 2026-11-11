@@ -38,9 +38,18 @@ pub fn import(inbox: &Inbox, sync: &LazyHistorySync) -> Result<usize> {
         // Groups: the subject. People: the name saved on the phone, which
         // the address book sync can lack. Not display_name: it can be the
         // person's own profile name, shown unmarked it would pass as saved.
+        let votes: Vec<crate::effects::Effect> = conv
+            .messages
+            .iter()
+            .filter_map(|m| m.message.as_option())
+            .flat_map(|m| history_votes(&chat, m))
+            .collect();
         let name = conv.name.filter(|n| !n.trim().is_empty());
         saved += usize::from(name.is_some() && !chat.ends_with("@g.us"));
         inbox.import(&chat, name, rows)?;
+        if !votes.is_empty() {
+            inbox.commit(Vec::new(), &votes)?;
+        }
         if let Some(seconds) = conv.ephemeral_expiration {
             let timer = crate::effects::Effect::Timer {
                 chat: chat.clone(),
@@ -159,6 +168,44 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
     })
 }
 
+/// The votes the phone already holds for a poll in history. They come
+/// open (the chosen options' hashes), not sealed as live votes do, so
+/// they are kept open: an empty IV marks them (see `cards::SealedVote`).
+fn history_votes(chat: &str, m: &wa::WebMessageInfo) -> Vec<crate::effects::Effect> {
+    let Some(target) = m.key.as_option().and_then(|k| k.id.clone()) else {
+        return Vec::new();
+    };
+    m.poll_updates
+        .iter()
+        .filter_map(|u| {
+            let key = u.poll_update_message_key.as_option()?;
+            let voter = if key.from_me.unwrap_or(false) {
+                ME.to_owned()
+            } else {
+                strip_device(key.participant.as_deref().or(key.remote_jid.as_deref())?)
+            };
+            let picked = &u.vote.as_option()?.selected_options;
+            let payload = picked
+                .iter()
+                .filter(|h| h.len() == 32)
+                .flatten()
+                .copied()
+                .collect();
+            Some(crate::effects::Effect::Vote {
+                chat: chat.to_owned(),
+                voter: voter.clone(),
+                vote: crate::cards::Vote {
+                    target: target.clone(),
+                    voter_jid: voter,
+                    payload,
+                    iv: Vec::new(),
+                    ts: u.sender_timestamp_ms.unwrap_or(0),
+                },
+            })
+        })
+        .collect()
+}
+
 /// Never "pending": that would put the phone's message in our outbox.
 fn history_status(status: Option<wa::web_message_info::Status>) -> &'static str {
     use wa::web_message_info::Status;
@@ -191,6 +238,61 @@ mod tests {
         assert_eq!(
             chat_id(&conv("1-2@g.us", None)).as_deref(),
             Some("1-2@g.us")
+        );
+    }
+
+    #[test]
+    fn history_brings_poll_votes_open_keyed_by_voter() {
+        use whatsapp_rust::buffa::MessageField;
+        let update = |from_me: bool, who: Option<&str>, picked: Vec<Vec<u8>>| {
+            let mut key = wa::MessageKey::default();
+            key.from_me = Some(from_me);
+            key.participant = who.map(Into::into);
+            let mut vote = wa::message::PollVoteMessage::default();
+            vote.selected_options = picked;
+            let mut u = wa::PollUpdate::default();
+            u.poll_update_message_key = MessageField::some(key);
+            u.vote = MessageField::some(vote);
+            u.sender_timestamp_ms = Some(7);
+            u
+        };
+        let mut key = wa::MessageKey::default();
+        key.id = Some("poll1".into());
+        let mut m = wa::WebMessageInfo::default();
+        m.key = MessageField::some(key);
+        m.poll_updates = vec![
+            update(
+                false,
+                Some("62811:4@s.whatsapp.net"),
+                vec![vec![1; 32], vec![2; 32], vec![3; 5]],
+            ),
+            update(true, None, vec![]),
+        ];
+        let votes = history_votes("1-2@g.us", &m);
+        assert_eq!(votes.len(), 2);
+        let crate::effects::Effect::Vote { chat, voter, vote } = &votes[0] else {
+            panic!("a vote")
+        };
+        assert_eq!(
+            (chat.as_str(), voter.as_str()),
+            ("1-2@g.us", "62811@s.whatsapp.net")
+        );
+        assert_eq!(
+            (
+                vote.target.as_str(),
+                vote.payload.len(),
+                vote.iv.len(),
+                vote.ts
+            ),
+            ("poll1", 64, 0, 7)
+        );
+        let crate::effects::Effect::Vote { voter, vote, .. } = &votes[1] else {
+            panic!("a vote")
+        };
+        assert_eq!(
+            (voter.as_str(), vote.payload.len()),
+            (ME, 0),
+            "an own vote taken back"
         );
     }
 }

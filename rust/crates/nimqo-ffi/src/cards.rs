@@ -212,19 +212,29 @@ async fn poll_card(client: &whatsapp_rust::Client, card: &Card) -> Option<PollCa
     let own = client.pn();
     if let (Some(secret), Some(creator)) = (secret, creator_jid(creator, own.as_ref())) {
         for vote in &card.votes {
-            let Ok(voter) = vote.voter_jid.parse::<Jid>() else {
-                continue;
-            };
-            let sealed = PollVoteCiphertext {
-                enc_payload: &vote.payload,
-                enc_iv: &vote.iv,
-            };
-            let Ok(picked) = client
-                .polls()
-                .decrypt_vote_raw(sealed, secret, &card.id, &creator, &voter)
-                .await
-            else {
-                continue;
+            let picked: Vec<Vec<u8>> = if vote.iv.is_empty() {
+                vote.payload
+                    .as_chunks::<32>()
+                    .0
+                    .iter()
+                    .map(|h| h.to_vec())
+                    .collect()
+            } else {
+                let Ok(voter) = vote.voter_jid.parse::<Jid>() else {
+                    continue;
+                };
+                let sealed = PollVoteCiphertext {
+                    enc_payload: &vote.payload,
+                    enc_iv: &vote.iv,
+                };
+                let Ok(picked) = client
+                    .polls()
+                    .decrypt_vote_raw(sealed, secret, &card.id, &creator, &voter)
+                    .await
+                else {
+                    continue;
+                };
+                picked
             };
             if picked.is_empty() {
                 continue;

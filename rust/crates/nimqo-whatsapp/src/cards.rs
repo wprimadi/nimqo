@@ -178,6 +178,9 @@ pub struct Card {
     pub votes: Vec<SealedVote>,
 }
 
+/// A vote as kept: sealed for the poll, or open (the chosen options'
+/// hashes, 32 bytes each, back to back) when `iv` is empty, as history
+/// brings them.
 pub struct SealedVote {
     /// "me" for own votes.
     pub voter: String,
