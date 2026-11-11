@@ -15,6 +15,7 @@ struct MessageCommands {
     let isAdmin: @MainActor () -> Bool
     /// Sends a recorded voice note to this chat; returns why it was refused.
     var sendVoice: (@MainActor (Data) async -> String?)?
+    var stickers: StickerPicking?
 }
 
 /// "Delete for Everyone…" on a member's message, for group admins. Its own

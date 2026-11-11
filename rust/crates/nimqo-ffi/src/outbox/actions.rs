@@ -209,6 +209,26 @@ impl Sender {
         Ok(())
     }
 
+    /// Sends the sticker of message `seq` in `from` to `chat`, by its upload.
+    pub fn send_sticker(&self, chat: &str, from: &str, seq: i64) -> Result<(), CoreError> {
+        Self::may_send(chat)?;
+        let m = self.original(from, seq)?;
+        let sendable = m.kind == "sticker"
+            && m.media
+                .as_deref()
+                .and_then(nimqo_whatsapp::forward::sticker)
+                .is_some();
+        if !sendable {
+            return Err(refused("This sticker can't be sent."));
+        }
+        let id = self.client.generate_message_id();
+        self.inbox
+            .enqueue_copy(chat, id.as_str(), crate::unix_now(), &m, false)
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
     /// Pins, archives, and stars set before NIMQO kept them: fetch them
     /// once. A read, nothing is sent.
     pub async fn load_flags_once(&self) {

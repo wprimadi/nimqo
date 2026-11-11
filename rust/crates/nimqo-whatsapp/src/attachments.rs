@@ -487,7 +487,7 @@ fn waveforms_are_bounded() {
     assert_eq!(bars(&[5, 200, 100]), vec![5, 100, 100]);
     let long = bars(&vec![50; 1_000_000]);
     assert!(long.len() <= 64 && long.iter().all(|&b| b == 50));
-    assert!(bars(&[]).is_empty());
+    assert_eq!(bars(&[]), Vec::<u8>::new());
 }
 
 #[cfg(test)]

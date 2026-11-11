@@ -63,7 +63,8 @@ struct ConversationView: View {
                     if let send {
                         Composer(send: send, sendFile: sendFile, replyingTo: $replyingTo, dropped: $dropped,
                                  editing: $editing, edit: commands.edit,
-                                 lastEditable: messages.last { $0.isEditable }, sendVoice: commands.sendVoice)
+                                 lastEditable: messages.last { $0.isEditable }, sendVoice: commands.sendVoice,
+                                 stickers: commands.stickers)
                     }
                 }
                 .padding([.horizontal, .bottom], Theme.Spacing.medium)

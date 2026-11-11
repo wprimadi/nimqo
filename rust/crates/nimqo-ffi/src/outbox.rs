@@ -196,6 +196,9 @@ impl Sender {
         let message = if p.forwarded {
             nimqo_whatsapp::forward::forwarded(&p.kind, p.body.as_deref(), p.media.as_deref())
                 .ok_or("not forwardable")?
+        } else if p.kind == "sticker" {
+            nimqo_whatsapp::forward::sticker(p.media.as_deref().unwrap_or_default())
+                .ok_or("sticker not sendable")?
         } else if p.kind == "text" {
             let body = p.body.clone().unwrap_or_default();
             match self.quote_context(p) {

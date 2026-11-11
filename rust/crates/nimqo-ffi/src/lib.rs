@@ -997,6 +997,30 @@ impl Core {
         Ok(())
     }
 
+    /// Stickers to pick from: the newest seen in any chat, each once.
+    ///
+    /// # Errors
+    /// `Storage` if they cannot be read.
+    pub fn recent_stickers(&self) -> Result<Vec<StickerRef>, CoreError> {
+        Ok(nimqo_whatsapp::forward::recent_stickers(&self.inbox, 120)
+            .map_err(err(|detail| CoreError::Storage { detail }))?
+            .into_iter()
+            .map(|(chat_id, seq)| StickerRef { chat_id, seq })
+            .collect())
+    }
+
+    /// Sends the sticker of message `seq` in `from_chat` to `chat_id`.
+    ///
+    /// # Errors
+    /// `SendRefused` for a chat that is not a person or group, or a sticker
+    /// that cannot be sent again; `Storage` if it cannot be queued.
+    pub fn send_sticker(&self, chat_id: &str, from_chat: &str, seq: i64) -> Result<(), CoreError> {
+        self.sender.send_sticker(chat_id, from_chat, seq)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
     /// Queues a text message and starts sending it. Returns once it is
     /// stored; delivery state arrives through `on_chats_changed`.
     ///
@@ -1198,6 +1222,13 @@ async fn purge_expired(inbox: Inbox, attachments: Arc<Attachments>) {
             Err(e) => log::warn!("expiry task failed: {e}"),
         }
     }
+}
+
+/// A sticker to pick: the message it came in.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StickerRef {
+    pub chat_id: String,
+    pub seq: i64,
 }
 
 /// An audio message as its bubble draws it.

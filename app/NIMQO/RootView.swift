@@ -156,7 +156,10 @@ struct MainView: View {
                 delete: { seq in Task { await model.deleteForEveryone(seq, in: chat.id) } },
                 forward: { forwarding = ($0, chat.id) },
                 isAdmin: { [contacts = model.contacts] in contacts.isAdmin(of: chat.id) },
-                sendVoice: { await model.sendVoice($0, to: chat.id) }
+                sendVoice: { await model.sendVoice($0, to: chat.id) },
+                stickers: model.core.map { core in
+                    StickerPicking(core: core) { await model.sendSticker($0, to: chat.id) }
+                }
             )
         )
         // A new view per chat: it opens at the latest message.

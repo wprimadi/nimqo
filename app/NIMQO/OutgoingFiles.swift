@@ -163,6 +163,18 @@ extension CoreModel {
         return nil
     }
 
+    /// Sends a sticker picked from those seen; returns why it was refused.
+    func sendSticker(_ sticker: StickerRef, to chat: String) async -> String? {
+        guard let core else { return "Not connected." }
+        let result = await Task.detached {
+            Result { try core.sendSticker(chatId: chat, fromChat: sticker.chatId, seq: sticker.seq) }
+        }.value
+        if case let .failure(error) = result {
+            return Self.message(for: error)
+        }
+        return nil
+    }
+
     /// Sends a picked file to `chat`, with `caption` if given. Returns why
     /// it was refused.
     func sendFile(_ url: URL, caption: String?, to chat: String) async -> String? {

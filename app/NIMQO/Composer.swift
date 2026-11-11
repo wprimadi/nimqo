@@ -16,6 +16,9 @@ struct Composer: View {
     var lastEditable: ChatMessage?
     /// Sends a recorded voice note; nil where none can be sent.
     var sendVoice: (@MainActor (Data) async -> String?)?
+    /// Stickers to pick and send; nil where none can be sent.
+    var stickers: StickerPicking?
+    @State private var pickingSticker = false
     @State private var recorder = VoiceRecorder()
     @State private var text = ""
     /// What was typed before editing began, put back when it ends.
@@ -163,8 +166,15 @@ struct Composer: View {
                 }
                 .padding(.leading, 14)
                 .padding(.vertical, 8)
-                .padding(.trailing, 34)
-                .overlay(alignment: .bottomTrailing) { emojiButton }
+                .padding(.trailing, stickers == nil ? 34 : 62)
+                .overlay(alignment: .bottomTrailing) {
+                    HStack(spacing: 0) {
+                        if stickers != nil {
+                            stickerButton
+                        }
+                        emojiButton
+                    }
+                }
                 .glassSurface(in: .rect(cornerRadius: 18))
             Button(sendTitle, systemImage: sendSymbol, action: primary)
                 .contentTransition(.symbolEffect(.replace))
@@ -211,6 +221,27 @@ struct Composer: View {
                 sendFiles(more)
             }
         }
+    }
+
+    /// Stickers from the chats, in a popover above the field.
+    private var stickerButton: some View {
+        Button("Stickers", systemImage: "face.smiling.inverse") { pickingSticker.toggle() }
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .font(.title3)
+            .foregroundStyle(pickingSticker ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            .help("Stickers")
+            .padding(.trailing, 6)
+            .padding(.bottom, 7)
+            .popover(isPresented: $pickingSticker, arrowEdge: .top) {
+                if let stickers {
+                    StickerPicker(picking: stickers) { refused in
+                        refusal = refused
+                        pickingSticker = false
+                        focused = true
+                    }
+                }
+            }
     }
 
     /// The system's emoji picker, typing into the field (also Fn-E or Control-Command-Space).
