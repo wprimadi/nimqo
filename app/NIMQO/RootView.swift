@@ -43,7 +43,7 @@ struct MainView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum Pane {
-        case chats, status, channels
+        case chats, status, channels, communities
     }
 
     /// The selected chat, or the one just started from New Chat.
@@ -60,18 +60,26 @@ struct MainView: View {
                     switch section {
                     case .chats: chatList
                     case .status: statusList
-                    case .channels: channelList
+                    case .channels: ChannelList(store: model.channels, avatars: model.avatars)
+                    case .communities: CommunityList(store: model.communities, avatars: model.avatars)
                     }
                 }
             }
             .safeAreaInset(edge: .top) {
                 HStack(spacing: Theme.Spacing.small) {
+                    // Icons: four names do not fit the narrowest sidebar.
                     Picker("Show", selection: $section) {
-                        Text("Chats").tag(Pane.chats)
-                        Text("Status").tag(Pane.status)
-                        Text("Channels").tag(Pane.channels)
+                        Label("Chats", systemImage: "bubble.left.and.bubble.right").tag(Pane.chats)
+                            .help("Chats")
+                        Label("Status", systemImage: "circle.dashed").tag(Pane.status)
+                            .help("Status")
+                        Label("Channels", systemImage: "megaphone").tag(Pane.channels)
+                            .help("Channels")
+                        Label("Communities", systemImage: "person.3").tag(Pane.communities)
+                            .help("Communities")
                     }
                     .pickerStyle(.segmented)
+                    .labelStyle(.iconOnly)
                     .labelsHidden()
                     MoreMenu(composing: $composing, starred: $starred)
                         .disabled(model.core == nil)
@@ -84,7 +92,9 @@ struct MainView: View {
             .navigationSplitViewColumnWidth(min: Theme.sidebarMinWidth, ideal: 320)
         } detail: {
             if section == .channels {
-                channelDetail
+                ChannelDetail(store: model.channels, pictures: model.pictures)
+            } else if section == .communities {
+                communityDetail
             } else if section == .status {
                 statusDetail
             } else if let chat = openChat {
@@ -168,18 +178,12 @@ struct MainView: View {
         .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts, calls: model.calls)
     }
 
-    @ViewBuilder
-    private var channelDetail: some View {
-        let store = model.channels
-        if let id = store.selected, let channel = store.channels?.first(where: { $0.id == id }) {
-            ChannelView(channel: channel, store: store, pictures: model.pictures)
-                .id(id)
-        } else {
-            ContentUnavailableView(
-                "Select a channel",
-                systemImage: "megaphone",
-                description: Text("Posts are read from WhatsApp when a channel opens; nothing is sent back.")
-            )
+    private var communityDetail: some View {
+        CommunityDetail(store: model.communities, avatars: model.avatars) { chat in
+            // A group joined but quiet so far has no row in Chats yet.
+            section = .chats
+            draft = model.chats.contains { $0.id == chat.id } ? nil : chat
+            model.selectedChat = chat.id
         }
     }
 
@@ -208,30 +212,6 @@ struct MainView: View {
                 )
             }
         }
-    }
-
-    private var channelList: some View {
-        let store = model.channels
-        return List(store.channels ?? [], id: \.id, selection: Bindable(store).selected) { channel in
-            ChannelRow(channel: channel, avatars: model.avatars)
-                .listRowSeparator(.visible)
-        }
-        .overlay {
-            if store.channels == nil {
-                if store.failed {
-                    ContentUnavailableView("Couldn't load channels", systemImage: "wifi.slash")
-                } else {
-                    ProgressView()
-                }
-            } else if store.channels?.isEmpty == true {
-                ContentUnavailableView(
-                    "No channels",
-                    systemImage: "megaphone",
-                    description: Text("Channels this account follows appear here.")
-                )
-            }
-        }
-        .task { await store.load() }
     }
 
     private var forwardingShown: Binding<Bool> {

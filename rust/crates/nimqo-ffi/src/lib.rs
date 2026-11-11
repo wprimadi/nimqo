@@ -28,6 +28,7 @@ uniffi::setup_scaffolding!();
 mod calls;
 mod channels;
 mod chats;
+mod communities;
 mod outbox;
 mod privacy;
 mod state;

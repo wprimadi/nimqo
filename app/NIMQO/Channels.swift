@@ -176,3 +176,51 @@ extension ChannelPost {
                     reply: nil, mentions: [], forwarded: false, starred: false)
     }
 }
+
+/// The followed channels in the sidebar.
+struct ChannelList: View {
+    let store: ChannelStore
+    let avatars: AvatarStore
+
+    var body: some View {
+        List(store.channels ?? [], id: \.id, selection: Bindable(store).selected) { channel in
+            ChannelRow(channel: channel, avatars: avatars)
+                .listRowSeparator(.visible)
+        }
+        .overlay {
+            if store.channels == nil {
+                if store.failed {
+                    ContentUnavailableView("Couldn't load channels", systemImage: "wifi.slash")
+                } else {
+                    ProgressView()
+                }
+            } else if store.channels?.isEmpty == true {
+                ContentUnavailableView(
+                    "No channels",
+                    systemImage: "megaphone",
+                    description: Text("Channels this account follows appear here.")
+                )
+            }
+        }
+        .task { await store.load() }
+    }
+}
+
+/// The selected channel's posts, or a hint to pick one.
+struct ChannelDetail: View {
+    let store: ChannelStore
+    let pictures: PictureStore
+
+    var body: some View {
+        if let id = store.selected, let channel = store.channels?.first(where: { $0.id == id }) {
+            ChannelView(channel: channel, store: store, pictures: pictures)
+                .id(id)
+        } else {
+            ContentUnavailableView(
+                "Select a channel",
+                systemImage: "megaphone",
+                description: Text("Posts are read from WhatsApp when a channel opens; nothing is sent back.")
+            )
+        }
+    }
+}

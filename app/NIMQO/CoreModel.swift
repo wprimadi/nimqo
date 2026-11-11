@@ -50,6 +50,7 @@ final class CoreModel {
             pictures.core = core
             contacts.core = core
             channels.core = core
+            communities.core = core
             statuses.core = core
             calls.core = core
             notifier.reset()
@@ -60,6 +61,7 @@ final class CoreModel {
     let pictures = PictureStore()
     let contacts = ContactStore()
     let channels = ChannelStore()
+    let communities = CommunityStore()
     let statuses = StatusStore()
     let calls = CallStore()
     let notifier = Notifier()
@@ -242,13 +244,6 @@ final class CoreModel {
         }
     }
 
-    /// The loaded messages that come before `first` in timeline order
-    /// (timestamp, then storage order); none when `first` is nil.
-    nonisolated static func olderThan(_ first: ChatMessage?, in loaded: [ChatMessage]) -> [ChatMessage] {
-        guard let first else { return [] }
-        return Array(loaded.prefix { ($0.timestampSecs, $0.seq) < (first.timestampSecs, first.seq) })
-    }
-
     func update(qrPayload payload: String) {
         qrPayload = payload
     }
@@ -381,5 +376,14 @@ extension CoreModel {
     /// A person or group already here: it gets a composer, reactions, mute.
     func canSend(_ chatId: String) -> Bool {
         core?.canSend(chatId: chatId) ?? false
+    }
+}
+
+extension CoreModel {
+    /// The loaded messages that come before `first` in timeline order
+    /// (timestamp, then storage order); none when `first` is nil.
+    nonisolated static func olderThan(_ first: ChatMessage?, in loaded: [ChatMessage]) -> [ChatMessage] {
+        guard let first else { return [] }
+        return Array(loaded.prefix { ($0.timestampSecs, $0.seq) < (first.timestampSecs, first.seq) })
     }
 }
