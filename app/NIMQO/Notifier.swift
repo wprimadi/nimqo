@@ -77,9 +77,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         authorized = true
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        // Reply from the notification, without opening NIMQO.
+        // Reply from the notification, without opening NIMQO; never from a
+        // locked screen.
         let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: String(localized: "Reply"),
-                                                  options: [], textInputButtonTitle: String(localized: "Send"),
+                                                  options: [.authenticationRequired],
+                                                  textInputButtonTitle: String(localized: "Send"),
                                                   textInputPlaceholder: String(localized: "Message"))
         center.setNotificationCategories([UNNotificationCategory(identifier: Self.messageCategory, actions: [reply],
                                                                  intentIdentifiers: [])])
