@@ -45,6 +45,7 @@ struct NimqoApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 PanelCommand(title: "About NIMQO", panel: .about, panels: panels)
+                PanelCommand(title: "Edit Profile…", panel: .profile, panels: panels)
                 ResetCommand(model: model)
             }
             CommandGroup(replacing: .appSettings) {

@@ -31,6 +31,7 @@ mod chats;
 mod communities;
 mod outbox;
 mod privacy;
+mod profile;
 mod state;
 
 pub use calls::{CallEnd, CallListener, PeerVideo};

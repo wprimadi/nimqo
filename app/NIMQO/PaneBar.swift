@@ -131,6 +131,7 @@ private struct PaneTab: View {
 private struct MoreMenu: View {
     @Binding var composing: NewChatView.Start?
     @Binding var starred: Bool
+    @Environment(Panels.self) private var panels
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -140,6 +141,7 @@ private struct MoreMenu: View {
             Button("New Group", systemImage: "person.2") { composing = .group }
             Divider()
             Button("Starred Messages", systemImage: "star") { starred = true }
+            Button("Edit Profile…", systemImage: "person.crop.circle") { panels.shown = .profile }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .bold))
@@ -154,7 +156,7 @@ private struct MoreMenu: View {
         .onHover { over in
             withAnimation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.3)) { hovering = over }
         }
-        .help("New chat, new group, starred messages")
+        .help("New chat, new group, starred messages, your profile")
         .accessibilityLabel("More")
     }
 }

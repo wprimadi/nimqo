@@ -17,7 +17,7 @@ struct RootView: View {
             }
         }
         .sheet(item: Bindable(panels).shown) {
-            PanelSheet(panel: $0, core: model.core, online: model.state == .connected)
+            PanelSheet(panel: $0, core: model.core, online: model.state == .connected, avatars: model.avatars)
         }
         .confirmationDialog("Log out and remove all data?", isPresented: Bindable(model).confirmingReset) {
             Button("Log Out and Remove Data", role: .destructive) { model.logOutAndReset() }

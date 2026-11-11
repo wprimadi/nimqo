@@ -8,7 +8,7 @@ import SwiftUI
 @Observable
 final class Panels {
     enum Panel: String, Identifiable {
-        case settings, about
+        case settings, about, profile
 
         var id: Self {
             self
@@ -24,6 +24,7 @@ struct PanelSheet: View {
     let core: Core?
     /// Connected to WhatsApp: what Settings asks of the server can come.
     let online: Bool
+    let avatars: AvatarStore
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -39,6 +40,16 @@ struct PanelSheet: View {
                     }
                     .padding([.horizontal, .bottom], Theme.Spacing.large)
                     .padding(.top, Theme.Spacing.small)
+                }
+                .windowLook()
+            case .profile:
+                VStack(spacing: 0) {
+                    ProfileEditor(core: core, avatars: avatars)
+                    HStack {
+                        Spacer()
+                        Button("Done") { dismiss() }
+                    }
+                    .padding([.horizontal, .bottom], Theme.Spacing.large)
                 }
                 .windowLook()
             case .about:
