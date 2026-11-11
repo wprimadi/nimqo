@@ -54,6 +54,7 @@ pub enum MessageCard {
     Poll { poll: PollCard },
     Place { place: PlaceCard },
     People { people: Vec<PersonCard> },
+    Buttons { card: crate::buttons::ButtonsCard },
 }
 
 fn poll_parts(card: &Card) -> Option<(&wa::message::PollCreationMessage, Option<&[u8]>, &str)> {
@@ -127,6 +128,9 @@ impl Core {
                     .map(|c| person(c.display_name.as_deref(), c.vcard.as_deref()))
                     .collect();
                 Some(MessageCard::People { people })
+            }
+            "buttons" => {
+                crate::buttons::card(&card.message).map(|card| MessageCard::Buttons { card })
             }
             _ => None,
         }

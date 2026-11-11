@@ -212,6 +212,9 @@ impl Sender {
         } else if p.kind == "poll" {
             nimqo_whatsapp::cards::poll_to_send(p.media.as_deref().unwrap_or_default())
                 .ok_or("poll not sendable")?
+        } else if p.kind == "choice" {
+            nimqo_whatsapp::buttons::decode(p.media.as_deref().unwrap_or_default())
+                .ok_or("answer not sendable")?
         } else if p.kind == "sticker" {
             nimqo_whatsapp::forward::sticker(p.media.as_deref().unwrap_or_default())
                 .ok_or("sticker not sendable")?

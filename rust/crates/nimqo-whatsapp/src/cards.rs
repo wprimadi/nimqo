@@ -9,7 +9,7 @@ use whatsapp_rust::prelude::{MessageExt as _, wa};
 
 use crate::inbox::Inbox;
 
-pub const KINDS: [&str; 3] = ["poll", "location", "contact"];
+pub const KINDS: [&str; 4] = ["poll", "location", "contact", "buttons"];
 
 /// At most this many contacts in one card, options in one poll.
 const MAX_ITEMS: usize = 64;
@@ -59,7 +59,7 @@ pub(crate) fn classify(b: &wa::Message) -> Option<(&'static str, Option<String>)
     if b.live_location_message.as_option().is_some() {
         return Some(("location", Some("📍 Live location".to_owned())));
     }
-    None
+    crate::buttons::classify(b)
 }
 
 /// What is kept of a card. A poll keeps its secret (to open the votes) in
@@ -68,6 +68,9 @@ pub(crate) fn classify(b: &wa::Message) -> Option<(&'static str, Option<String>)
 /// own polls. A live location is kept as the place it was last at.
 pub(crate) fn card_of(message: &wa::Message, creator: &str) -> Option<Vec<u8>> {
     let b = message.get_base_message();
+    if poll_of(b).is_none() && crate::buttons::classify(b).is_some() {
+        return crate::buttons::kept(b);
+    }
     let mut kept = wa::Message::default();
     if let Some(p) = poll_of(b) {
         let mut poll = p.clone();
@@ -225,7 +228,7 @@ impl Inbox {
         let mut conn = self.lock()?;
         let row: Option<Row> = diesel::sql_query(
             "SELECT kind, id, from_me, media FROM messages
-             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind IN ('poll', 'location', 'contact')",
+             WHERE rowid = ? AND chat = ? AND media IS NOT NULL AND kind IN ('poll', 'location', 'contact', 'buttons')",
         )
         .bind::<BigInt, _>(seq)
         .bind::<Text, _>(chat)

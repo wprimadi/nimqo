@@ -3,6 +3,7 @@
 
 pub mod attachments;
 pub mod avatars;
+pub mod buttons;
 pub mod calllog;
 pub mod cards;
 pub mod channels;

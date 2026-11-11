@@ -5,7 +5,7 @@ import SwiftUI
 extension ChatMessage {
     /// Drawn as a card (`MessageCardView`), not as text.
     var isCard: Bool {
-        [.poll, .location, .contact].contains(kind)
+        [.poll, .location, .contact, .buttons].contains(kind)
     }
 }
 
@@ -23,7 +23,7 @@ extension EnvironmentValues {
     @Entry var openChat: OpenChatAction?
 }
 
-/// A poll, a place or contacts, loaded from the core; the message's line
+/// A poll, a place, contacts or buttons, loaded from the core; the message's line
 /// of text stands in until then.
 struct MessageCardView: View {
     let chat: String
@@ -39,6 +39,7 @@ struct MessageCardView: View {
                 PollCardView(chat: chat, seq: message.seq, poll: poll, core: store.core, reload: load)
             case let .place(place): PlaceCardView(place: place)
             case let .people(people): PeopleCardView(people: people)
+            case let .buttons(buttons): ButtonsCardView(chat: chat, seq: message.seq, card: buttons, core: store.core)
             case nil:
                 Text(message.body ?? "")
                     .italic()

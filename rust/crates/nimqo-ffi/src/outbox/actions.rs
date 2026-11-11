@@ -316,6 +316,46 @@ impl Sender {
         Ok(())
     }
 
+    /// Queues the answer to reply button or list row `id` of message `seq`.
+    pub fn send_choice(&self, chat: &str, seq: i64, id: &str) -> Result<(), CoreError> {
+        Self::may_send(chat)?;
+        let m = self.original(chat, seq)?;
+        let card = self
+            .inbox
+            .card(chat, seq)
+            .map_err(|e| storage(&e))?
+            .filter(|c| c.kind == "buttons")
+            .ok_or_else(|| refused("That message has no buttons."))?;
+        let sender = if m.from_me {
+            self.client
+                .pn()
+                .ok_or_else(|| refused("Not signed in."))?
+                .to_non_ad_string()
+        } else {
+            m.sender.clone()
+        };
+        let context = whatsapp_rust::wacore::proto_helpers::build_quote_context(
+            m.id.clone(),
+            sender,
+            &card.message,
+        );
+        let (answer, label) = nimqo_whatsapp::buttons::reply(&card.message, id, context)
+            .ok_or_else(|| refused("That button no longer answers."))?;
+        let id = self.client.generate_message_id();
+        self.inbox
+            .enqueue_file(
+                chat,
+                id.as_str(),
+                crate::unix_now(),
+                "choice",
+                Some(&label),
+                &whatsapp_rust::buffa::Message::encode_to_vec(&answer),
+            )
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
     /// Sends the GIF of message `seq` in `from` to `chat`, by its upload.
     ///
     /// # Errors

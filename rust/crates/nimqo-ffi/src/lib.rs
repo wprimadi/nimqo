@@ -25,6 +25,7 @@ use whatsapp_rust::{ChatActivity, Client, PresenceStatus};
 
 uniffi::setup_scaffolding!();
 
+mod buttons;
 mod calls;
 mod cards;
 mod channels;

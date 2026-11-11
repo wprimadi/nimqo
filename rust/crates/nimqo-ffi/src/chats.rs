@@ -14,6 +14,8 @@ pub enum MessageKind {
     Poll,
     Location,
     Contact,
+    /// Text with buttons or a list: `Core::message_card`.
+    Buttons,
     /// Deleted for everyone by its sender.
     Deleted,
     /// A call; the body is `<voice|video> <outcome> <seconds>`.
@@ -24,7 +26,8 @@ pub enum MessageKind {
 impl MessageKind {
     pub(crate) fn parse(kind: &str) -> Self {
         match kind {
-            "text" => Self::Text,
+            // "choice": an answer to buttons, sent from here.
+            "text" | "choice" => Self::Text,
             "image" => Self::Image,
             "video" => Self::Video,
             "audio" => Self::Audio,
@@ -33,6 +36,7 @@ impl MessageKind {
             "poll" => Self::Poll,
             "location" => Self::Location,
             "contact" => Self::Contact,
+            "buttons" => Self::Buttons,
             "deleted" => Self::Deleted,
             "call" => Self::Call,
             _ => Self::Unsupported,

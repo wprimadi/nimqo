@@ -978,6 +978,9 @@ pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<St
 /// Text for kinds the timeline shows as text: templates and buttons (one-time
 /// codes come as these), lists, events and pins.
 fn shown_text(b: &wa::Message) -> Option<String> {
+    if let Some(text) = crate::buttons::answer_text(b) {
+        return Some(text);
+    }
     let some = |s: &Option<String>| s.clone().filter(|s| !s.is_empty());
     if let Some(t) = b.template_message.as_option() {
         let hydrated = t.hydrated_template.as_option();
