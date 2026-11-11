@@ -88,6 +88,24 @@ final class StatusStore {
         selected = nil
     }
 
+    /// Deletes own `update` for everyone who can see it, then plays on;
+    /// nil when done, else why not.
+    func delete(_ update: ChatMessage) async -> String? {
+        guard let core else { return nil }
+        do {
+            try await core.deleteStatus(seq: update.seq)
+        } catch {
+            return CoreModel.message(for: error)
+        }
+        queue.removeAll { $0.seq == update.seq }
+        if queue.isEmpty {
+            close()
+        } else {
+            position = min(position, queue.count - 1)
+        }
+        return nil
+    }
+
     /// Records `update` opened; the core tells its poster only when asked.
     func view(_ update: ChatMessage, tellPoster: Bool) {
         guard unviewed.remove(update.seq) != nil, let core else { return }

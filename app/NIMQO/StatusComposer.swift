@@ -53,7 +53,7 @@ struct StatusComposer: View {
                 }
             }
         }
-        .fileImporter(isPresented: $picking, allowedContentTypes: [.image]) { result in
+        .fileImporter(isPresented: $picking, allowedContentTypes: [.image, .movie]) { result in
             if case let .success(url) = result {
                 Task { await load(url) }
             }
@@ -92,6 +92,9 @@ struct StatusComposer: View {
                 // The whole photo, over a blur of itself, as the phone shows it.
                 Image(nsImage: preview).resizable().scaledToFill().blur(radius: 24, opaque: true)
                 Image(nsImage: preview).resizable().scaledToFit()
+                if let seconds = photo?.durationSecs, photo?.kind == .video {
+                    VideoBadge(seconds: seconds)
+                }
             } else {
                 colour.color
                 LinearGradient(colors: [.white.opacity(0.16), .clear, .black.opacity(0.18)],
@@ -112,7 +115,9 @@ struct StatusComposer: View {
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .strokeBorder(.white, style: StrokeStyle(lineWidth: 3, dash: [10, 8]))
                     .padding(10)
-                    .overlay { Label("Drop to use this photo", systemImage: "photo.badge.plus").font(.headline) }
+                    .overlay {
+                        Label("Drop to use this photo or video", systemImage: "photo.badge.plus").font(.headline)
+                    }
                     .foregroundStyle(.white)
                     .background(.black.opacity(0.35))
             }
@@ -166,10 +171,11 @@ struct StatusComposer: View {
 
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Button(photo == nil ? "Add Photo" : "Remove Photo",
+            Button(photo == nil ? "Add Photo or Video" : "Remove",
                    systemImage: photo == nil ? "photo.badge.plus" : "photo.badge.minus", action: togglePhoto)
                 .labelStyle(.iconOnly)
-                .help(photo == nil ? "Add a photo (or drop one on the card)" : "Back to a text status")
+                .help(photo == nil ? "Add a photo or a video of up to a minute (or drop one on the card)"
+                    : "Back to a text status")
             if photo == nil {
                 Divider().frame(height: 22)
                 StatusSwatches(colour: $colour)
@@ -222,27 +228,12 @@ struct StatusComposer: View {
         }
     }
 
-    private func setPhoto(_ file: OutgoingFile?) {
+    private func setPhoto(_ file: OutgoingFile?, still: NSImage? = nil) {
         withAnimation(.easeInOut(duration: 0.3)) {
             photo = file
-            preview = file.flatMap { NSImage(data: $0.bytes) }
+            preview = still ?? file.flatMap { NSImage(data: $0.bytes) }
         }
         focused = true
-    }
-
-    private func load(_ url: URL) async {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer {
-            if scoped {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-        guard let file = try? await OutgoingFiles.prepare(url), file.kind == .photo else {
-            problem = "That file couldn't be read as a photo."
-            return
-        }
-        problem = nil
-        setPhoto(file)
     }
 
     private func post() {
@@ -278,5 +269,26 @@ struct StatusComposer: View {
         try? await Task.sleep(for: .seconds(1.8))
         withAnimation(.easeOut(duration: 0.3)) { toast = false }
         focused = true
+    }
+}
+
+private extension StatusComposer {
+    func load(_ url: URL) async {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        guard let file = try? await OutgoingFiles.prepare(url), [.photo, .video].contains(file.kind) else {
+            problem = "That file couldn't be read as a photo or an MP4 video."
+            return
+        }
+        if file.kind == .video, (file.durationSecs ?? .max) > 60 {
+            problem = "A status video can be at most a minute long."
+            return
+        }
+        problem = nil
+        await setPhoto(file, still: file.kind == .video ? VideoBadge.still(url) : nil)
     }
 }

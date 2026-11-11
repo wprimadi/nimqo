@@ -15,6 +15,9 @@ struct StatusPlayer: View {
     @State private var paused = false
     @State private var player: AVPlayer?
     @State private var source: MemoryAsset?
+    @State private var confirmingDelete = false
+    @State private var deleting = false
+    @State private var problem: String?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private let chat = StatusStore.chat
@@ -250,8 +253,10 @@ struct StatusPlayer: View {
         .frame(maxWidth: 640)
         .accessibilityHidden(true)
     }
+}
 
-    private var header: some View {
+private extension StatusPlayer {
+    var header: some View {
         HStack(spacing: 10) {
             Group {
                 if !update.fromMe, let image = avatars.image(for: update.sender) {
@@ -269,8 +274,25 @@ struct StatusPlayer: View {
                 Text(Date(timeIntervalSince1970: TimeInterval(update.timestampSecs)), style: .relative)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let problem {
+                    Text(problem).font(.caption).foregroundStyle(.red)
+                }
             }
             Spacer()
+            if update.fromMe {
+                Button("Delete", systemImage: "trash") {
+                    paused = true
+                    confirmingDelete = true
+                }
+                .disabled(deleting)
+                .glassIcon()
+                .confirmationDialog("Delete this status update?", isPresented: $confirmingDelete) {
+                    Button("Delete for Everyone", role: .destructive) { delete() }
+                    Button("Cancel", role: .cancel) { paused = false }
+                } message: {
+                    Text("It is removed for everyone who can see your status.")
+                }
+            }
             Button(paused ? "Play" : "Pause", systemImage: paused ? "play.fill" : "pause.fill") { paused.toggle() }
                 .keyboardShortcut(.space, modifiers: [])
                 .glassIcon()
@@ -279,6 +301,18 @@ struct StatusPlayer: View {
                 .glassIcon()
         }
         .frame(maxWidth: 640)
+    }
+
+    func delete() {
+        deleting = true
+        problem = nil
+        Task {
+            problem = await store.delete(update)
+            deleting = false
+            if problem != nil {
+                paused = false
+            }
+        }
     }
 }
 

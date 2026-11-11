@@ -2,7 +2,7 @@
 //! names (My contacts, My contacts except…, Only share with…). When that is
 //! not known, or cannot be applied exactly, nothing is posted.
 
-use whatsapp_rust::media::{ImageOptions, image_message};
+use whatsapp_rust::media::{ImageOptions, VideoOptions, image_message, video_message};
 use whatsapp_rust::prelude::wa;
 use whatsapp_rust::prelude::wa::message::extended_text_message::FontType;
 use whatsapp_rust::wacore::download::MediaType;
@@ -18,6 +18,8 @@ use crate::CoreError;
 
 /// What the phone allows in a text status.
 const MAX_STATUS_CHARS: usize = 700;
+/// The longest video the phone posts as one status.
+const MAX_STATUS_VIDEO_SECS: u32 = 60;
 /// The typeface of a text status; the phone draws it in its own fonts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum StatusFont {
@@ -40,13 +42,21 @@ impl StatusFont {
     }
 }
 
-/// A text status, or a photo with an optional caption.
+/// A text status, or a photo or video with an optional caption.
 fn check_status(text: &str, photo: Option<&OutgoingFile>) -> Result<(), &'static str> {
     if text.chars().count() > MAX_STATUS_CHARS {
         return Err("A status can have at most 700 characters.");
     }
     match photo {
-        Some(p) if p.kind != FileKind::Photo => Err("Only photos can be posted as a status here."),
+        Some(p) if !matches!(p.kind, FileKind::Photo | FileKind::Video) => {
+            Err("Only photos and videos can be posted as a status.")
+        }
+        Some(p)
+            if p.kind == FileKind::Video
+                && p.duration_secs.is_none_or(|s| s > MAX_STATUS_VIDEO_SECS) =>
+        {
+            Err("A status video can be at most a minute long.")
+        }
         Some(p) => check_file(p),
         None if text.trim().is_empty() => Err("The status is empty."),
         None => Ok(()),
@@ -118,6 +128,15 @@ impl Sender {
                 .collect();
             (StatusPrivacySetting::AllowList, chosen)
         } else {
+            // ponytail: Close Friends is refused until where its list
+            // travels is seen; the shape (no one named) says what came.
+            log::info!(
+                "status privacy not supported: mode {:?}, modes {:?}, {} listed, {} custom list(s)",
+                a.mode,
+                a.modes,
+                a.user_jid.len(),
+                a.custom_lists.len()
+            );
             return Err(refused(
                 "This status privacy setting isn't supported here yet, so nothing was posted.",
             ));
@@ -155,6 +174,24 @@ impl Sender {
                 message.extended_text_message = whatsapp_rust::buffa::MessageField::some(m);
                 message
             }
+            Some(p) if p.kind == FileKind::Video => {
+                let upload = self
+                    .client
+                    .upload(p.bytes.clone(), MediaType::Video, UploadOptions::new())
+                    .await
+                    .map_err(|_| refused("The video could not be uploaded."))?;
+                let mut options = VideoOptions::default().with_mimetype(p.mimetype.clone());
+                if let Some(c) = caption {
+                    options = options.with_caption(c.to_owned());
+                }
+                if let Some(t) = p.thumbnail.clone() {
+                    options = options.with_jpeg_thumbnail(t);
+                }
+                if let Some(s) = p.duration_secs {
+                    options = options.with_duration_seconds(s);
+                }
+                video_message(upload, options)
+            }
             Some(p) => {
                 let upload = self
                     .client
@@ -187,7 +224,11 @@ impl Sender {
                     std::mem::discriminant(&e)
                 ))
             })?;
-        let kind = if photo.is_some() { "image" } else { "text" };
+        let kind = match photo.map(|p| p.kind) {
+            Some(FileKind::Video) => "video",
+            Some(_) => "image",
+            None => "text",
+        };
         let media = nimqo_whatsapp::inbox::media_of(&message);
         self.inbox
             .store_own_status(
@@ -202,6 +243,43 @@ impl Sender {
             })?;
         self.listener
             .on_chats_changed(vec![nimqo_whatsapp::inbox::STATUS.to_owned()]);
+        Ok(())
+    }
+
+    /// Takes own status update `seq` back from everyone, then removes it
+    /// here. The revoke goes to today's audience: someone added to it since
+    /// the post never had it, someone removed keeps it until it expires.
+    pub async fn delete_status(&self, seq: i64) -> Result<(), CoreError> {
+        use nimqo_whatsapp::inbox::STATUS;
+        let refused = |reason: &str| CoreError::SendRefused {
+            reason: reason.to_owned(),
+        };
+        let m = self
+            .inbox
+            .stored_by_seq(STATUS, seq)
+            .map_err(|e| storage(&e))?
+            .filter(|m| m.from_me)
+            .ok_or_else(|| refused("That status is gone."))?;
+        let (privacy, audience) = self.audience()?;
+        let id = MessageId::try_from(m.id.clone()).map_err(|_| refused("bad id"))?;
+        self.client
+            .status()
+            .revoke(
+                id,
+                &audience,
+                StatusSendOptions::default().with_privacy(privacy),
+            )
+            .await
+            .map_err(|e| {
+                refused(&format!(
+                    "status not deleted: {:?}",
+                    std::mem::discriminant(&e)
+                ))
+            })?;
+        self.attachments
+            .delete_for_me(STATUS, &m.id, Some(true))
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![STATUS.to_owned()]);
         Ok(())
     }
 }
@@ -244,6 +322,16 @@ mod tests {
         assert!(check_status(&"x".repeat(MAX_STATUS_CHARS + 1), None).is_err());
         assert!(check_status("", Some(&photo(FileKind::Photo, "image/jpeg"))).is_ok());
         assert!(check_status("", Some(&photo(FileKind::Photo, "image/png"))).is_err());
-        assert!(check_status("", Some(&photo(FileKind::Video, "video/mp4"))).is_err());
+        assert!(check_status("", Some(&photo(FileKind::Document, "application/pdf"))).is_err());
+        let video = |secs| OutgoingFile {
+            duration_secs: secs,
+            ..photo(FileKind::Video, "video/mp4")
+        };
+        assert!(check_status("", Some(&video(Some(60)))).is_ok());
+        assert!(check_status("", Some(&video(Some(61)))).is_err());
+        assert!(
+            check_status("", Some(&video(None))).is_err(),
+            "length unknown"
+        );
     }
 }

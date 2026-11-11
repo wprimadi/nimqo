@@ -770,12 +770,13 @@ impl Core {
     }
 
     /// Posts a status update: `text` alone on `background` (RGB) in `font`,
-    /// or a JPEG photo with `text` as its caption, to the audience in the
-    /// phone's status privacy.
+    /// or a JPEG photo or an MP4 video of at most a minute with `text` as
+    /// its caption, to the audience in the phone's status privacy.
     ///
     /// # Errors
     /// `SendRefused` for an empty or too long status, a photo that is not
-    /// JPEG or too large, or a failed post; `Storage` if it cannot be kept.
+    /// JPEG, a file too large, or a failed post; `Storage` if it cannot be
+    /// kept.
     pub async fn post_status(
         &self,
         text: String,
@@ -790,6 +791,21 @@ impl Core {
                     .post_status(&text, photo.as_ref(), background, font)
                     .await
             })
+            .await
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e}"),
+            })?
+    }
+
+    /// Deletes own status update `seq` for everyone who can see it.
+    ///
+    /// # Errors
+    /// `SendRefused` if it is not own or the revoke fails; `Storage` if it
+    /// cannot be removed here.
+    pub async fn delete_status(&self, seq: i64) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.runtime
+            .spawn(async move { sender.delete_status(seq).await })
             .await
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e}"),

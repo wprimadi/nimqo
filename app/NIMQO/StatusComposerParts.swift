@@ -1,3 +1,5 @@
+import AppKit
+import AVFoundation
 import NimqoCore
 import SwiftUI
 
@@ -173,5 +175,31 @@ struct StatusSwatches: View {
             }
         }
         .animation(.spring(duration: 0.25, bounce: 0.3), value: colour)
+    }
+}
+
+/// On a video's still in the composer: that it is one, and how long.
+struct VideoBadge: View {
+    let seconds: UInt32
+
+    var body: some View {
+        Label(Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond)), systemImage: "play.fill")
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(.black.opacity(0.5), in: .capsule)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            .padding(.top, 58)
+            .padding(.trailing, 14)
+    }
+
+    /// The first frame, large enough for the card.
+    static func still(_ url: URL) async -> NSImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1080, height: 1080)
+        guard let image = try? await generator.image(at: .zero).image else { return nil }
+        return NSImage(cgImage: image, size: .zero)
     }
 }
