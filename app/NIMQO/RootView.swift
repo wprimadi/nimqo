@@ -139,6 +139,12 @@ struct MainView: View {
         }
     }
 
+    /// Typed here, not in the ternary: there the closure got no type and
+    /// was converted to a sendable one, which Swift warns about.
+    private func sender(to id: String) -> @MainActor (String, Int64?) async -> String? {
+        { [model] text, reply in await model.send(text, replyTo: reply, to: id) }
+    }
+
     private func conversation(_ chat: ChatSummary) -> some View {
         ConversationView(
             chat: chat,
@@ -150,7 +156,7 @@ struct MainView: View {
             // Bound to this chat: a send still running after
             // switching chats goes where it was started.
             send: model.canSend(chat.id)
-                ? { await model.send($0, replyTo: $1, to: chat.id) } : nil,
+                ? sender(to: chat.id) : nil,
             sendFile: { await model.sendFile($0, caption: $1, to: chat.id) },
             reveal: model.revealing,
             revealed: { model.revealing = nil },
@@ -168,7 +174,7 @@ struct MainView: View {
                 stickers: model.core.map { core in
                     StickerPicking(core: core) { await model.sendSticker($0, gif: $1, to: chat.id) }
                 },
-                info: { await model.messageInfo($0, in: chat.id) },
+                info: { await model.messageInfo($0, in: chat.id, waiting: $1) },
                 avatars: model.avatars,
                 sendPoll: { await model.sendPoll($0, options: $1, multiple: $2, to: chat.id) }
             )
