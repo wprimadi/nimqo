@@ -225,15 +225,6 @@ fn video_pair(listener: Arc<dyn CallListener>) -> Pair<Vec<u8>, VideoFrame> {
     (camera_tx, camera_rx, screen_tx)
 }
 
-/// The bitrate a REMB feedback item carries (RFC draft-alvestrand-rmcat-remb).
-fn remb_bps(fci: &[u8]) -> Option<u64> {
-    let [b'R', b'E', b'M', b'B', _, e, m1, m2, ..] = *fci else {
-        return None;
-    };
-    let mantissa = (u64::from(e & 0x03) << 16) | (u64::from(m1) << 8) | u64::from(m2);
-    Some(mantissa << (e >> 2))
-}
-
 /// Counts only, for telling a network stall from a decoder one.
 fn log_video_stats(call_id: &str, handle: &CallHandle) {
     let s = handle.media_stats();
@@ -422,39 +413,9 @@ impl Calls {
         if let Some(mut events) = events {
             let calls = Arc::clone(self);
             tokio::spawn(async move {
-                // ponytail: counts only, to learn what a group's server feeds back (NACK, REMB…).
-                let mut rtcp = std::collections::BTreeMap::<(u8, u8), u32>::new();
-                let mut afb = Vec::new();
                 while let Ok(event) = events.recv().await {
-                    if let CallEvent::RtcpReceived {
-                        packet_types,
-                        feedback,
-                        ..
-                    } = &event
-                    {
-                        let kinds = packet_types.iter().map(|&pt| (pt, 0));
-                        let kinds =
-                            kinds.chain(feedback.iter().map(|f| (f.packet_type, f.fmt + 1)));
-                        for kind in kinds {
-                            *rtcp.entry(kind).or_default() += 1;
-                        }
-                        // Application feedback: REMB, or whatever WhatsApp puts there.
-                        // Only the first 64: a long call, or a flood, must not grow it.
-                        let room = 64usize.saturating_sub(afb.len());
-                        let afbs = feedback
-                            .iter()
-                            .filter(|f| f.packet_type == 206 && f.fmt == 15);
-                        for f in afbs.take(room) {
-                            afb.push(remb_bps(&f.fci).map_or_else(
-                                || format!("{:02x?}", &f.fci[..f.fci.len().min(12)]),
-                                |bps| format!("{}k", bps / 1000),
-                            ));
-                        }
-                    }
                     calls.on_media_event(&call_id, event).await;
                 }
-                log::info!("call {call_id} rtcp in (type, feedback fmt+1): {rtcp:?}");
-                log::info!("call {call_id} rtcp afb: {afb:?}");
             });
         }
     }
@@ -652,33 +613,26 @@ impl Calls {
     }
 
     async fn on_signal(&self, client: &Arc<Client>, inbox: &Inbox, call: &IncomingCall) {
-        let reason = match &call.action {
-            CallAction::Terminate { reason, .. } => reason.as_deref().unwrap_or("none"),
-            _ => "-",
-        };
-        log::info!(
-            "call {} signal {} (group {}, offline {}, media {}, reason {reason})",
-            call.action.call_id(),
-            call.action.wire_tag(),
-            call.group.is_some(),
-            call.offline,
-            call.media().is_some(),
-        );
+        if let CallAction::Terminate {
+            call_id, reason, ..
+        } = &call.action
+        {
+            // A remote string: short.
+            let reason: String = reason
+                .as_deref()
+                .unwrap_or("none")
+                .chars()
+                .take(32)
+                .collect();
+            log::info!("call {call_id} terminated by the other side ({reason})");
+        }
         match &call.action {
             CallAction::Offer {
                 call_id,
                 is_video,
                 group_jid,
-                audio,
                 ..
             } => {
-                // Remote strings: a few, and short.
-                let codecs: Vec<_> = audio
-                    .iter()
-                    .take(4)
-                    .map(|c| (c.enc.chars().take(12).collect::<String>(), c.rate))
-                    .collect();
-                log::info!("call {call_id} offer audio {codecs:?}");
                 if call.offline {
                     return;
                 }
@@ -1025,13 +979,6 @@ impl Core {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn remb_reads_exponent_and_mantissa() {
-        // exp 3, mantissa 0x1_0000 (65536) → 524288 bps.
-        assert_eq!(remb_bps(b"REMB\x01\x0d\x00\x00"), Some(524_288));
-        assert_eq!(remb_bps(b"XXXX\x01\x0d\x00\x00"), None);
-    }
 
     fn log(outgoing: bool, connected: Option<i64>) -> Log {
         Log {
