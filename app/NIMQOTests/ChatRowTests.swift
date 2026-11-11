@@ -21,7 +21,7 @@ struct ChatRowTests {
             ChatMessage(
                 id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: mine, timestampSecs: time, kind: .text, body: nil,
-                delivery: .none, reply: nil, mentions: [], forwarded: false, starred: false
+                delivery: .none, reply: nil, mentions: [], forwarded: false, starred: false, revision: 0
             )
         }
         let day = Int64(86400)

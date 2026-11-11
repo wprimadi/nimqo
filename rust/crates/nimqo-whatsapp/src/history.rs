@@ -137,7 +137,14 @@ fn row(chat: &str, m: &wa::WebMessageInfo) -> Option<Row> {
         } else {
             ""
         },
-        media: crate::inbox::media_of(m.message.as_option()?),
+        media: crate::inbox::media_of(m.message.as_option()?).or_else(|| {
+            let creator = if from_me {
+                String::new()
+            } else {
+                strip_device(sender)
+            };
+            crate::cards::card_of(m.message.as_option()?, &creator)
+        }),
         quote: crate::replies::quote_of(m.message.as_option()?),
         forwarded: crate::inbox::is_forwarded(m.message.as_option()?),
         // ponytail: history counts as read; the conversation's unread

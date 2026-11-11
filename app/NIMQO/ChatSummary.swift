@@ -68,7 +68,7 @@ extension ChatMessage {
             return CallEntry(body).text
         }
         let label = switch kind {
-        case .text: ""
+        case .text, .poll, .location, .contact: ""
         case .image: "Photo"
         case .video: "Video"
         case .audio: "Audio"

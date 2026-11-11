@@ -346,9 +346,10 @@ struct MessageBubble: View {
                     default: MessagePictureView(chat: chat, message: message, store: pictures)
                     }
                 }
-                // A shown picture needs no "Photo" label, only its caption;
-                // a document shows its own name.
-                if message.kind == .call {
+                // A shown picture needs only its caption; a document shows its own name.
+                if message.isCard {
+                    MessageCardView(chat: chat, message: message, store: pictures)
+                } else if message.kind == .call {
                     CallEntry(message.body).label
                 } else if !(message.hasMedia && (message.body == nil || message.kind == .document)) {
                     Text(rich)

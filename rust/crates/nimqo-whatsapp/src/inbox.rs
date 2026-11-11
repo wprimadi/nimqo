@@ -111,6 +111,9 @@ pub struct MessageRow {
     /// This account's own reaction, if any.
     #[diesel(sql_type = Nullable<Text>)]
     pub my_reaction: Option<String>,
+    /// Changes when a poll's votes do, so it is drawn again.
+    #[diesel(sql_type = BigInt)]
+    pub revision: i64,
     /// A picture can be shown for this message.
     #[diesel(sql_type = Bool)]
     pub has_media: bool,
@@ -265,7 +268,9 @@ impl Inbox {
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = m.chat AND x.target = m.id) AS reactions,
                  (SELECT emoji FROM reactions y WHERE y.chat = m.chat AND y.target = m.id
-                  AND y.reactor = 'me') AS my_reaction
+                  AND y.reactor = 'me') AS my_reaction,
+                 CASE WHEN m.kind = 'poll' THEN (SELECT count(*) * 1000003 + coalesce(sum(ts % 1000003), 0)
+                   FROM poll_votes v WHERE v.chat = m.chat AND v.target = m.id) ELSE 0 END AS revision
                FROM messages m
                -- Only an unambiguous match: in groups another member can
                -- reuse an id, and then the quote stays unattributed.
@@ -611,6 +616,14 @@ const LATER: &[(i64, &[&str])] = &[
             "ALTER TABLE messages ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0",
         ],
     ),
+    // Poll votes, still sealed (see `cards`).
+    (
+        17,
+        &["CREATE TABLE poll_votes (
+              chat TEXT NOT NULL, target TEXT NOT NULL, voter TEXT NOT NULL,
+              voter_jid TEXT NOT NULL, payload BLOB NOT NULL, iv BLOB NOT NULL,
+              ts INTEGER NOT NULL, PRIMARY KEY (chat, target, voter))"],
+    ),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.
@@ -763,7 +776,14 @@ impl Row {
                     .get_ephemeral_expiration()
                     .map(|s| ts + i64::from(s))
             },
-            media: media_of(&m.message),
+            media: media_of(&m.message).or_else(|| {
+                let creator = if src.is_from_me {
+                    String::new()
+                } else {
+                    src.sender.to_non_ad_string()
+                };
+                crate::cards::card_of(&m.message, &creator)
+            }),
             quote: crate::replies::quote_of(&m.message),
             forwarded: is_forwarded(&m.message),
         })
@@ -891,6 +911,9 @@ pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<St
             return classify(inner);
         }
     }
+    if let Some(card) = crate::cards::classify(b) {
+        return Some(card);
+    }
     if let Some(text) = shown_text(b) {
         return Some(("text", Some(text)));
     }
@@ -924,7 +947,7 @@ pub(crate) fn classify(message: &wa::Message) -> Option<(&'static str, Option<St
 }
 
 /// Text for kinds the timeline shows as text: templates and buttons (one-time
-/// codes come as these), lists, polls, events, contacts, places and pins.
+/// codes come as these), lists, events and pins.
 fn shown_text(b: &wa::Message) -> Option<String> {
     let some = |s: &Option<String>| s.clone().filter(|s| !s.is_empty());
     if let Some(t) = b.template_message.as_option() {
@@ -946,28 +969,11 @@ fn shown_text(b: &wa::Message) -> Option<String> {
     if let Some(m) = b.list_message.as_option() {
         return some(&m.description).or_else(|| some(&m.title));
     }
-    let poll = [
-        &b.poll_creation_message,
-        &b.poll_creation_message_v2,
-        &b.poll_creation_message_v3,
-        &b.poll_creation_message_v5,
-    ]
-    .into_iter()
-    .find_map(|p| p.as_option());
-    if let Some(p) = poll {
-        return Some(format!("📊 {}", p.name.clone().unwrap_or_default()));
-    }
     if let Some(e) = b.event_message.as_option() {
         return Some(format!("📅 {}", e.name.clone().unwrap_or_default()));
     }
     if let Some(c) = b.scheduled_call_creation_message.as_option() {
         return Some(format!("📅 {}", c.title.clone().unwrap_or_default()));
-    }
-    if let Some(c) = b.contact_message.as_option() {
-        return Some(format!("👤 {}", c.display_name.clone().unwrap_or_default()));
-    }
-    if b.location_message.as_option().is_some() || b.live_location_message.as_option().is_some() {
-        return Some("📍 Location".to_owned());
     }
     if b.pin_in_chat_message.as_option().is_some() {
         return Some("📌 Pinned a message".to_owned());

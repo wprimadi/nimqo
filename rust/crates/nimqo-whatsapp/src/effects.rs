@@ -35,11 +35,24 @@ pub(crate) enum Effect {
         target: String,
         emoji: Option<String>,
     },
+    Vote {
+        chat: String,
+        voter: String,
+        vote: crate::cards::Vote,
+    },
 }
 
 impl Effect {
     pub(crate) fn from_inbound(m: &InboundMessage) -> Option<Self> {
         let src = &m.info.source;
+        let base = m.message.get_base_message();
+        if let Some(vote) = crate::cards::Vote::parse(base, src.sender.to_non_ad_string()) {
+            return Some(Self::Vote {
+                chat: chat_key(src),
+                voter: sender_key(src),
+                vote,
+            });
+        }
         Self::parse(&m.message, chat_key(src), sender_key(src))
     }
 
@@ -90,6 +103,7 @@ impl Effect {
             Self::Edit { chat, .. }
             | Self::Revoke { chat, .. }
             | Self::React { chat, .. }
+            | Self::Vote { chat, .. }
             | Self::Timer { chat, .. } => chat,
         }
     }
@@ -99,6 +113,7 @@ impl Effect {
             Self::Edit { chat, .. }
             | Self::Revoke { chat, .. }
             | Self::React { chat, .. }
+            | Self::Vote { chat, .. }
             | Self::Timer { chat, .. } => chat,
         }
     }
@@ -135,6 +150,7 @@ impl Effect {
             .bind::<Text, _>(sender)
             .bind::<Text, _>(target)
             .execute(c),
+            Self::Vote { chat, voter, vote } => vote.apply(c, chat, voter),
             Self::Timer { chat, seconds } => {
                 diesel::sql_query("INSERT OR REPLACE INTO chat_timers (chat, seconds) VALUES (?, ?)")
                     .bind::<Text, _>(chat)

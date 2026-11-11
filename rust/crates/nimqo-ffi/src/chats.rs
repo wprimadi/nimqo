@@ -10,6 +10,10 @@ pub enum MessageKind {
     Audio,
     Document,
     Sticker,
+    /// Drawn from `Core::message_card`; the body is a one-line summary.
+    Poll,
+    Location,
+    Contact,
     /// Deleted for everyone by its sender.
     Deleted,
     /// A call; the body is `<voice|video> <outcome> <seconds>`.
@@ -26,6 +30,9 @@ impl MessageKind {
             "audio" => Self::Audio,
             "document" => Self::Document,
             "sticker" => Self::Sticker,
+            "poll" => Self::Poll,
+            "location" => Self::Location,
+            "contact" => Self::Contact,
             "deleted" => Self::Deleted,
             "call" => Self::Call,
             _ => Self::Unsupported,
@@ -140,6 +147,8 @@ pub struct ChatMessage {
     /// Marked forwarded by whoever sent it.
     pub forwarded: bool,
     pub starred: bool,
+    /// Changes when a poll's votes do.
+    pub revision: i64,
 }
 
 /// Someone in the address book.
@@ -198,6 +207,7 @@ impl From<MessageRow> for ChatMessage {
             edited: r.edited,
             reactions: r.reactions,
             my_reaction: r.my_reaction,
+            revision: r.revision,
             from_me: r.from_me,
             timestamp_secs: r.ts,
             kind: MessageKind::parse(&r.kind),

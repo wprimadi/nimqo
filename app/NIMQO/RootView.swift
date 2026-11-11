@@ -103,6 +103,11 @@ struct MainView: View {
             }
         }
         .toolbar(model.statuses.playing == nil ? .automatic : .hidden, for: .windowToolbar)
+        .environment(\.openChat, OpenChatAction { chat in
+            section = .chats
+            draft = model.chats.contains { $0.id == chat.id } ? nil : chat
+            model.selectedChat = chat.id
+        })
         .sheet(item: $composing) { start in
             NewChatView(core: model.core, avatars: model.avatars, start: start) { chat in
                 query = ""
