@@ -266,6 +266,7 @@ extension ConversationView {
             }
         }
         if message.canSave {
+            Button("Quick Look", systemImage: "eye") { pictures.preview(chat: chat.id, message: message) }
             Button("Save As…", systemImage: "square.and.arrow.down") { pictures.save(chat: chat.id, message: message) }
         }
         if send != nil, message.delivery == .failed {

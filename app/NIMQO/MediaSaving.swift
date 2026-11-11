@@ -24,15 +24,64 @@ extension PictureStore {
         }
     }
 
+    /// Quick Look, which also shares it: a private copy of the file,
+    /// downloading it first when it is not here yet.
+    func preview(chat: String, message: ChatMessage) {
+        if let data = media(chat: chat, message: message) {
+            show(data, as: message.fileName(for: data))
+            return
+        }
+        pendingPreviews.insert(Self.key(chat, message))
+        save(chat: chat, message: message)
+    }
+
     /// A download finished: ask where to save what was waiting for it.
     func finishSaves() {
         for (key, item) in pendingSaves {
             guard let data = media(chat: item.chat, message: item.message) else { continue }
             pendingSaves[key] = nil
             saving.remove(key)
+            let previews = pendingPreviews.remove(key) != nil
             // Next turn: not inside the change that reported the download.
-            Task { @MainActor in Self.write(data, as: item.message.fileName(for: data)) }
+            Task { @MainActor in
+                if previews {
+                    show(data, as: item.message.fileName(for: data))
+                } else {
+                    Self.write(data, as: item.message.fileName(for: data))
+                }
+            }
         }
+    }
+
+    /// In a folder of its own in this user's temporary folder, marked as
+    /// downloaded like a saved file; gone once Quick Look closes, and at
+    /// the next launch if NIMQO quits first.
+    private func show(_ data: Data, as name: String) {
+        let folder = Self.previews.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let file = folder.appending(path: name)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            try data.write(to: file, options: [.atomic, .completeFileProtection])
+            var values = URLResourceValues()
+            values.quarantineProperties = [
+                kLSQuarantineTypeKey as String: kLSQuarantineTypeOtherDownload,
+                kLSQuarantineAgentNameKey as String: "NIMQO",
+            ]
+            var marked = file
+            try marked.setResourceValues(values)
+            previewing = file
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    static let previews = FileManager.default.temporaryDirectory.appending(path: "NIMQO Previews")
+
+    /// Left by a session that ended with Quick Look open.
+    static func removeLeftPreviews() {
+        try? FileManager.default.removeItem(at: previews)
     }
 
     private static func write(_ data: Data, as name: String) {

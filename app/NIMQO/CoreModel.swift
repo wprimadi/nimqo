@@ -88,6 +88,7 @@ final class CoreModel {
         self.defaults = defaults
         hasAcceptedDisclosure = defaults.bool(forKey: Self.disclosureKey)
         notifier.open = { [weak self] chat in self?.selectedChat = chat }
+        notifier.reply = { [weak self] chat, text in await self?.send(text, replyTo: nil, to: chat) ?? nil }
         calls.missed = { [weak self] chat in
             guard let self else { return }
             notifier.missedCall(from: title(of: chat), chat: chat)

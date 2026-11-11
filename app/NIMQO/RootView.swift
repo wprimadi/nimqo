@@ -1,4 +1,5 @@
 import NimqoCore
+import QuickLook
 import SwiftUI
 
 /// Pairing and status until the core connects, then the main window.
@@ -103,6 +104,7 @@ struct MainView: View {
             }
         }
         .toolbar(model.statuses.playing == nil ? .automatic : .hidden, for: .windowToolbar)
+        .quickLookPreview(Bindable(model.pictures).previewing)
         .environment(\.openChat, OpenChatAction { chat in
             section = .chats
             draft = model.chats.contains { $0.id == chat.id } ? nil : chat

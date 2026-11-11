@@ -278,6 +278,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            GeneralSection()
             AccountPrivacySection(core: core, online: online)
             Section {
                 Toggle("Tell people when I view their status", isOn: $sendsStatusReceipts)

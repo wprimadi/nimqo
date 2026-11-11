@@ -17,7 +17,9 @@ final class PictureStore {
             requested = []
             failed = []
             pendingSaves = [:]
+            pendingPreviews = []
             saving = []
+            previewing = nil
             generation += 1
         }
     }
@@ -38,6 +40,16 @@ final class PictureStore {
     @ObservationIgnored var pendingSaves: [String: (chat: String, message: ChatMessage)] = [:]
     /// Keys being downloaded to save; shown as progress.
     var saving: Set<String> = []
+    /// Of `pendingSaves`, those to show in Quick Look instead.
+    @ObservationIgnored var pendingPreviews: Set<String> = []
+    /// The file shown in Quick Look: a private copy, removed when it closes.
+    var previewing: URL? {
+        didSet {
+            if let old = oldValue, old != previewing {
+                try? FileManager.default.removeItem(at: old.deletingLastPathComponent())
+            }
+        }
+    }
 
     static func key(_ chat: String, _ message: ChatMessage) -> String {
         "\(chat)\n\(message.sender)\n\(message.id)"
@@ -86,6 +98,7 @@ final class PictureStore {
                 requested.remove(key)
                 failed.insert(key)
                 pendingSaves[key] = nil
+                pendingPreviews.remove(key)
                 saving.remove(key)
             }
         }

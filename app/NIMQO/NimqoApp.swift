@@ -22,6 +22,7 @@ struct NimqoApp: App {
             )
             exit(0)
         }
+        PictureStore.removeLeftPreviews()
     }
 
     var body: some Scene {

@@ -17,6 +17,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let log = Logger(subsystem: "app.nimqo", category: "notifier")
     /// Clicking a notification opens its chat.
     var open: ((String) -> Void)?
+    /// Reply typed in a notification: sends it to the chat, returns why not.
+    var reply: ((String, String) async -> String?)?
+    private nonisolated static let messageCategory = "message"
+    private nonisolated static let replyAction = "reply"
 
     /// A new session (or none, after logging out): nothing of the old one
     /// stays in Notification Center, and counting starts again.
@@ -48,6 +52,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             content.body = chat.unread == 1 ? "New message" : "\(chat.unread) new messages"
             content.sound = .default
             content.threadIdentifier = chat.id
+            content.categoryIdentifier = Self.messageCategory
             center.add(UNNotificationRequest(identifier: chat.id, content: content, trigger: nil))
         }
     }
@@ -72,6 +77,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         authorized = true
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        // Reply from the notification, without opening NIMQO.
+        let reply = UNTextInputNotificationAction(identifier: Self.replyAction, title: String(localized: "Reply"),
+                                                  options: [], textInputButtonTitle: String(localized: "Send"),
+                                                  textInputPlaceholder: String(localized: "Message"))
+        center.setNotificationCategories([UNNotificationCategory(identifier: Self.messageCategory, actions: [reply],
+                                                                 intentIdentifiers: [])])
         // The Dock badge is a notification setting too: without .badge,
         // macOS hides it.
         Task { [log] in
@@ -98,11 +109,31 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     ) async {
         let id = response.notification.request.identifier
         let chat = id.hasPrefix(Self.missedPrefix) ? String(id.dropFirst(Self.missedPrefix.count)) : id
+        if response.actionIdentifier == Self.replyAction, let typed = response as? UNTextInputNotificationResponse {
+            await send(typed.userText, to: chat)
+            return
+        }
         await MainActor.run {
             // Only chats of the current session.
             guard unread?[chat] != nil else { return }
             NSApp.activate()
             open?(chat)
         }
+    }
+
+    /// A reply that could not go opens the chat instead, so it is not lost
+    /// unseen: the text is put back on the clipboard.
+    private func send(_ text: String, to chat: String) async {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, unread?[chat] != nil, let reply, let refusal = await reply(chat, text) else { return }
+        log.info("notification reply not sent")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        NSApp.activate()
+        open?(chat)
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Reply not sent")
+        alert.informativeText = refusal + "\n\n" + String(localized: "Your reply is on the clipboard.")
+        alert.runModal()
     }
 }
