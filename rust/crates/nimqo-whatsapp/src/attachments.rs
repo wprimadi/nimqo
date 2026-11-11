@@ -165,7 +165,7 @@ impl Attachments {
         Ok(Some((
             a.seconds.unwrap_or(0),
             a.ptt.unwrap_or(false),
-            a.waveform.unwrap_or_default(),
+            bars(&a.waveform.unwrap_or_default()),
         )))
     }
 
@@ -469,6 +469,25 @@ fn is_gone(error: &anyhow::Error) -> bool {
 fn file_name(chat: &str, sender: &str, id: &str) -> String {
     let hash = Sha256::digest(format!("{chat}\n{sender}\n{id}"));
     format!("{}.nqm", crate::avatars::hex(&hash[..16]))
+}
+
+/// A sender's waveform as at most 64 bars of 0 to 100: it is the sender's
+/// to make any length, and the bubble redraws it many times a second.
+fn bars(waveform: &[u8]) -> Vec<u8> {
+    const MAX: usize = 64;
+    let step = waveform.len().div_ceil(MAX).max(1);
+    waveform
+        .chunks(step)
+        .map(|c| c.iter().copied().max().unwrap_or(0).min(100))
+        .collect()
+}
+
+#[test]
+fn waveforms_are_bounded() {
+    assert_eq!(bars(&[5, 200, 100]), vec![5, 100, 100]);
+    let long = bars(&vec![50; 1_000_000]);
+    assert!(long.len() <= 64 && long.iter().all(|&b| b == 50));
+    assert!(bars(&[]).is_empty());
 }
 
 #[cfg(test)]

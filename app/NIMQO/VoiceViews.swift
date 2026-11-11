@@ -130,7 +130,8 @@ struct WaveformBars: View {
     /// 64 bars from a sender's waveform, or a calm made-up one when it has
     /// none (audio files, older apps), the same each time for the message.
     static func shape(_ waveform: [UInt8], seed: Int64) -> [UInt8] {
-        if waveform.count >= 8 {
+        // The core sends at most 64; anything longer is not drawn as is.
+        if (8 ... 64).contains(waveform.count) {
             return waveform.map { min($0, 100) }
         }
         var value = UInt64(bitPattern: seed) &+ 0x9E37_79B9_7F4A_7C15
