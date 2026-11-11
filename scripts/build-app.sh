@@ -2,7 +2,10 @@
 # One command to build the app: Rust core, Xcode project, app bundle.
 # `scripts/build-app.sh test` also runs the Swift tests.
 # CONFIG=Release builds the core and the app optimised (default Debug).
+# ARCHS: "arm64" (default), "x86_64", or "arm64 x86_64" for a universal app.
 set -eu
+ARCHS=${ARCHS:-arm64}
+export ARCHS
 root=$(cd "$(dirname "$0")/.." && pwd)
 config=${CONFIG:-Debug}
 profile=debug
@@ -11,10 +14,10 @@ profile=debug
 cd "$root/app"
 xcodegen generate --quiet
 action=${1:-build}
-# Apple silicon only, like the core (see build-core.sh): a Release build
-# would otherwise be universal and miss x86_64 in the core.
+# The same archs as the core (see build-core.sh); a Release build would
+# otherwise be universal whatever the core holds.
 xcodebuild -project NIMQO.xcodeproj -scheme NIMQO -configuration "$config" \
-    -derivedDataPath build -quiet ARCHS=arm64 "$action"
+    -derivedDataPath build -quiet ARCHS="$ARCHS" ONLY_ACTIVE_ARCH=NO "$action"
 app="$root/app/build/Build/Products/$config/NIMQO.app"
 # The maintainer's self-signed certificate (Secret/, never committed; see
 # README "Code signing") keeps one app identity across updates, so the

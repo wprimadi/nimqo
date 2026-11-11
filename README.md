@@ -238,7 +238,7 @@ Found a vulnerability? Please report it privately as described in
 
 | | |
 | --- | --- |
-| **Run** | macOS 14 Sonoma or later, Apple silicon. Liquid Glass appears on macOS 26 and later. |
+| **Run** | macOS 14 Sonoma or later, on Apple silicon or Intel. Liquid Glass appears on macOS 26 and later. |
 | **Build** | Xcode 26 or later, Rust 1.95 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
 | **Push** | gitleaks, cargo-audit, cargo-deny, SwiftLint, SwiftFormat (the local quality gate) |
 
@@ -257,13 +257,17 @@ make run
 | --- | --- |
 | `make run` | Builds the app (Debug) and opens it |
 | `make build` | Builds the app; `make build CONFIG=Release` for an optimised one |
-| `make dmg` | Builds Release and packages it as `dist/NIMQO-<version>.dmg` |
+| `make dmg` | Builds Release disk images for all three below, in `dist/` |
+| `make dmg-silicon` | `dist/NIMQO-<version>-apple-silicon.dmg`, for Apple silicon |
+| `make dmg-intel` | `dist/NIMQO-<version>-intel.dmg`, for Intel Macs |
+| `make dmg-universal` | `dist/NIMQO-<version>-universal.dmg`, one app for both |
 | `make test` | Builds and runs the app's unit tests |
 | `make clean` | Removes the app build, the generated core, and `dist/` |
 
 The targets call the scripts below, which build the Rust core, generate the
 Xcode project from [`app/project.yml`](app/project.yml), and build the app
-(Apple silicon only):
+(for Apple silicon unless `ARCHS` says otherwise: `x86_64`, or
+`"arm64 x86_64"` for a universal app):
 
 | Script | What it does |
 | --- | --- |

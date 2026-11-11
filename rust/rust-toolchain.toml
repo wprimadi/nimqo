@@ -1,3 +1,5 @@
 [toolchain]
 channel = "1.99.1"
 components = ["rustfmt", "clippy"]
+# Intel and universal builds (make dmg-intel, make dmg-universal).
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
