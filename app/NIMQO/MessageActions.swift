@@ -20,6 +20,8 @@ struct MessageCommands {
     var stickers: StickerPicking?
     /// Who has an own message (seq) and who read it: Message Info.
     var info: (@MainActor (Int64) async -> [Recipient])?
+    /// Pictures for Message Info's rows.
+    var avatars: AvatarStore?
     var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
 }
 

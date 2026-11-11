@@ -68,7 +68,12 @@ impl Sender {
     /// in the chat.
     pub async fn delete_for_me(&self, chat: &str, seq: i64) -> Result<(), CoreError> {
         let jid = Self::may_send(chat)?;
-        let m = self.original(chat, seq)?;
+        // A message already deleted for everyone can still go from here.
+        let m = self
+            .inbox
+            .stored_by_seq(chat, seq)
+            .map_err(|e| storage(&e))?
+            .ok_or_else(|| refused("That message is gone."))?;
         let sender = Self::author(&jid, &m)?;
         let id = MessageId::new(&m.id).map_err(|e| refused(format!("{e:?}")))?;
         let target = MessageRef::new(&jid, id, sender.as_ref(), m.from_me)

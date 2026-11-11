@@ -82,6 +82,8 @@ impl Quoted {
     }
 }
 
+const ANY: &str =
+    "SELECT id, sender, from_me, ts, kind, body, media FROM messages WHERE chat = ? AND ";
 const QUOTED: &str = "SELECT id, sender, from_me, ts, kind, body, media FROM messages
                       WHERE chat = ? AND kind <> 'deleted' AND ";
 
@@ -93,6 +95,20 @@ impl Inbox {
     pub fn quoted_by_seq(&self, chat: &str, seq: i64) -> Result<Option<Quoted>> {
         let mut conn = self.lock()?;
         Ok(diesel::sql_query(format!("{QUOTED} rowid = ?"))
+            .bind::<Text, _>(chat)
+            .bind::<BigInt, _>(seq)
+            .get_result(&mut *conn)
+            .optional()?)
+    }
+
+    /// Message `seq` of `chat`, also when deleted for everyone: what
+    /// Delete for Me removes.
+    ///
+    /// # Errors
+    /// The query fails.
+    pub fn stored_by_seq(&self, chat: &str, seq: i64) -> Result<Option<Quoted>> {
+        let mut conn = self.lock()?;
+        Ok(diesel::sql_query(format!("{ANY} rowid = ?"))
             .bind::<Text, _>(chat)
             .bind::<BigInt, _>(seq)
             .get_result(&mut *conn)
@@ -176,6 +192,26 @@ mod spoofing {
                 reply.quote_seq
             ),
             (Some("forged"), None, None)
+        );
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_message_deleted_for_everyone_can_still_be_found_to_delete_for_me() {
+        let path = std::env::temp_dir().join(format!("nimqo-gone-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([4; 32]), Fault::None).unwrap();
+        let chat = "62811@s.whatsapp.net";
+        inbox.insert_kind_for_test(chat, "d1", "deleted", Vec::new());
+        let seq = inbox.messages(chat, 10).unwrap()[0].seq;
+        assert!(inbox.quoted_by_seq(chat, seq).unwrap().is_none());
+        assert_eq!(inbox.stored_by_seq(chat, seq).unwrap().unwrap().id, "d1");
+        assert!(
+            inbox
+                .stored_by_seq("x@s.whatsapp.net", seq)
+                .unwrap()
+                .is_none()
         );
         drop(inbox);
         std::fs::remove_file(&path).unwrap();

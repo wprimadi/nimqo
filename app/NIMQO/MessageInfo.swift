@@ -7,6 +7,7 @@ struct MessageInfoSheet: ViewModifier {
     @Binding var message: ChatMessage?
     let isGroup: Bool
     let load: (@MainActor (Int64) async -> [Recipient])?
+    let avatars: AvatarStore?
 
     func body(content: Content) -> some View {
         let shown = Binding { message != nil } set: {
@@ -16,7 +17,7 @@ struct MessageInfoSheet: ViewModifier {
         }
         content.sheet(isPresented: shown) {
             if let message, let load {
-                MessageInfoView(message: message, isGroup: isGroup, load: load)
+                MessageInfoView(message: message, isGroup: isGroup, load: load, avatars: avatars)
             }
         }
     }
@@ -26,6 +27,7 @@ private struct MessageInfoView: View {
     let message: ChatMessage
     let isGroup: Bool
     let load: @MainActor (Int64) async -> [Recipient]
+    let avatars: AvatarStore?
     @State private var recipients: [Recipient]?
     @Environment(\.dismiss) private var dismiss
 
@@ -49,12 +51,12 @@ private struct MessageInfoView: View {
                 } else {
                     if !readers.isEmpty {
                         Section(message.kind == .audio ? "Read or played by" : "Read by") {
-                            ForEach(readers, id: \.who) { RecipientRow(recipient: $0, read: true) }
+                            ForEach(readers, id: \.who) { RecipientRow(recipient: $0, read: true, avatars: avatars) }
                         }
                     }
                     if !waiting.isEmpty {
                         Section("Delivered to") {
-                            ForEach(waiting, id: \.who) { RecipientRow(recipient: $0, read: false) }
+                            ForEach(waiting, id: \.who) { RecipientRow(recipient: $0, read: false, avatars: avatars) }
                         }
                     }
                 }
@@ -137,6 +139,7 @@ private struct RecipientRow: View {
     let recipient: Recipient
     /// In the "Read by" list: its read (and played) time; else delivered.
     let read: Bool
+    let avatars: AvatarStore?
 
     private var title: String {
         recipient.name ?? "+" + (recipient.who.split(separator: "@").first.map(String.init) ?? recipient.who)
@@ -144,11 +147,11 @@ private struct RecipientRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Text(String(title.first(where: \.isLetter) ?? "#").uppercased())
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Color.accentColor.gradient.opacity(0.8), in: .circle)
+            if let avatars {
+                Avatar(chat: ChatSummary(id: recipient.who, title: title, isGroup: false, phone: nil, preview: "",
+                                         lastActivity: .now, unread: 0, timer: nil, muted: false),
+                       store: avatars, size: 30)
+            }
             Text(title).lineLimit(1)
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
