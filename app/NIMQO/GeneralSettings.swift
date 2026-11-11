@@ -16,7 +16,7 @@ struct GeneralSection: View {
             }
             Toggle("Make previews for links I send", isOn: $sendsLinkPreviews)
         } header: {
-            Text("General")
+            Text("Startup and Links")
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(problem ?? String(localized: "Starts in the menu bar at login, so messages arrive right away."))

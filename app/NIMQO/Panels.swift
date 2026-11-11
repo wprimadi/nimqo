@@ -33,13 +33,14 @@ struct PanelSheet: View {
             case .settings:
                 VStack(spacing: 0) {
                     SettingsView(core: core, online: online)
+                    Divider().opacity(0.5)
                     HStack {
                         Spacer()
                         Button("Done") { dismiss() }
                             .keyboardShortcut(.defaultAction)
                     }
-                    .padding([.horizontal, .bottom], Theme.Spacing.large)
-                    .padding(.top, Theme.Spacing.small)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 }
                 .windowLook()
             case .profile:

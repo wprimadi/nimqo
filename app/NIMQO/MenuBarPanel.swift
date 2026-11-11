@@ -40,6 +40,7 @@ struct MenuBarPanel: View {
         .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.25), value: replying)
         .animation(reduceMotion ? nil : .snappy, value: shown.map(\.id))
         .onExitCommand { replying = nil }
+        .background(OnEverySpace())
     }
 
     // MARK: Parts
@@ -137,6 +138,28 @@ struct MenuBarPanel: View {
         NSApp.activate()
         if let chat {
             model.selectedChat = chat
+        }
+    }
+}
+
+/// The popover's panel is made once and stays on the Space it was first
+/// shown on; clicking the menu bar on another desktop then showed nothing
+/// there. Joining every Space makes it open wherever it is clicked.
+private struct OnEverySpace: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSView {
+        Joiner()
+    }
+
+    func updateNSView(_: NSView, context _: Context) {
+        // Set when the view joins its window; nothing changes afterwards.
+    }
+
+    private final class Joiner: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.collectionBehavior.remove(.moveToActiveSpace)
+            window.collectionBehavior.formUnion([.canJoinAllSpaces, .fullScreenAuxiliary])
         }
     }
 }
