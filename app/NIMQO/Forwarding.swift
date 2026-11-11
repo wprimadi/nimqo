@@ -27,7 +27,9 @@ struct ForwardPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            QuoteView(reply: Reply(kind: message.kind, body: message.body, fromMe: message.fromMe,
+            QuoteView(reply: Reply(kind: message.kind,
+                                   body: MessageText.named(message.body, mentions: message.mentions),
+                                   fromMe: message.fromMe,
                                    senderName: message.displaySender, seq: nil))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)

@@ -41,7 +41,7 @@ struct Composer: View {
                         HStack {
                             QuoteView(reply: Reply(
                                 kind: replyingTo.kind,
-                                body: replyingTo.body,
+                                body: MessageText.named(replyingTo.body, mentions: replyingTo.mentions),
                                 fromMe: replyingTo.fromMe,
                                 senderName: replyingTo.contactName ?? replyingTo.senderName,
                                 seq: nil

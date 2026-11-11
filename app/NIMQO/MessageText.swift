@@ -10,6 +10,12 @@ enum MessageText {
     private static let schemes: Set<String> = ["http", "https", "mailto"]
     private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
+    /// `text` with its mentions by name, plain: for a quote of it.
+    static func named(_ text: String?, mentions: [Mention]) -> String? {
+        guard let text else { return nil }
+        return String(attributed(text, mentions: mentions).characters)
+    }
+
     static func attributed(_ text: String, mentions: [Mention]) -> AttributedString {
         let names = Dictionary(mentions.map { ($0.user, $0.name) }) { first, _ in first }
         var out = AttributedString()

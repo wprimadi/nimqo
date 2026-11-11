@@ -362,16 +362,23 @@ impl Core {
             messages.retain(|m| m.from_me || self.inbox.is_contact(&m.sender).unwrap_or(false));
         }
         let mut names = self.own_mention_names();
+        let mut name = |user: &str| {
+            names
+                .entry(user.to_owned())
+                .or_insert_with(|| self.inbox.mention_name(user).ok().flatten())
+                .clone()
+        };
         for m in &mut messages {
+            // A quoted message's mentions read as names, as in the list.
+            if let Some(quoted) = m.reply.as_mut().and_then(|r| r.body.as_mut()) {
+                *quoted = chats::named_mentions(quoted, &mut name);
+            }
             let Some(body) = &m.body else { continue };
             for user in chats::mentioned_users(body) {
-                let name = names
-                    .entry(user.to_owned())
-                    .or_insert_with(|| self.inbox.mention_name(user).ok().flatten());
-                if let Some(name) = name {
+                if let Some(name) = name(user) {
                     m.mentions.push(chats::Mention {
                         user: user.to_owned(),
-                        name: name.clone(),
+                        name,
                     });
                 }
             }
