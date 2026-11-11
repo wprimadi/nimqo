@@ -11,6 +11,7 @@ struct GroupCard: View {
     let avatars: AvatarStore
     let contacts: ContactStore
     let calls: CallStore
+    let showStarred: () -> Void
     @State private var filter = ""
     @State private var adding = false
     @State private var problem: String?
@@ -94,6 +95,7 @@ struct GroupCard: View {
                         .transition(.opacity)
                 }
                 details(info)
+                ChatSettings(chat: chat, core: contacts.core, locked: !canEditInfo(info), showStarred: showStarred)
                 memberList
                 footer
             } else if info != nil {
@@ -138,9 +140,6 @@ struct GroupCard: View {
                           systemImage: "megaphone")
                     Label(info.locked ? "Only admins can edit group info" : "Everyone can edit group info",
                           systemImage: info.locked ? "lock.fill" : "lock.open")
-                }
-                if let timer = chat.timer {
-                    Label("Disappearing messages: \(timer)", systemImage: "timer")
                 }
                 if let secs = info.createdSecs {
                     let date = Date(timeIntervalSince1970: TimeInterval(secs))

@@ -265,6 +265,7 @@ extension View {
 /// status, and the glass look, each shown as a small sample.
 struct SettingsView: View {
     let core: Core?
+    let online: Bool
     @AppStorage(GlassLook.key) private var look = GlassLook.dark
     @AppStorage(GlassLook.opacityKey) private var opacity = 0.5
     @AppStorage(StatusStore.receiptsKey) private var sendsStatusReceipts = true
@@ -277,7 +278,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            AccountPrivacySection(core: core)
+            AccountPrivacySection(core: core, online: online)
             Section {
                 Toggle("Tell people when I view their status", isOn: $sendsStatusReceipts)
             } header: {

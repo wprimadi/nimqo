@@ -16,6 +16,8 @@ struct ChatSummary: Identifiable, Hashable {
     let timer: String?
     /// Muted on one of the account's devices: no notification, no count.
     let muted: Bool
+    /// The disappearing-message duration in seconds; 0 when off.
+    var timerSecs: UInt32 = 0
     var pinned = false
     /// Out of the chat list, under Archived; quiet like a muted chat.
     var archived = false
@@ -52,6 +54,7 @@ extension ChatSummary {
         lastActivity = Date(timeIntervalSince1970: TimeInterval(chat.lastActivitySecs))
         unread = Int(chat.unread)
         timer = chat.timerSecs == 0 ? nil : CoreModel.duration(UInt64(chat.timerSecs))
+        timerSecs = chat.timerSecs
         muted = chat.muted
         pinned = chat.pinned
         archived = chat.archived

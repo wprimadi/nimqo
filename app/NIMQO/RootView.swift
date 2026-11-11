@@ -16,7 +16,9 @@ struct RootView: View {
                 PairingView(model: model)
             }
         }
-        .sheet(item: Bindable(panels).shown) { PanelSheet(panel: $0, core: model.core) }
+        .sheet(item: Bindable(panels).shown) {
+            PanelSheet(panel: $0, core: model.core, online: model.state == .connected)
+        }
         .confirmationDialog("Log out and remove all data?", isPresented: Bindable(model).confirmingReset) {
             Button("Log Out and Remove Data", role: .destructive) { model.logOutAndReset() }
         } message: {
@@ -38,6 +40,8 @@ struct MainView: View {
     /// The list shows archived chats instead of the others.
     @State private var showingArchived = false
     @State private var starred = false
+    /// Starred messages of one chat only, when opened from its card.
+    @State private var starredChat: String?
     /// A message on its way to the chat picker, with the chat it is in.
     @State private var forwarding: (message: ChatMessage, chat: String)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -107,7 +111,9 @@ struct MainView: View {
                 model.selectedChat = chat.id
             }
         }
-        .sheet(isPresented: $starred) { StarredView(model: model) }
+        .sheet(isPresented: $starred, onDismiss: { starredChat = nil }, content: {
+            StarredView(model: model, chat: starredChat)
+        })
         .sheet(isPresented: forwardingShown) {
             if let forwarding {
                 let targets = model.chats.filter { model.canSend($0.id) }
@@ -154,7 +160,10 @@ struct MainView: View {
         )
         // A new view per chat: it opens at the latest message.
         .id(chat.id)
-        .chatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts, calls: model.calls)
+        .chatHeader(chat: chat, model: model) {
+            starredChat = chat.id
+            starred = true
+        }
     }
 
     private var communityDetail: some View {

@@ -6,6 +6,8 @@ import SwiftUI
 /// in. Click or Return opens it in its chat; Delete unstars it.
 struct StarredView: View {
     let model: CoreModel
+    /// Only this chat's, when set.
+    var chat: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hits: [SearchHit]?
@@ -38,7 +40,7 @@ struct StarredView: View {
             list
         }
         .frame(width: 520, height: 640)
-        .task { hits = await model.starredMessages() }
+        .task { hits = await model.starredMessages().filter { chat == nil || $0.chatId == chat } }
     }
 
     private var header: some View {
@@ -53,6 +55,9 @@ struct StarredView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text("Starred Messages").font(.title2.bold())
+                if let chat {
+                    Text(model.title(of: chat)).font(.callout.weight(.medium))
+                }
                 Text(hits.map { "\($0.count) messages" } ?? " ")
                     .font(.callout).foregroundStyle(.secondary)
                     .contentTransition(.numericText())

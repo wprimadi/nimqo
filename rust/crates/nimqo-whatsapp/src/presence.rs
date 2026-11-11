@@ -63,6 +63,11 @@ impl Presences {
         self.with(chat, |e| !std::mem::replace(&mut e.about_fetched, true))
     }
 
+    /// The fetch failed: ask again next time the chat opens.
+    pub fn unclaim_about(&self, chat: &str) {
+        self.with(chat, |e| e.about_fetched = false);
+    }
+
     pub fn set_about(&self, chat: &str, about: Option<String>) {
         self.with(chat, |e| e.about = about.filter(|a| !a.trim().is_empty()));
     }

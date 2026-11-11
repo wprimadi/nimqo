@@ -22,6 +22,8 @@ final class Panels {
 struct PanelSheet: View {
     let panel: Panels.Panel
     let core: Core?
+    /// Connected to WhatsApp: what Settings asks of the server can come.
+    let online: Bool
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -29,7 +31,7 @@ struct PanelSheet: View {
             switch panel {
             case .settings:
                 VStack(spacing: 0) {
-                    SettingsView(core: core)
+                    SettingsView(core: core, online: online)
                     HStack {
                         Spacer()
                         Button("Done") { dismiss() }

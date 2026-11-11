@@ -9,6 +9,8 @@ struct ContactCard: View {
     let status: ContactStatus?
     let avatars: AvatarStore
     let calls: CallStore
+    let core: Core?
+    let showStarred: () -> Void
     @State private var copied = false
 
     private var canCall: Bool {
@@ -52,19 +54,7 @@ struct ContactCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if chat.timer != nil || chat.muted {
-                InfoSection("This chat", symbol: "slider.horizontal.3") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let timer = chat.timer {
-                            Label("Disappearing messages: \(timer)", systemImage: "timer")
-                        }
-                        if chat.muted {
-                            Label("Muted", systemImage: "bell.slash.fill")
-                        }
-                    }
-                    .font(.callout)
-                }
-            }
+            ChatSettings(chat: chat, core: core, showStarred: showStarred)
         }
         .padding(14)
         .frame(width: 320)

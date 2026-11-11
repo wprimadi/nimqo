@@ -5,6 +5,8 @@ import SwiftUI
 /// when Settings opens, each change sent at once and undone if refused.
 struct AccountPrivacySection: View {
     let core: Core?
+    /// Asked again when the connection comes back.
+    let online: Bool
     @State private var settings: PrivacySettings?
     @State private var failed = false
     @State private var refused = false
@@ -21,6 +23,9 @@ struct AccountPrivacySection: View {
                     get: { settings.readReceipts != .nobody },
                     set: { change(.readReceipts, to: $0 ? .everyone : .nobody) }
                 ))
+            } else if !online {
+                Label("Waiting for the connection to WhatsApp…", systemImage: "wifi.exclamationmark")
+                    .foregroundStyle(.secondary)
             } else if failed {
                 HStack {
                     Text("Couldn't load privacy settings.").foregroundStyle(.secondary)
@@ -38,7 +43,11 @@ struct AccountPrivacySection: View {
                 "\"My contacts except…\" is set on the phone.")
                 .foregroundStyle(refused ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
         }
-        .task(id: core.map(ObjectIdentifier.init)) { await load() }
+        .task(id: [core.map(ObjectIdentifier.init).hashValue, online.hashValue]) {
+            if online {
+                await load()
+            }
+        }
     }
 
     private func picker(_ title: LocalizedStringKey, _ setting: PrivacySetting, _ all: [PrivacyChoice]) -> some View {

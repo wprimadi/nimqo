@@ -531,7 +531,7 @@ impl Core {
         let Ok(jid) = chat_id.parse::<Jid>() else {
             return;
         };
-        if !chat_id.ends_with("@s.whatsapp.net") {
+        if !chat_id.ends_with("@s.whatsapp.net") && !chat_id.ends_with("@lid") {
             return;
         }
         let (client, presences, inbox) = (
@@ -547,11 +547,18 @@ impl Core {
                     .await
                 {
                     Ok(info) => {
-                        presences
-                            .set_about(&chat_id, info.into_values().next().and_then(|u| u.status));
+                        let about = info.into_values().next().and_then(|u| u.status);
+                        log::info!(
+                            "about fetched: {}",
+                            if about.is_some() { "set" } else { "none" }
+                        );
+                        presences.set_about(&chat_id, about);
                         inbox.notify_changed(vec![chat_id.clone()]);
                     }
-                    Err(e) => log::info!("about not fetched: {e}"),
+                    Err(e) => {
+                        log::info!("about not fetched: {e}");
+                        presences.unclaim_about(&chat_id);
+                    }
                 }
             }
             if let Err(e) = client.presence().subscribe(jid).await {
@@ -726,13 +733,38 @@ impl Core {
     /// `SendRefused` for anything but the test chat, or when WhatsApp does
     /// not take the change; `Storage` if it cannot be stored.
     pub async fn set_muted(&self, chat_id: String, muted: bool) -> Result<(), CoreError> {
+        let until = if muted {
+            nimqo_whatsapp::mutes::FOREVER
+        } else {
+            0
+        };
         let sender = Arc::clone(&self.sender);
-        self.runtime
-            .spawn(async move { sender.set_muted(&chat_id, muted).await })
+        self.on_runtime(async move { sender.set_mute_until(&chat_id, until).await })
             .await
-            .map_err(|e| CoreError::Storage {
-                detail: format!("{e}"),
-            })?
+    }
+
+    /// Mutes a chat for `seconds` from now, on every device of the account.
+    ///
+    /// # Errors
+    /// As `set_muted`.
+    pub async fn mute_for(&self, chat_id: String, seconds: u64) -> Result<(), CoreError> {
+        let ms = i64::try_from(seconds.saturating_mul(1000)).unwrap_or(i64::MAX);
+        let until = unix_now().saturating_mul(1000).saturating_add(ms);
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_mute_until(&chat_id, until).await })
+            .await
+    }
+
+    /// Turns disappearing messages on for `seconds`, or off with 0, for
+    /// everyone in the chat.
+    ///
+    /// # Errors
+    /// `SendRefused` when WhatsApp does not take the change (in a group,
+    /// when only admins may change it); `Storage` if it cannot be stored.
+    pub async fn set_chat_timer(&self, chat_id: String, seconds: u32) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_timer(&chat_id, seconds).await })
+            .await
     }
 
     /// Pins or unpins a chat on every device of the account.
@@ -1562,13 +1594,17 @@ impl log::Log for NimqoOnly {
         if target.starts_with("nimqo") {
             return metadata.level() <= log::Level::Info;
         }
-        // Why a call was dropped lives upstream; its warnings come through with numbers masked.
-        let calls = [
+        // Why a call was dropped, or a reconnect stalled, lives upstream; those
+        // warnings come through with numbers masked.
+        let upstream = [
             "whatsapp_rust::handlers::call",
             "whatsapp_rust::voip",
             "wacore::voip",
+            "whatsapp_rust::client",
+            "whatsapp_rust::keepalive",
+            "whatsapp_rust::socket",
         ];
-        calls.iter().any(|c| target.starts_with(c)) && metadata.level() <= log::Level::Warn
+        upstream.iter().any(|c| target.starts_with(c)) && metadata.level() <= log::Level::Warn
     }
 
     fn log(&self, record: &log::Record<'_>) {

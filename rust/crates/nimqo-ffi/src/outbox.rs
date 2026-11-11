@@ -326,25 +326,49 @@ impl Sender {
         }
     }
 
-    /// Mutes or unmutes `chat` on every device of the account.
-    pub async fn set_muted(&self, chat: &str, muted: bool) -> Result<(), CoreError> {
+    /// Mutes `chat` on every device of the account until `until`
+    /// (milliseconds since 1970, or `mutes::FOREVER`); 0 unmutes.
+    pub async fn set_mute_until(&self, chat: &str, until: i64) -> Result<(), CoreError> {
         let jid = Self::may_send(chat)?;
         let actions = self.client.chat_actions();
-        let done = if muted {
-            actions.mute_chat(&jid).await
-        } else {
-            actions.unmute_chat(&jid).await
+        let done = match until {
+            0 => actions.unmute_chat(&jid).await,
+            nimqo_whatsapp::mutes::FOREVER => actions.mute_chat(&jid).await,
+            end => actions.mute_chat_until(&jid, end).await,
         };
         done.map_err(|e| CoreError::SendRefused {
             reason: format!("mute not changed: {e}"),
         })?;
-        let until = if muted {
-            nimqo_whatsapp::mutes::FOREVER
-        } else {
-            0
-        };
         self.inbox
             .set_mute(chat, until)
+            .map_err(|e| CoreError::Storage {
+                detail: format!("{e:#}"),
+            })?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
+    /// Turns disappearing messages on (`seconds`) or off (0) in `chat`, for
+    /// everyone in it.
+    pub async fn set_timer(&self, chat: &str, seconds: u32) -> Result<(), CoreError> {
+        let jid = Self::may_send(chat)?;
+        let refused = |e: String| CoreError::SendRefused {
+            reason: format!("Disappearing messages not changed: {e}"),
+        };
+        if chat.ends_with("@g.us") {
+            self.client
+                .groups()
+                .set_ephemeral(jid, seconds)
+                .await
+                .map_err(|e| refused(e.to_string()))?;
+        } else {
+            self.client
+                .set_chat_disappearing_timer(jid, seconds)
+                .await
+                .map_err(|e| refused(e.to_string()))?;
+        }
+        self.inbox
+            .set_timer(chat, seconds)
             .map_err(|e| CoreError::Storage {
                 detail: format!("{e:#}"),
             })?;

@@ -155,6 +155,11 @@ struct CommunityList: View {
             }
         }
         .task { await store.load() }
+        // Nothing on the community's page takes focus, so the list kept it
+        // and painted its selection in the accent, unlike the other lists.
+        .onChange(of: store.selected) {
+            DispatchQueue.main.async { FocusWatch.release(NSApp.keyWindow) }
+        }
     }
 }
 

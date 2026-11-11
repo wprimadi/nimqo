@@ -61,8 +61,9 @@ final class ContactStore {
 extension View {
     /// Replaces the plain window title with the chat's picture, name,
     /// number and status; clicking it shows the contact card.
-    func chatHeader(chat: ChatSummary, avatars: AvatarStore, contacts: ContactStore, calls: CallStore) -> some View {
-        modifier(ChatHeader(chat: chat, avatars: avatars, contacts: contacts, calls: calls))
+    func chatHeader(chat: ChatSummary, model: CoreModel, showStarred: @escaping () -> Void) -> some View {
+        modifier(ChatHeader(chat: chat, avatars: model.avatars, contacts: model.contacts, calls: model.calls,
+                            showStarred: showStarred))
     }
 }
 
@@ -71,6 +72,7 @@ private struct ChatHeader: ViewModifier {
     let avatars: AvatarStore
     let contacts: ContactStore
     let calls: CallStore
+    let showStarred: () -> Void
     @State private var showsCard = false
 
     func body(content: Content) -> some View {
@@ -113,6 +115,12 @@ private struct ChatHeader: ViewModifier {
             .disabled(calls.current != nil || calls.core == nil)
     }
 
+    /// The card closes first: a sheet can't sit over a popover.
+    private func starred() {
+        showsCard = false
+        showStarred()
+    }
+
     private func header(status: ContactStatus?) -> some View {
         Button { showsCard.toggle() } label: {
             // The label reads the group's info itself: read here, its
@@ -129,9 +137,10 @@ private struct ChatHeader: ViewModifier {
         }
         .popover(isPresented: $showsCard, arrowEdge: .bottom) {
             if chat.isGroup {
-                GroupCardOf(chat: chat, contacts: contacts, avatars: avatars, calls: calls)
+                GroupCardOf(chat: chat, contacts: contacts, avatars: avatars, calls: calls, showStarred: starred)
             } else {
-                ContactCard(chat: chat, status: status, avatars: avatars, calls: calls)
+                ContactCard(chat: chat, status: status, avatars: avatars, calls: calls, core: contacts.core,
+                            showStarred: starred)
             }
         }
     }
@@ -166,7 +175,7 @@ private func releaseSidebarFocus() {
 }
 
 @MainActor
-private final class FocusWatch {
+final class FocusWatch {
     var token: NSObjectProtocol?
 
     static func release(_ window: NSWindow?) {
@@ -311,9 +320,11 @@ private struct GroupCardOf: View {
     let contacts: ContactStore
     let avatars: AvatarStore
     let calls: CallStore
+    let showStarred: () -> Void
 
     var body: some View {
-        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars, contacts: contacts, calls: calls)
+        GroupCard(chat: chat, info: contacts.groups[chat.id], avatars: avatars, contacts: contacts, calls: calls,
+                  showStarred: showStarred)
             // Members and settings change from other phones too.
             .task { await contacts.refresh(chat.id) }
     }
