@@ -18,6 +18,8 @@ struct Composer: View {
     var sendVoice: (@MainActor (Data) async -> String?)?
     /// Stickers to pick and send; nil where none can be sent.
     var stickers: StickerPicking?
+    /// Sends a new poll; nil where none can be sent.
+    var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
     @State private var pickingSticker = false
     @State private var recorder = VoiceRecorder()
     @State private var text = ""
@@ -140,11 +142,7 @@ struct Composer: View {
 
     private var field: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.small) {
-            Button("Attach a photo or file", systemImage: "plus") { picking = true }
-                .labelStyle(.iconOnly)
-                .buttonBorderShape(.circle)
-                .glassButton()
-                .controlSize(.extraLarge)
+            AttachMenu(attach: { picking = true }, sendPoll: sendPoll)
                 .disabled(isSending)
             TextField("Message, or a caption for a file", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)

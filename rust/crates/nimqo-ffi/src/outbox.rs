@@ -209,6 +209,9 @@ impl Sender {
             && let Some(gif) = nimqo_whatsapp::forward::gif(p.media.as_deref().unwrap_or_default())
         {
             gif
+        } else if p.kind == "poll" {
+            nimqo_whatsapp::cards::poll_to_send(p.media.as_deref().unwrap_or_default())
+                .ok_or("poll not sendable")?
         } else if p.kind == "sticker" {
             nimqo_whatsapp::forward::sticker(p.media.as_deref().unwrap_or_default())
                 .ok_or("sticker not sendable")?

@@ -168,7 +168,8 @@ struct MainView: View {
                 stickers: model.core.map { core in
                     StickerPicking(core: core) { await model.sendSticker($0, gif: $1, to: chat.id) }
                 },
-                info: { await model.messageInfo($0, in: chat.id) }
+                info: { await model.messageInfo($0, in: chat.id) },
+                sendPoll: { await model.sendPoll($0, options: $1, multiple: $2, to: chat.id) }
             )
         )
         // A new view per chat: it opens at the latest message.

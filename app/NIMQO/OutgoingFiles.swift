@@ -170,7 +170,6 @@ extension CoreModel {
         return nil
     }
 
-    /// Sends a sticker picked from those seen; returns why it was refused.
     /// Sends a picked sticker, or a GIF when `gif`, by its upload.
     func sendSticker(_ sticker: StickerRef, gif: Bool, to chat: String) async -> String? {
         guard let core else { return "Not connected." }

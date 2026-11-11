@@ -270,6 +270,84 @@ impl Inbox {
     }
 }
 
+/// WhatsApp's own limits for a poll.
+const MAX_QUESTION: usize = 255;
+const MAX_OPTION: usize = 100;
+const MAX_OPTIONS: usize = 12;
+
+/// An own poll, as kept (see `card_of`): `question` and 2 to 12 distinct
+/// `options`, trimmed; one choice each, or any number when `multiple`.
+/// Its secret, which voters need, is made here.
+///
+/// # Errors
+/// Why the poll is not one WhatsApp takes.
+pub fn new_poll(question: &str, options: &[String], multiple: bool) -> anyhow::Result<Vec<u8>> {
+    let question = question.trim();
+    let options: Vec<String> = options.iter().map(|o| o.trim().to_owned()).collect();
+    anyhow::ensure!(!question.is_empty(), "Ask a question.");
+    anyhow::ensure!(
+        question.chars().count() <= MAX_QUESTION,
+        "The question is too long."
+    );
+    anyhow::ensure!(
+        (2..=MAX_OPTIONS).contains(&options.len()),
+        "A poll has 2 to {MAX_OPTIONS} options."
+    );
+    anyhow::ensure!(
+        options
+            .iter()
+            .all(|o| !o.is_empty() && o.chars().count() <= MAX_OPTION),
+        "Each option needs 1 to {MAX_OPTION} characters."
+    );
+    let distinct: std::collections::HashSet<&String> = options.iter().collect();
+    anyhow::ensure!(
+        distinct.len() == options.len(),
+        "Each option must be different."
+    );
+    let mut poll = wa::message::PollCreationMessage::default();
+    poll.name = Some(question.to_owned());
+    poll.options = options
+        .into_iter()
+        .map(|name| {
+            let mut option = wa::message::poll_creation_message::Option::default();
+            option.option_name = Some(name);
+            option
+        })
+        .collect();
+    // As WhatsApp Web: 1 for one choice, 0 for any number.
+    poll.selectable_options_count = Some(u32::from(!multiple));
+    poll.poll_content_type = Some(wa::message::PollContentType::TEXT);
+    let mut secret = vec![0; 32];
+    crate::vault::fill_random(&mut secret)?;
+    let mut message = wa::Message::default();
+    message.poll_creation_message = MessageField::some(poll);
+    let mut info = wa::MessageContextInfo::default();
+    info.message_secret = Some(secret);
+    message.message_context_info = MessageField::some(info);
+    card_of(&message, "").ok_or_else(|| anyhow::anyhow!("poll not kept"))
+}
+
+/// An own poll as kept, as it is sent: without what was added to keep it,
+/// one-choice polls in the form WhatsApp Web sends.
+#[must_use]
+pub fn poll_to_send(kept: &[u8]) -> Option<wa::Message> {
+    let kept = wa::Message::decode_from_slice(kept).ok()?;
+    let mut poll = kept.poll_creation_message.as_option()?.clone();
+    kept.message_context_info
+        .as_option()?
+        .message_secret
+        .as_ref()?;
+    poll.context_info = MessageField::none();
+    let mut message = wa::Message::default();
+    if poll.selectable_options_count == Some(1) {
+        message.poll_creation_message_v3 = MessageField::some(poll);
+    } else {
+        message.poll_creation_message = MessageField::some(poll);
+    }
+    message.message_context_info = kept.message_context_info.clone();
+    Some(message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,6 +400,57 @@ mod tests {
         assert_eq!(
             (place.degrees_latitude, place.is_live),
             (Some(-6.2), Some(true))
+        );
+    }
+
+    #[test]
+    fn own_polls_are_checked_kept_with_a_secret_and_sent_bare() {
+        let opts = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(
+            new_poll(" ", &opts(&["a", "b"]), false).is_err(),
+            "no question"
+        );
+        assert!(new_poll("Q", &opts(&["a"]), false).is_err(), "one option");
+        assert!(
+            new_poll("Q", &opts(&["a", " a "]), false).is_err(),
+            "same option"
+        );
+        assert!(
+            new_poll("Q", &opts(&["a", ""]), false).is_err(),
+            "empty option"
+        );
+        let kept = new_poll(" Lunch? ", &opts(&["Rice", "Noodles "]), false).unwrap();
+        let sent = poll_to_send(&kept).unwrap();
+        let poll = sent.poll_creation_message_v3.as_option().unwrap();
+        assert_eq!(poll.name.as_deref(), Some("Lunch?"));
+        assert_eq!(poll.options[1].option_name.as_deref(), Some("Noodles"));
+        assert!(
+            poll.context_info.as_option().is_none(),
+            "the kept creator stays here"
+        );
+        let secret = sent
+            .message_context_info
+            .as_option()
+            .unwrap()
+            .message_secret
+            .clone()
+            .unwrap();
+        assert_eq!(secret.len(), 32);
+        let any = poll_to_send(&new_poll("Q", &opts(&["a", "b"]), true).unwrap()).unwrap();
+        assert_eq!(
+            any.poll_creation_message
+                .as_option()
+                .unwrap()
+                .selectable_options_count,
+            Some(0)
+        );
+        assert_ne!(
+            any.message_context_info
+                .as_option()
+                .unwrap()
+                .message_secret
+                .as_ref(),
+            Some(&secret)
         );
     }
 }

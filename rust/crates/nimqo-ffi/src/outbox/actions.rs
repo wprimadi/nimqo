@@ -280,6 +280,37 @@ impl Sender {
         }
     }
 
+    /// Queues a new poll in `chat`: see `cards::new_poll`.
+    ///
+    /// # Errors
+    /// `SendRefused` with why the poll is not one WhatsApp takes, or where
+    /// nothing may be sent; `Storage` if it cannot be queued.
+    pub fn send_poll(
+        &self,
+        chat: &str,
+        question: &str,
+        options: &[String],
+        multiple: bool,
+    ) -> Result<(), CoreError> {
+        Self::may_send(chat)?;
+        let kept = nimqo_whatsapp::cards::new_poll(question, options, multiple)
+            .map_err(|e| refused(e.to_string()))?;
+        let id = self.client.generate_message_id();
+        let line = format!("📊 {}", question.trim());
+        self.inbox
+            .enqueue_file(
+                chat,
+                id.as_str(),
+                crate::unix_now(),
+                "poll",
+                Some(&line),
+                &kept,
+            )
+            .map_err(|e| storage(&e))?;
+        self.listener.on_chats_changed(vec![chat.to_owned()]);
+        Ok(())
+    }
+
     /// Sends the GIF of message `seq` in `from` to `chat`, by its upload.
     ///
     /// # Errors

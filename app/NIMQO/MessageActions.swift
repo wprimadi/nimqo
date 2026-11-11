@@ -20,6 +20,7 @@ struct MessageCommands {
     var stickers: StickerPicking?
     /// Who has an own message (seq) and who read it: Message Info.
     var info: (@MainActor (Int64) async -> [Recipient])?
+    var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
 }
 
 /// Asks how a message goes: for everyone (when its sender, or a group's

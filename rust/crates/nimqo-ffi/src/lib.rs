@@ -1088,6 +1088,29 @@ impl Core {
             .collect())
     }
 
+    /// Queues a new poll in `chat_id` and starts sending it: `question` and
+    /// 2 to 12 distinct `options`, one choice each unless `multiple`.
+    ///
+    /// # Errors
+    /// `SendRefused` with why, or `Storage` if it cannot be queued.
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "UniFFI passes sequences by value"
+    )]
+    pub fn send_poll(
+        &self,
+        chat_id: &str,
+        question: &str,
+        options: Vec<String>,
+        multiple: bool,
+    ) -> Result<(), CoreError> {
+        self.sender
+            .send_poll(chat_id, question, &options, multiple)?;
+        let sender = Arc::clone(&self.sender);
+        self.runtime.spawn(async move { sender.flush(false).await });
+        Ok(())
+    }
+
     /// Sends the GIF of message `seq` in `from_chat` to `chat_id`.
     ///
     /// # Errors
