@@ -63,7 +63,11 @@ struct GroupGrid: View {
 
     var body: some View {
         let count = max(participants.count, 1)
-        let columns = count == 1 ? 1 : count <= 4 ? 2 : 3
+        let columns = switch count {
+        case 1: 1
+        case 2 ... 4: 2
+        default: 3
+        }
         let rows = (count + columns - 1) / columns
         GeometryReader { geometry in
             let spacing: CGFloat = 6

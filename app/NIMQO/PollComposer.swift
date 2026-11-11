@@ -43,8 +43,8 @@ struct PollComposer: View {
                 .focused($focus, equals: Self.questionField)
             Divider()
             VStack(spacing: 6) {
-                ForEach($options) { $option in
-                    row($option)
+                ForEach($options) { option in
+                    row(option)
                         .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                 }
             }

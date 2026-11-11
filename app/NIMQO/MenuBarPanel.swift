@@ -205,6 +205,11 @@ private struct PanelChatRow: View {
     let toggle: () -> Void
     let open: () -> Void
     @State private var hovering = false
+
+    private var hoverShade: Double {
+        hovering ? 0.05 : 0
+    }
+
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -254,7 +259,7 @@ private struct PanelChatRow: View {
                                             removal: .opacity))
             }
         }
-        .background(.primary.opacity(replying ? 0.08 : hovering ? 0.05 : 0),
+        .background(.primary.opacity(replying ? 0.08 : hoverShade),
                     in: .rect(cornerRadius: 10, style: .continuous))
         .onHover { hovering = $0 }
         .opacity(appeared || reduceMotion ? 1 : 0)
@@ -281,6 +286,13 @@ private struct QuickReply: View {
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var sendFill: AnyShapeStyle {
+        if sent {
+            return AnyShapeStyle(Color.green.gradient)
+        }
+        return canSend ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(.gray.opacity(0.4))
+    }
+
     private var canSend: Bool {
         model.canSend(chat.id) && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !sending
     }
@@ -299,9 +311,7 @@ private struct QuickReply: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 28, height: 28)
-                    .background(sent ? AnyShapeStyle(Color.green.gradient)
-                        : canSend ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(.gray.opacity(0.4)),
-                        in: .circle)
+                    .background(sendFill, in: .circle)
                     .buttonStyle(.plain)
                     .disabled(!canSend)
                     .offset(x: sending && !reduceMotion ? 14 : 0, y: sending && !reduceMotion ? -10 : 0)

@@ -145,9 +145,14 @@ struct ProfileEditor: View {
         }
     }
 
+    private var photoShade: Double {
+        guard !dropping else { return 0.45 }
+        return hoveringPhoto && busy != .photo ? 0.35 : 0
+    }
+
     private var photoHover: some View {
         ZStack {
-            Circle().fill(.black.opacity(dropping ? 0.45 : hoveringPhoto && busy != .photo ? 0.35 : 0))
+            Circle().fill(.black.opacity(photoShade))
             if dropping {
                 Label("Drop", systemImage: "arrow.down.circle.fill")
                     .labelStyle(.iconOnly)

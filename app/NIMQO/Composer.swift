@@ -283,11 +283,17 @@ struct Composer: View {
 
 extension Composer {
     private var sendTitle: LocalizedStringKey {
-        editing != nil ? "Save Edit" : recordsVoice ? "Record Voice Message" : "Send"
+        if editing != nil {
+            return "Save Edit"
+        }
+        return recordsVoice ? "Record Voice Message" : "Send"
     }
 
     private var sendSymbol: String {
-        editing != nil ? "checkmark" : recordsVoice ? "mic.fill" : "arrow.up"
+        if editing != nil {
+            return "checkmark"
+        }
+        return recordsVoice ? "mic.fill" : "arrow.up"
     }
 
     private func primary() {
