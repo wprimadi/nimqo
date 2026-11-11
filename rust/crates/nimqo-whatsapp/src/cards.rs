@@ -134,6 +134,11 @@ impl Vote {
     pub(crate) fn parse(b: &wa::Message, voter_jid: String) -> Option<Self> {
         let u = b.poll_update_message.as_option()?;
         let vote = u.vote.as_option()?;
+        // Sealed votes carry a 12-byte IV; an empty one marks an open vote
+        // from history, which a live message must not pass for.
+        if vote.enc_iv.as_ref().is_none_or(|iv| iv.len() != 12) {
+            return None;
+        }
         Some(Self {
             target: u.poll_creation_message_key.as_option()?.id.clone()?,
             voter_jid,
@@ -455,5 +460,28 @@ mod tests {
                 .as_ref(),
             Some(&secret)
         );
+    }
+
+    #[test]
+    fn a_live_vote_must_be_sealed() {
+        let vote = |iv: Option<Vec<u8>>| {
+            let mut key = wa::MessageKey::default();
+            key.id = Some("poll1".into());
+            let mut enc = wa::message::PollEncValue::default();
+            enc.enc_payload = Some(vec![1; 40]);
+            enc.enc_iv = iv;
+            let mut update = wa::message::PollUpdateMessage::default();
+            update.poll_creation_message_key = MessageField::some(key);
+            update.vote = MessageField::some(enc);
+            let mut m = wa::Message::default();
+            m.poll_update_message = MessageField::some(update);
+            Vote::parse(&m, "62811@s.whatsapp.net".into())
+        };
+        assert!(vote(Some(vec![0; 12])).is_some());
+        assert!(
+            vote(Some(Vec::new())).is_none(),
+            "would pass for an open vote"
+        );
+        assert!(vote(None).is_none());
     }
 }

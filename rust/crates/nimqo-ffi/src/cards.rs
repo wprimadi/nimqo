@@ -209,6 +209,7 @@ async fn poll_card(client: &whatsapp_rust::Client, card: &Card) -> Option<PollCa
     let mut tally = vec![0u32; names.len()];
     let mut mine = vec![false; names.len()];
     let mut counted = 0u32;
+    let single = poll.selectable_options_count == Some(1);
     let own = client.pn();
     if let (Some(secret), Some(creator)) = (secret, creator_jid(creator, own.as_ref())) {
         for vote in &card.votes {
@@ -236,15 +237,23 @@ async fn poll_card(client: &whatsapp_rust::Client, card: &Card) -> Option<PollCa
                 };
                 picked
             };
-            if picked.is_empty() {
+            // Each choice once; a one-answer poll counts one at most.
+            let mut chosen: Vec<usize> = picked
+                .iter()
+                .filter_map(|hash| hashes.iter().position(|h| h.as_slice() == hash.as_slice()))
+                .collect();
+            chosen.sort_unstable();
+            chosen.dedup();
+            if single {
+                chosen.truncate(1);
+            }
+            if chosen.is_empty() {
                 continue;
             }
             counted += 1;
-            for hash in picked {
-                if let Some(i) = hashes.iter().position(|h| h.as_slice() == hash.as_slice()) {
-                    tally[i] += 1;
-                    mine[i] |= vote.voter == nimqo_whatsapp::inbox::ME;
-                }
+            for i in chosen {
+                tally[i] += 1;
+                mine[i] |= vote.voter == nimqo_whatsapp::inbox::ME;
             }
         }
     }
