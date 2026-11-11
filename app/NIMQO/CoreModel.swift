@@ -37,7 +37,7 @@ final class CoreModel {
         isLoadingOlder || askedPhoneBefore != nil
     }
 
-    nonisolated static let pageSize: UInt32 = 200
+    nonisolated static let pageSize: UInt32 = 80
     /// A message (seq) of `messages` to scroll to and mark, then cleared.
     var revealing: Int64?
     var selectedChat: ChatSummary.ID? {

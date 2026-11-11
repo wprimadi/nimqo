@@ -2,8 +2,8 @@ import NimqoCore
 import SwiftUI
 
 /// The channels this account follows and the posts of the open one, asked
-/// of the server when shown. Read-only: nothing is sent back, and opened
-/// media is kept (encrypted) only until the app quits.
+/// of the server when shown. Nothing is sent back but posts to a channel
+/// the user runs; opened media is kept (encrypted) only until the app quits.
 @MainActor
 @Observable
 final class ChannelStore {
@@ -49,6 +49,33 @@ final class ChannelStore {
               let page = await core.channelPosts(channelId: id, before: nil) else { return }
         let first = page.first?.serverId ?? .max
         posts[id] = shown.filter { $0.serverId < first } + page
+    }
+
+    /// Posts `text` to channel `id`; nil when posted, else why not.
+    func post(_ text: String, to id: String) async -> String? {
+        guard let core else { return nil }
+        do {
+            try await core.postToChannel(channelId: id, text: text)
+        } catch {
+            return CoreModel.message(for: error)
+        }
+        // The server numbers it a moment later.
+        try? await Task.sleep(for: .seconds(1))
+        await refresh(id)
+        return nil
+    }
+
+    /// Creates a channel and opens it; nil when made, else why not.
+    func create(name: String, description: String) async -> String? {
+        guard let core else { return nil }
+        do {
+            let made = try await core.createChannel(name: name, description: description)
+            channels = ((channels ?? []) + [made]).sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            selected = made.id
+            return nil
+        } catch {
+            return CoreModel.message(for: error)
+        }
     }
 
     func loadOlder(_ id: String) async {
@@ -144,6 +171,11 @@ struct ChannelView: View {
             .padding(Theme.Spacing.medium)
         }
         .bottomAnchored()
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if channel.admin {
+                ChannelComposer(channel: channel.id, store: store)
+            }
+        }
         // Full size even when the content is narrow: it sized to a short
         // description, and the bar above with it.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -175,11 +207,19 @@ struct ChannelView: View {
 }
 
 extension ChannelPost {
+    /// The three most used reactions with their counts, as the phone shows.
+    var tally: String? {
+        guard !reactions.isEmpty else { return nil }
+        return reactions.prefix(3)
+            .map { "\($0.emoji) \(Int($0.count).formatted(.number.notation(.compactName)))" }
+            .joined(separator: "  ")
+    }
+
     /// Shown with the chat bubble; its media comes from the core like a
     /// chat message's, under the channel id and `serverId`.
     var asMessage: ChatMessage {
         ChatMessage(id: String(serverId), seq: Int64(clamping: serverId), sender: "", senderName: nil,
-                    contactName: nil, edited: edited, hasMedia: hasMedia, reactions: nil, myReaction: nil,
+                    contactName: nil, edited: edited, hasMedia: hasMedia, reactions: tally, myReaction: nil,
                     fromMe: false, timestampSecs: timestampSecs, kind: kind, body: body, delivery: .none,
                     reply: nil, mentions: [], forwarded: false, starred: false, revision: 0, hasLink: false, gif: false)
     }
@@ -189,6 +229,7 @@ extension ChannelPost {
 struct ChannelList: View {
     let store: ChannelStore
     let avatars: AvatarStore
+    @State private var creating = false
 
     var body: some View {
         List(store.channels ?? [], id: \.id, selection: Bindable(store).selected) { channel in
@@ -210,6 +251,13 @@ struct ChannelList: View {
                 )
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            Button("New Channel", systemImage: "plus") { creating = true }
+                .glassButton()
+                .disabled(store.core == nil)
+                .padding(.bottom, Theme.Spacing.small)
+        }
+        .sheet(isPresented: $creating) { NewChannelSheet(store: store) }
         .task { await store.load() }
     }
 }
@@ -227,7 +275,7 @@ struct ChannelDetail: View {
             ContentUnavailableView(
                 "Select a channel",
                 systemImage: "megaphone",
-                description: Text("Posts are read from WhatsApp when a channel opens; nothing is sent back.")
+                description: Text("Posts are read from WhatsApp when a channel opens.")
             )
         }
     }

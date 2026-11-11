@@ -1,10 +1,15 @@
 //! Channels the account follows and their posts, asked of the server when
-//! the user opens them. Read-only: nothing goes back (no views, reactions or
-//! follows) and nothing is stored, except opened media until the core
-//! stops (`Attachments::clear_channel_files`).
+//! the user opens them. Nothing goes back (no views, reactions or follows)
+//! except what the user posts to a channel they run, or a channel they
+//! create; nothing is stored, except opened media until the core stops
+//! (`Attachments::clear_channel_files`).
 
 use anyhow::{Result, anyhow};
-use whatsapp_rust::{Client, Jid, NewsletterState, NewsletterVerification};
+use whatsapp_rust::prelude::wa;
+use whatsapp_rust::wacore_binary::JidExt as _;
+use whatsapp_rust::{
+    Client, Jid, NewsletterMetadata, NewsletterRole, NewsletterState, NewsletterVerification,
+};
 
 use crate::inbox::{classify, media_of};
 
@@ -18,6 +23,21 @@ pub struct Channel {
     pub description: Option<String>,
     pub followers: u64,
     pub verified: bool,
+    /// The account owns or administers it, so may post.
+    pub admin: bool,
+}
+
+impl From<NewsletterMetadata> for Channel {
+    fn from(c: NewsletterMetadata) -> Self {
+        Self {
+            id: c.jid.to_string(),
+            name: c.name,
+            description: c.description.filter(|d| !d.trim().is_empty()),
+            followers: c.subscriber_count,
+            verified: c.verification == NewsletterVerification::Verified,
+            admin: matches!(c.role, Some(NewsletterRole::Owner | NewsletterRole::Admin)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +51,8 @@ pub struct Post {
     pub edited: bool,
     /// The encoded media message (`media_of`), for its picture and file.
     pub media: Option<Vec<u8>>,
+    /// Each emoji and how many reacted with it, most first.
+    pub reactions: Vec<(String, u64)>,
 }
 
 /// The followed channels that still exist, by name.
@@ -44,13 +66,7 @@ pub async fn list(client: &Client) -> Result<Vec<Channel>> {
         .await?
         .into_iter()
         .filter(|c| c.state == NewsletterState::Active)
-        .map(|c| Channel {
-            id: c.jid.to_string(),
-            name: c.name,
-            description: c.description.filter(|d| !d.trim().is_empty()),
-            followers: c.subscriber_count,
-            verified: c.verification == NewsletterVerification::Verified,
-        })
+        .map(Channel::from)
         .collect();
     channels.sort_by_cached_key(|c| c.name.to_lowercase());
     Ok(channels)
@@ -62,10 +78,7 @@ pub async fn list(client: &Client) -> Result<Vec<Channel>> {
 /// # Errors
 /// Not a channel id, or the server query fails.
 pub async fn posts(client: &Client, channel: &str, before: Option<u64>) -> Result<Vec<Post>> {
-    let jid: Jid = channel.parse().map_err(|_| anyhow!("not a channel id"))?;
-    if !channel.ends_with("@newsletter") {
-        return Err(anyhow!("not a channel"));
-    }
+    let jid = channel_jid(channel)?;
     let mut posts: Vec<Post> = client
         .newsletter()
         .get_messages(jid, PAGE, before)
@@ -83,9 +96,57 @@ pub async fn posts(client: &Client, channel: &str, before: Option<u64>) -> Resul
                 body,
                 edited: m.message.is_some() && m.last_edit_timestamp_ms.is_some(),
                 media: m.message.as_ref().and_then(media_of),
+                reactions: {
+                    let mut r: Vec<(String, u64)> = m
+                        .reactions
+                        .iter()
+                        .filter(|r| r.count > 0)
+                        .map(|r| (r.code.clone(), r.count))
+                        .collect();
+                    r.sort_by_key(|a| std::cmp::Reverse(a.1));
+                    r
+                },
             }
         })
         .collect();
     posts.sort_unstable_by_key(|p| p.server_id);
     Ok(posts)
+}
+
+fn channel_jid(channel: &str) -> Result<Jid> {
+    let jid: Jid = channel.parse().map_err(|_| anyhow!("not a channel id"))?;
+    if !jid.is_newsletter() {
+        return Err(anyhow!("not a channel"));
+    }
+    Ok(jid)
+}
+
+/// Posts `text` to a channel the account runs. The server refuses anyone
+/// else.
+///
+/// # Errors
+/// Empty text, not a channel id, or the send fails.
+pub async fn post_text(client: &Client, channel: &str, text: &str) -> Result<()> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(anyhow!("The post is empty."));
+    }
+    let jid = channel_jid(channel)?;
+    let mut message = wa::Message::default();
+    message.conversation = Some(text.to_owned());
+    client.send_message(jid, message).await?;
+    Ok(())
+}
+
+/// Creates a channel the account owns.
+///
+/// # Errors
+/// An empty name, or the server refuses.
+pub async fn create(client: &Client, name: &str, description: Option<&str>) -> Result<Channel> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(anyhow!("A channel needs a name."));
+    }
+    let description = description.map(str::trim).filter(|d| !d.is_empty());
+    Ok(client.newsletter().create(name, description).await?.into())
 }
