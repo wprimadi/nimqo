@@ -19,6 +19,7 @@ use nimqo_whatsapp::inbox::Inbox;
 use nimqo_whatsapp::lids;
 use nimqo_whatsapp::outbox::Pending;
 use nimqo_whatsapp::outbox::Status;
+use nimqo_whatsapp::receipts::Seen;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::types::events::{Receipt, ServerAck};
 use whatsapp_rust::types::presence::ReceiptType;
@@ -187,6 +188,7 @@ impl Sender {
                 }
             }
         }
+        changed.sort();
         changed.dedup();
         if !changed.is_empty() {
             self.listener.on_chats_changed(changed);
@@ -554,14 +556,29 @@ impl Sender {
             ReceiptType::Read | ReceiptType::Played => Status::Read,
             _ => return,
         };
+        let seen = match receipt.r#type {
+            ReceiptType::Delivered => Seen::Delivered,
+            ReceiptType::Read => Seen::Read,
+            _ => Seen::Played,
+        };
+        // Who it was: the member in a group, the other side in a chat.
+        let who = lids::phone_chat(&self.inbox, &self.client, &receipt.source.sender).await;
+        let at = receipt.timestamp.timestamp();
         let mut changed = Vec::new();
         for id in &receipt.message_ids {
+            // Message Info's list, per recipient; the bubble's tick below.
+            match self.inbox.record_receipt(id.as_str(), &who, seen, at) {
+                Ok(Some(chat)) => changed.push(chat),
+                Ok(None) => {}
+                Err(e) => log::warn!("receipt not kept: {e:#}"),
+            }
             match self.inbox.advance(id.as_str(), to) {
                 Ok(Some(chat)) => changed.push(chat),
                 Ok(None) => {}
                 Err(e) => log::warn!("receipt not stored: {e:#}"),
             }
         }
+        changed.sort();
         changed.dedup();
         if !changed.is_empty() {
             self.listener.on_chats_changed(changed);

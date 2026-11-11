@@ -30,6 +30,7 @@ mod cards;
 mod channels;
 mod chats;
 mod communities;
+mod info;
 mod outbox;
 mod privacy;
 mod profile;
@@ -152,7 +153,7 @@ impl std::fmt::Display for CoreError {
 
 impl std::error::Error for CoreError {}
 
-fn err<E: std::fmt::Display>(make: fn(String) -> CoreError) -> impl Fn(E) -> CoreError {
+pub(crate) fn err<E: std::fmt::Display>(make: fn(String) -> CoreError) -> impl Fn(E) -> CoreError {
     move |e| make(format!("{e:#}"))
 }
 

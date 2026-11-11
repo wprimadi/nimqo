@@ -18,6 +18,8 @@ struct MessageCommands {
     /// Sends a recorded voice note to this chat; returns why it was refused.
     var sendVoice: (@MainActor (Data) async -> String?)?
     var stickers: StickerPicking?
+    /// Who has an own message (seq) and who read it: Message Info.
+    var info: (@MainActor (Int64) async -> [Recipient])?
 }
 
 /// Asks how a message goes: for everyone (when its sender, or a group's
@@ -264,6 +266,9 @@ extension ConversationView {
             Button(message.starred ? "Unstar" : "Star", systemImage: message.starred ? "star.slash" : "star") {
                 commands.star(message.seq, !message.starred)
             }
+        }
+        if message.fromMe, live, commands.info != nil, message.delivery != .pending, message.delivery != .failed {
+            Button("Info", systemImage: "info.circle") { infoFor = message }
         }
         if message.canSave {
             Button("Quick Look", systemImage: "eye") { pictures.preview(chat: chat.id, message: message) }

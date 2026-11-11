@@ -23,6 +23,7 @@ pub mod outbox;
 pub mod peer;
 pub mod presence;
 pub mod reads;
+pub mod receipts;
 pub mod replies;
 pub mod reupload;
 pub mod search;

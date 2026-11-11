@@ -627,6 +627,14 @@ const LATER: &[(i64, &[&str])] = &[
               voter_jid TEXT NOT NULL, payload BLOB NOT NULL, iv BLOB NOT NULL,
               ts INTEGER NOT NULL, PRIMARY KEY (chat, target, voter))"],
     ),
+    // When each recipient got, read, and played an own message (`receipts`).
+    (
+        18,
+        &["CREATE TABLE receipts (
+              chat TEXT NOT NULL, id TEXT NOT NULL, who TEXT NOT NULL,
+              delivered INTEGER, read INTEGER, played INTEGER,
+              PRIMARY KEY (chat, id, who))"],
+    ),
 ];
 
 /// Schema by `PRAGMA user_version`. Version 0 is the Phase 0 table.

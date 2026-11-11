@@ -35,6 +35,8 @@ struct ConversationView: View {
     @State var editing: ChatMessage?
     /// Waiting for the user to confirm deleting it for everyone.
     @State var deleting: ChatMessage?
+    /// Its Message Info is open.
+    @State var infoFor: ChatMessage?
     /// Files dropped anywhere on the chat, handed to the composer to send.
     @State private var dropped: [URL] = []
     @State private var isDropTarget = false
@@ -92,6 +94,7 @@ struct ConversationView: View {
             }
             .environment(lightbox)
             .modifier(DeleteConfirmation(deleting: $deleting, commands: commands, isGroup: chat.isGroup))
+            .modifier(MessageInfoSheet(message: $infoFor, isGroup: chat.isGroup, load: commands.info))
             .navigationTitle(chat.title)
     }
 
