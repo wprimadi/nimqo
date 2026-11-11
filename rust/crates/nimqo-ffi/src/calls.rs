@@ -923,7 +923,8 @@ impl Core {
             .on_runtime(async move {
                 if let Some(handle) = calls.handle() {
                     let id = handle.call_id().to_owned();
-                    let _ = handle.terminate().await;
+                    let outcome = handle.terminate().await;
+                    log::info!("call {id} hung up here: {outcome:?}");
                     calls.finish(&id, CallEnd::Local);
                 }
                 Ok(())
