@@ -80,7 +80,13 @@ final class Listener: CoreListener, Sendable {
     }
 
     func onChatsChanged(chatIds: [String]) {
-        Task { @MainActor [model] in model?.chatsChanged(chatIds) }
+        Task { @MainActor [model] in
+            model?.chatsChanged(chatIds)
+            // New posts in channels shown: their latest page again.
+            for channel in chatIds where channel.hasSuffix("@newsletter") {
+                await model?.channels.refresh(channel)
+            }
+        }
     }
 
     func onPairCodeError(throttled: Bool, retryAfterSecs: UInt64?) {

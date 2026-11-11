@@ -427,9 +427,21 @@ impl InboundDurabilityHook for Inbox {
     async fn on_messages(&self, client: Arc<Client>, batch: &[InboundMessage]) -> Result<()> {
         let mut rows = Vec::new();
         let mut effects = Vec::new();
+        let mut channels = Vec::new();
         for m in batch {
             if is_broadcast_list(&m.info.source.chat) {
                 continue; // a broadcast list's copy, not a chat
+            }
+            // A new channel post: channels are read from the server, not
+            // kept; an open one fetches its latest posts again.
+            if m.info
+                .source
+                .chat
+                .to_non_ad_string()
+                .ends_with("@newsletter")
+            {
+                channels.push(m.info.source.chat.to_non_ad_string());
+                continue;
             }
             // Diagnostics: protocol message types only, never content or ids.
             if let Some(p) = m.message.get_base_message().protocol_message.as_option() {
@@ -451,6 +463,10 @@ impl InboundDurabilityHook for Inbox {
                 }
                 rows.push(r);
             }
+        }
+        if !channels.is_empty() {
+            channels.dedup();
+            self.notify(channels);
         }
         if rows.is_empty() && effects.is_empty() {
             return Ok(());

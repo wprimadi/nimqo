@@ -43,6 +43,14 @@ final class ChannelStore {
         await fetch(id, before: nil)
     }
 
+    /// A new post came: the latest page again, older pages kept.
+    func refresh(_ id: String) async {
+        guard let core, let shown = posts[id],
+              let page = await core.channelPosts(channelId: id, before: nil) else { return }
+        let first = page.first?.serverId ?? .max
+        posts[id] = shown.filter { $0.serverId < first } + page
+    }
+
     func loadOlder(_ id: String) async {
         await fetch(id, before: posts[id]?.first?.serverId)
     }
