@@ -83,83 +83,129 @@ In practice that means:
 ## What it does today
 
 NIMQO links to your account as a companion device, like WhatsApp Web, and
-works with every chat and group.
+works with every chat, group, community, and channel.
 
 ### Chats and messages
 
-- Chat list with names, previews, times, unread counts, muted and
-  disappearing-message indicators; mute and unmute (synced to your phone).
+- Chat list with names, previews, times, unread counts, typing, muted and
+  disappearing-message indicators. **Pin** up to three chats, **archive**
+  chats, and mute them; all of it syncs with your phone.
 - Send and receive text, with **Return** to send and **Shift-Return** or
   **Option-Return** for a new line.
 - **Replies**: quote any message; click a quote to jump to the original,
   loading older history if needed, and see it highlighted.
 - **Reactions**: six quick reactions, or any emoji from the macOS Character
   Viewer. Hover a message for its React and menu buttons.
-- **Mentions** show people's names, not numbers or LIDs.
-- **Links** are clickable (`http`, `https`, and `mailto` only).
+- **Edit** your messages within 15 minutes (↑ edits the last one), **delete
+  for everyone** within WhatsApp's window, or **delete for me** on all your
+  devices. **Star** messages and find them again under Starred Messages.
+- **Forward** to up to five chats at once.
+- **Message Info** for your own messages: who it was delivered to and who
+  read or played it, with the time and their profile picture.
+- **Polls**: create one from the composer (one answer or several), vote, and
+  see the count live; votes from before linking are counted too.
+- **Locations and contact cards** are drawn as cards; a contact opens its chat.
+- **Messages with buttons** from businesses and bots (buttons, templates,
+  lists, and interactive messages) show their buttons inside the bubble:
+  quick replies answer, links open, codes copy, and lists open as a menu.
+- **Mentions** show people's names, not numbers or LIDs, also in quotes and
+  in the chat list.
+- **Links** are clickable (`http`, `https`, and `mailto` only), with the
+  preview the sender attached. Making previews for your own links is a
+  Settings switch, off by default.
 - **New Chat** (⌘N): pick a contact or type any number with its country code;
   NIMQO checks it is on WhatsApp before the chat opens.
 - **Search** across stored messages, with the hit revealed in its chat.
-- Read receipts sent as you read; delivery and read ticks on your messages;
-  failed sends can be retried.
+- Read receipts sent as you read (unless turned off in your privacy settings);
+  delivery and read ticks on your messages; failed sends can be retried.
 - A contact's about text, online status, last seen, and typing indicator in
-  the chat header.
+  the chat header, and a profile card with starred messages, notifications,
+  and disappearing messages.
+- View-once media is never stored, so it cannot be forwarded or reopened.
 
 ### Media
 
 - Photos, videos, voice notes and audio, documents, and stickers (static,
-  GIF, and animated Lottie).
+  GIF, and animated Lottie). GIFs loop on their own in the timeline, muted.
+- **Voice messages**: record and send from the composer; they play back with
+  a waveform, a speed control, and seeking.
+- **Stickers and GIFs**: a picker with your favourites from the phone, the
+  recent ones, and the stickers and GIFs seen in your chats.
 - Send photos, videos, audio, and documents by picker or **drag and drop**
   anywhere on a chat; photos are re-encoded as JPEG, which also strips
   location and other metadata.
 - A full-window viewer for photos and videos with zoom, pan, and
-  drag-to-dismiss; **Save As…** for photos, videos, and documents.
+  drag-to-dismiss, with **Save As…** and **Share**. Documents open in
+  Quick Look.
 - Old media that WhatsApp's servers no longer hold is asked for again from
   your phone.
 
-### Groups, channels, and status
+### Groups, communities, channels, and status
 
 - Group info: subject, description, members, and their roles.
-- **Channels** you follow, with their posts and media (read-only).
+- **Group admin**: edit the name and description, change the group's
+  settings, add, remove, promote, and demote members, copy or reset the
+  invite link, delete members' messages, and leave. Create a **New Group**
+  (⌘⇧N).
+- **Communities**: see your communities and their groups, and open or join
+  a group.
+- **Channels** you follow, with their posts and media (read-only); new posts
+  appear as they arrive.
 - **Status**: a full-window player with auto-advance, and posting text or a
   photo with a caption to the audience set in your phone's status privacy.
   A Settings switch decides whether posters see you in their viewers.
 
 ### Calls
 
-- **Voice and video calls** with one person, from the phone and camera
-  buttons in the chat header. Incoming calls ring in a small window that
-  floats over other apps until you click Accept or Decline (Esc declines).
-- Mute, camera on and off mid-call (the other side can ask to switch to
-  video too), and the running time. Closing the window hangs up.
+- **Voice and video calls**, one-to-one and in groups, from the phone and
+  camera buttons in the chat header. Group calls show a grid of
+  participants. Incoming calls ring in a small window that floats over other
+  apps until you click Accept or Decline (Esc declines).
+- Mute, camera on and off mid-call, **share a window or your screen**, and
+  see a phone's shared screen. Closing the window hangs up.
 - Echo cancellation from macOS's own voice processing; video is H.264
   encoded and decoded in hardware.
-- A notification for calls missed while NIMQO could not answer.
+- Calls appear in the chat's timeline, and calls missed while NIMQO could not
+  answer raise a notification.
+
+### Your account
+
+- **Profile**: change your picture, name, and About.
+- **Linking** by QR code or by an eight-character pairing code, with Copy.
 
 ### The Mac around it
 
-- **Menu bar extra** with connection status, unread count, and recent chats.
-- Notifications and a Dock badge for unread messages.
+- **Menu bar popover** with connection status, the latest chats, search, and
+  a reply field, on every desktop.
+- Notifications you can **reply to** (when the Mac is unlocked), and a Dock
+  badge for unread messages.
+- **Open at Login**, as a Settings switch.
 - Closing the window keeps NIMQO connected; the Dock icon or the menu bar
   brings it back. A second launch brings the running app forward.
-- **Settings** (⌘,): your WhatsApp privacy settings (last seen, online,
-  profile photo, about, who can add you to groups), status view receipts,
-  and the window's **glass**: Clear, Dark, or Light, with an opacity slider
-  from see-through to solid.
-- Settings and About open as sheets on the main window.
+- **Settings** (⌘,), in panes: General (Open at Login, link previews),
+  Privacy (your WhatsApp privacy settings: last seen, online, profile photo,
+  about, groups, read receipts; and status view receipts), and Appearance
+  (the window's **glass**: Clear, Dark, or Light, with an opacity slider from
+  see-through to solid).
+- Light on resources: pictures are decoded at the size they are shown,
+  rows redraw only when their message changes, and voice notes redraw only
+  while they play.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 | --- | --- |
 | ⌘N | New Chat |
+| ⌘⇧N | New Group |
 | ⌘F | Search messages |
+| ⌥⌘S | Starred messages |
 | ⌘1 … ⌘9 | Open one of the nine most recent chats |
 | ⌃Tab / ⌃⇧Tab | Next / previous chat |
 | ⌘⇧A | Attach a photo or file |
 | Return | Send |
 | ⇧Return, ⌥Return | New line |
 | ⌘Return | Send (from anywhere in the composer) |
+| ↑ (empty composer) | Edit your last message |
 | ⌘↓ | Jump to the latest message |
 | ⌘S | Save the open photo or video |
 | Esc | Close the viewer, a sheet, or a menu |
@@ -273,11 +319,11 @@ from your phone.
 ```mermaid
 flowchart TB
     subgraph App["NIMQO.app (SwiftUI, Swift 6)"]
-        UI["Views: chats, conversation, status, channels, settings"]
+        UI["Views: chats, conversation, calls, status, channels, communities, settings"]
         Model["CoreModel (@Observable, main actor)"]
     end
     subgraph Core["Rust core, embedded (no unsafe code)"]
-        FFI["nimqo-ffi: UniFFI API, outbox, media, status"]
+        FFI["nimqo-ffi: UniFFI API, outbox, media, calls, status"]
         WA["nimqo-whatsapp: inbox, stores, encryption, history"]
         Upstream["whatsapp-rust: WhatsApp Web protocol, Signal sessions"]
     end
@@ -358,19 +404,22 @@ Never bypass it with `--no-verify`. Conventions:
 
 **Next**
 
-- Group calls, and calls in the chat history.
+- A first public beta, signed and with release notes.
+- GIF search, and making stickers from your own photos.
 
 **Known limits today**
 
-- Not signed or notarized yet; builds are ad hoc and for development.
+- No releases yet and not notarized; build from source (see
+  [Code signing](#code-signing)).
 - Channels are read-only; you cannot post to or create one.
-- Calls are one-to-one; group calls keep ringing on your phone only.
 - Status: no video posts, no deleting your own update, and the "close
   friends" audience is not supported (NIMQO refuses rather than guess).
 - History is what your phone sends at linking; older messages load from it
   page by page where it allows.
-- No stickers to send yet; mentions in the chat list preview still show as
-  numbers.
+- Stickers to send are the ones you have seen or favourited; there is no
+  sticker or GIF search yet.
+- Message Info lists receipts that arrived after it was added; older
+  messages show their tick only.
 
 The full plan, with every phase and its exit criteria, is in
 [`plan.md`](plan.md).
@@ -398,6 +447,7 @@ open an issue before larger changes. Report security issues privately through
 - [UniFFI](https://github.com/mozilla/uniffi-rs): the Rust and Swift bridge.
 - [SQLCipher](https://www.zetetic.net/sqlcipher/): encrypted SQLite.
 - [Lottie](https://github.com/airbnb/lottie-ios): animated stickers.
+- [Opus](https://opus-codec.org): voice messages and call audio.
 - [Simple Icons](https://simpleicons.org): the brand marks in the About window.
 
 ## Author
