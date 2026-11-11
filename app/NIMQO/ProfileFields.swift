@@ -169,26 +169,24 @@ struct ProfileCaption: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 6) {
             Text(name)
-                .font(.title2.weight(.bold))
+                .font(.title2.bold())
                 .lineLimit(1)
                 .contentTransition(.interpolate)
             if let phone {
-                Text(phone).font(.callout).monospacedDigit().foregroundStyle(.white.opacity(0.75))
+                Text(phone).font(.callout).monospacedDigit().foregroundStyle(.secondary)
             }
             if !about.trimmingCharacters(in: .whitespaces).isEmpty {
                 Text(about)
                     .font(.callout)
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                     .padding(.top, 2)
                     .contentTransition(.interpolate)
             }
         }
-        .foregroundStyle(.white)
-        .shadow(color: .black.opacity(0.35), radius: 6, y: 1)
         .animation(reduceMotion ? nil : .snappy, value: name)
         .animation(reduceMotion ? nil : .snappy, value: about)
     }

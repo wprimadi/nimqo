@@ -81,9 +81,9 @@ struct ProfileEditor: View {
         VStack(spacing: 14) {
             ZStack {
                 ProfileRing(busy: busy == .photo, glowing: dropping || hoveringPhoto)
-                    .frame(width: 140, height: 140)
+                    .frame(width: 112, height: 112)
                 picture
-                    .frame(width: 126, height: 126)
+                    .frame(width: 104, height: 104)
                     .clipShape(.circle)
                     .overlay { photoHover }
                     .onHover { hoveringPhoto = $0 }
@@ -98,6 +98,7 @@ struct ProfileEditor: View {
                     .disabled(core == nil || profile == nil || busy == .photo)
                     .offset(x: -4, y: -4)
             }
+            .shadow(color: .black.opacity(0.3), radius: 12, y: 6)
             .scaleEffect(dropping && !reduceMotion ? 1.06 : 1)
             .animation(reduceMotion ? nil : .spring(duration: 0.3, bounce: 0.4), value: dropping)
             .onDrop(of: [.image, .fileURL], isTargeted: $dropping, perform: drop)
@@ -106,12 +107,18 @@ struct ProfileEditor: View {
             .accessibilityHint("Drop a picture, or click to choose one.")
             ProfileCaption(name: shownName, phone: phone, about: about)
         }
-        .padding(.top, 30)
-        .padding(.bottom, 24)
-        .padding(.horizontal, 24)
+        // As on a chat's profile card: a rounded card inset from the edges.
+        .padding(.top, 22)
+        .padding(.bottom, 16)
+        .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
         .background { HeroBackdrop(id: profile?.id ?? "", avatars: avatars) }
-        .environment(\.colorScheme, .dark)
+        .clipShape(.rect(cornerRadius: 20, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
+        .padding([.top, .horizontal], 16)
     }
 
     private var shownName: String {
