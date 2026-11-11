@@ -230,6 +230,13 @@ struct LightboxView: View {
                     .glassButton()
                     .controlSize(.large)
                 }
+                ShareButton(chat: chat, message: message, store: store)
+                    .labelStyle(.iconOnly)
+                    .buttonBorderShape(.circle)
+                    .glassButton()
+                    .controlSize(.large)
+                    .disabled(isVideo ? player == nil : store.image(chat: chat, message: message)?.full != true)
+                    .help("Share…")
                 Button("Save As…", systemImage: "arrow.down.to.line") { store.save(chat: chat, message: message) }
                     .labelStyle(.iconOnly)
                     .buttonBorderShape(.circle)

@@ -57,7 +57,17 @@ extension PictureStore {
     /// downloaded like a saved file; gone once Quick Look closes, and at
     /// the next launch if NIMQO quits first.
     private func show(_ data: Data, as name: String) {
-        let folder = Self.previews.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        do {
+            previewing = try Self.privateCopy(data, as: name)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    /// A copy in a folder of its own under `previews`, marked as downloaded;
+    /// remove its folder when done with it.
+    static func privateCopy(_ data: Data, as name: String) throws -> URL {
+        let folder = previews.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let file = folder.appending(path: name)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
@@ -70,10 +80,10 @@ extension PictureStore {
             ]
             var marked = file
             try marked.setResourceValues(values)
-            previewing = file
+            return file
         } catch {
             try? FileManager.default.removeItem(at: folder)
-            NSAlert(error: error).runModal()
+            throw error
         }
     }
 
