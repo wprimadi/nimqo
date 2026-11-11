@@ -63,33 +63,21 @@ extension CommunityGroup {
     }
 }
 
-/// A community in the sidebar: its picture, name and size.
+/// A community in the sidebar: its emblem, name and size.
 struct CommunityRow: View {
     let community: Community
     let avatars: AvatarStore
 
     var body: some View {
         HStack(spacing: 12) {
-            Group {
-                if let image = avatars.image(for: community.id) {
-                    Image(nsImage: image).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "person.3.sequence.fill")
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.tint)
-                }
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(.rect(cornerRadius: 10, style: .continuous))
-            .accessibilityHidden(true)
-            .onAppear { avatars.request(community.id) }
+            CommunityEmblem(id: community.id, avatars: avatars, size: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text(community.name.isEmpty ? "Community" : community.name)
                     .font(.body.weight(.semibold))
                     .lineLimit(1)
                 if let members = community.members {
-                    Text("\(members, format: .number) members")
+                    Label("\(members, format: .number) members", systemImage: "person.2.fill")
+                        .labelStyle(.titleAndIcon)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -100,87 +88,44 @@ struct CommunityRow: View {
     }
 }
 
-/// The groups of one community: open the ones joined, join the others.
-struct CommunityView: View {
-    let community: Community
-    let store: CommunityStore
+/// A community's picture on a stack of tinted cards: many groups, one place.
+struct CommunityEmblem: View {
+    let id: String
     let avatars: AvatarStore
-    /// Shows the group in Chats.
-    let open: (ChatSummary) -> Void
-    @State private var problem: String?
+    let size: CGFloat
 
     var body: some View {
-        let groups = store.groups[community.id]
-        List {
-            if let problem {
-                Text(problem).foregroundStyle(.red)
-            }
-            ForEach(groups ?? [], id: \.id) { group in
-                row(group)
-            }
-        }
-        .overlay {
-            if groups?.isEmpty == true {
-                ContentUnavailableView("No groups to show", systemImage: "person.3",
-                                       description: Text("WhatsApp listed no groups in this community."))
-            } else if groups == nil {
-                if store.unreachable.contains(community.id) {
-                    ContentUnavailableView("Couldn't load groups", systemImage: "wifi.slash",
-                                           description: Text("Check the connection and open the community again."))
+        let corner = size * 0.28
+        ZStack {
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(.tint.opacity(0.25))
+                .rotationEffect(.degrees(-10))
+                .offset(x: -size * 0.08, y: size * 0.04)
+            RoundedRectangle(cornerRadius: corner, style: .continuous)
+                .fill(.tint.opacity(0.45))
+                .rotationEffect(.degrees(6))
+                .offset(x: size * 0.07, y: size * 0.02)
+            Group {
+                if let image = avatars.image(for: id) {
+                    Image(nsImage: image).resizable().scaledToFill()
                 } else {
-                    ProgressView()
+                    Image(systemName: "person.3.fill")
+                        .font(.system(size: size * 0.36, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.accentColor.gradient)
                 }
             }
+            .clipShape(.rect(cornerRadius: corner, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: corner, style: .continuous)
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.25), radius: size * 0.08, y: size * 0.04)
         }
-        .task { await store.open(community.id) }
-        .navigationTitle(community.name.isEmpty ? "Community" : community.name)
-        .navigationSubtitle(community.members.map { Text("\($0, format: .number) members") } ?? Text(""))
-        .windowBar()
-    }
-
-    private func row(_ group: CommunityGroup) -> some View {
-        HStack(spacing: 12) {
-            if group.announcements {
-                Image(systemName: "megaphone.fill")
-                    .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(.tint, in: .rect(cornerRadius: 8, style: .continuous))
-                    .accessibilityHidden(true)
-            } else {
-                Avatar(chat: group.summary, store: avatars, size: 36)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(group.announcements ? String(localized: "Announcements") : group.name)
-                    .font(.body.weight(.medium))
-                    .lineLimit(1)
-                if let members = group.members {
-                    Text("\(members, format: .number) members").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if group.joined {
-                Button("Open") { open(group.summary) }
-            } else if store.joining == group.id {
-                ProgressView().controlSize(.small)
-            } else {
-                Button("Join") {
-                    Task {
-                        problem = nil
-                        problem = await store.join(group.id, in: community.id)
-                    }
-                }
-                .disabled(store.joining != nil)
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(.rect)
-        // A double-click opens a joined group, like a chat in the list.
-        .onTapGesture(count: 2) {
-            if group.joined {
-                open(group.summary)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+        .onAppear { avatars.request(id) }
     }
 }
 

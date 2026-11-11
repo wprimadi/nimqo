@@ -31,7 +31,7 @@ struct MainView: View {
     @State private var query = ""
     @FocusState private var searching: Bool
     @State private var findRequested = false
-    @State private var section = Pane.chats
+    @State private var section = SidebarPane.chats
     @State private var composing: NewChatView.Start?
     /// A chat opened from New Chat that has no messages yet.
     @State private var draft: ChatSummary?
@@ -41,10 +41,6 @@ struct MainView: View {
     /// A message on its way to the chat picker, with the chat it is in.
     @State private var forwarding: (message: ChatMessage, chat: String)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private enum Pane {
-        case chats, status, channels, communities
-    }
 
     /// The selected chat, or the one just started from New Chat.
     private var openChat: ChatSummary? {
@@ -65,27 +61,9 @@ struct MainView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .top) {
-                HStack(spacing: Theme.Spacing.small) {
-                    // Icons: four names do not fit the narrowest sidebar.
-                    Picker("Show", selection: $section) {
-                        Label("Chats", systemImage: "bubble.left.and.bubble.right").tag(Pane.chats)
-                            .help("Chats")
-                        Label("Status", systemImage: "circle.dashed").tag(Pane.status)
-                            .help("Status")
-                        Label("Channels", systemImage: "megaphone").tag(Pane.channels)
-                            .help("Channels")
-                        Label("Communities", systemImage: "person.3").tag(Pane.communities)
-                            .help("Communities")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelStyle(.iconOnly)
-                    .labelsHidden()
-                    MoreMenu(composing: $composing, starred: $starred)
-                        .disabled(model.core == nil)
-                }
-                .padding(.horizontal, Theme.Spacing.medium)
-                .padding(.vertical, Theme.Spacing.small)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaneBar(section: $section, chatsUnread: model.chats.contains { $0.unread > 0 && !$0.quiet },
+                        composing: $composing, starred: $starred, enabled: model.core != nil)
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search messages")
             .searchFocus($searching)
@@ -352,27 +330,5 @@ struct ChatRow: View {
             return date.formatted(.dateTime.weekday(.wide))
         }
         return date.formatted(date: .numeric, time: .omitted)
-    }
-}
-
-/// New chat, new group, and starred messages, behind one button.
-private struct MoreMenu: View {
-    @Binding var composing: NewChatView.Start?
-    @Binding var starred: Bool
-
-    var body: some View {
-        Menu {
-            Button("New Chat", systemImage: "square.and.pencil") { composing = .chat }
-            Button("New Group", systemImage: "person.2") { composing = .group }
-            Divider()
-            Button("Starred Messages", systemImage: "star") { starred = true }
-        } label: {
-            Image(systemName: "ellipsis.circle").font(.title3)
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("New chat, new group, starred messages")
-        .accessibilityLabel("More")
     }
 }

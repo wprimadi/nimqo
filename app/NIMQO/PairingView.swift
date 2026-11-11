@@ -32,6 +32,8 @@ struct PairingView: View {
                 }
             } else if model.isResetting {
                 ProgressView("Removing local data…")
+            } else if [nil, .connecting, .reconnecting].contains(model.state) {
+                ConnectingView(text: model.statusText)
             } else {
                 Label(model.statusText, systemImage: model.statusSymbol)
                     .font(.title2)
