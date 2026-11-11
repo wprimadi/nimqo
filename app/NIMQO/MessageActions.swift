@@ -19,7 +19,8 @@ struct MessageCommands {
     var sendVoice: (@MainActor (Data) async -> String?)?
     var stickers: StickerPicking?
     /// Who has an own message (seq) and who read it: Message Info.
-    var info: (@MainActor (Int64) async -> [Recipient])?
+    /// The second argument asks for group members still waiting instead.
+    var info: (@MainActor (Int64, Bool) async -> [Recipient])?
     /// Pictures for Message Info's rows.
     var avatars: AvatarStore?
     var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?

@@ -40,4 +40,40 @@ impl Core {
             })
             .collect())
     }
+
+    /// Group members with no receipt for own message `seq` yet, from the
+    /// server's member list (so needs a connection). Empty when no receipt
+    /// came at all: then the message predates receipts being kept, and
+    /// everyone would look waiting.
+    pub async fn waiting_members(&self, chat_id: String, seq: i64) -> Vec<Recipient> {
+        let Ok(have) = self.inbox.recipients(&chat_id, seq) else {
+            return Vec::new();
+        };
+        if have.is_empty() || !chat_id.ends_with("@g.us") {
+            return Vec::new();
+        }
+        let Some(info) = self.group_info(chat_id).await else {
+            return Vec::new();
+        };
+        // A receipt may name the member by number or by LID.
+        let known: std::collections::HashSet<String> = have
+            .iter()
+            .flat_map(|r| {
+                self.inbox
+                    .aliases(&r.who)
+                    .unwrap_or_else(|_| vec![r.who.clone()])
+            })
+            .collect();
+        info.members
+            .into_iter()
+            .filter(|m| !m.is_me && !known.contains(&m.id))
+            .map(|m| Recipient {
+                name: m.saved_name.or(m.push_name),
+                who: m.id,
+                delivered_secs: None,
+                read_secs: None,
+                played_secs: None,
+            })
+            .collect()
+    }
 }

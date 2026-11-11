@@ -6,7 +6,7 @@ import SwiftUI
 struct MessageInfoSheet: ViewModifier {
     @Binding var message: ChatMessage?
     let isGroup: Bool
-    let load: (@MainActor (Int64) async -> [Recipient])?
+    let load: (@MainActor (Int64, Bool) async -> [Recipient])?
     let avatars: AvatarStore?
 
     func body(content: Content) -> some View {
@@ -26,9 +26,11 @@ struct MessageInfoSheet: ViewModifier {
 private struct MessageInfoView: View {
     let message: ChatMessage
     let isGroup: Bool
-    let load: @MainActor (Int64) async -> [Recipient]
+    let load: @MainActor (Int64, Bool) async -> [Recipient]
     let avatars: AvatarStore?
     @State private var recipients: [Recipient]?
+    /// Group members without a receipt yet; asked of the server after.
+    @State private var pending: [Recipient] = []
     @Environment(\.dismiss) private var dismiss
 
     private var readers: [Recipient] {
@@ -59,6 +61,12 @@ private struct MessageInfoView: View {
                             ForEach(waiting, id: \.who) { RecipientRow(recipient: $0, read: false, avatars: avatars) }
                         }
                     }
+                    if !pending.isEmpty {
+                        Section("Not delivered yet") {
+                            ForEach(pending, id: \.who) { RecipientRow(recipient: $0, read: false, avatars: avatars) }
+                        }
+                        .transition(.opacity)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -73,7 +81,13 @@ private struct MessageInfoView: View {
         }
         .frame(width: 400, height: 460)
         .windowLook()
-        .task { recipients = await load(message.seq) }
+        .task {
+            recipients = await load(message.seq, false)
+            if isGroup {
+                let found = await load(message.seq, true)
+                withAnimation(.easeOut(duration: 0.2)) { pending = found }
+            }
+        }
     }
 
     /// The message itself, as a bubble, with when it went.
@@ -179,9 +193,13 @@ private struct RecipientRow: View {
 }
 
 extension CoreModel {
-    /// Message Info's recipients of own message `seq` in `chat`.
-    func messageInfo(_ seq: Int64, in chat: String) async -> [Recipient] {
+    /// Message Info's recipients of own message `seq` in `chat`, or with
+    /// `waiting`, the group's members without a receipt yet.
+    func messageInfo(_ seq: Int64, in chat: String, waiting: Bool) async -> [Recipient] {
         guard let core else { return [] }
+        if waiting {
+            return await core.waitingMembers(chatId: chat, seq: seq)
+        }
         return await Task.detached { (try? core.messageInfo(chatId: chat, seq: seq)) ?? [] }.value
     }
 }
