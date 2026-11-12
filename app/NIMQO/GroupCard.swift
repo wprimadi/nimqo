@@ -305,9 +305,7 @@ private struct MemberRow<Actions: View>: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Avatar(chat: ChatSummary(id: member.id, title: member.displayName, isGroup: false, phone: member.phone,
-                                     preview: "", lastActivity: .now, unread: 0, timer: nil, muted: false),
-                   store: avatars, size: 30)
+            Avatar(chat: member.summary, store: avatars, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(member.isMe ? String(localized: "You") : member.displayName).lineLimit(1)
                 if member.savedName != nil || member.isMe, let phone = member.phone {

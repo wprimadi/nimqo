@@ -22,6 +22,7 @@ struct Composer: View {
     var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
     /// A group's members, to mention with "@"; nil elsewhere.
     var members: (@MainActor () -> [GroupMember])?
+    var avatars: AvatarStore?
     /// Each "@Name" picked, and the number it is sent as.
     @State var mentioned: [String: String] = [:]
     @State var mentionHighlight = 0

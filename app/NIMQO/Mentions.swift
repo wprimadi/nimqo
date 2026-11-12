@@ -58,7 +58,11 @@ extension Composer {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, member in
                 Button { mention(member) } label: {
-                    HStack {
+                    HStack(spacing: 8) {
+                        // The picture tells apart one person's two numbers.
+                        if let avatars {
+                            Avatar(chat: member.summary, store: avatars, size: 24)
+                        }
                         Text(member.mentionLabel).lineLimit(1)
                         Spacer()
                         if let phone = member.phone, member.savedName != nil || member.pushName != nil {
@@ -94,5 +98,11 @@ extension GroupMember {
     /// As written after "@": the saved name, else the chosen one, else the number.
     var mentionLabel: String {
         savedName ?? pushName ?? phone ?? String(id.prefix { $0 != "@" })
+    }
+
+    /// As a chat, for its `Avatar`.
+    var summary: ChatSummary {
+        ChatSummary(id: id, title: displayName, isGroup: false, phone: phone,
+                    preview: "", lastActivity: .now, unread: 0, timer: nil, muted: false)
     }
 }
