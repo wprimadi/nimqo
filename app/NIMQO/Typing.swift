@@ -43,6 +43,12 @@ struct Pulsing: NSViewRepresentable {
         view.configure(symbol: symbol, size: size, color: color, still: reduceMotion)
     }
 
+    /// Its own size, whatever is offered: an NSView otherwise stretches to
+    /// the width SwiftUI proposes.
+    func sizeThatFits(_: ProposedViewSize, nsView: PulseView, context _: Context) -> CGSize? {
+        nsView.intrinsicContentSize
+    }
+
     final class PulseView: NSView {
         private var symbol: String?
         private var size: CGFloat = 5
@@ -55,7 +61,7 @@ struct Pulsing: NSViewRepresentable {
         }
 
         override var intrinsicContentSize: NSSize {
-            symbol == nil ? NSSize(width: size * 4.2, height: size) : NSSize(width: size, height: size)
+            symbol == nil ? NSSize(width: size * 4.2, height: size * 1.8) : NSSize(width: size, height: size)
         }
 
         func configure(symbol: String?, size: CGFloat, color: NSColor, still: Bool) {
@@ -86,23 +92,38 @@ struct Pulsing: NSViewRepresentable {
             }
         }
 
+        /// A dot brightens as it rises, one after another, then all rest
+        /// a moment: the wave WhatsApp's dots make. A symbol only breathes.
+        private func pulse(index: Int) -> CAAnimation {
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            let rise = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            let times: [NSNumber] = [0, 0.18, 0.36, 1]
+            fade.values = symbol == nil ? [0.35, 1, 0.35, 0.35] : [1, 0.4, 1, 1]
+            rise.values = symbol == nil ? [0, size * 0.6, 0, 0] : [0, 0, 0, 0]
+            let ease = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: 3)
+            (fade.keyTimes, rise.keyTimes) = (times, times)
+            (fade.timingFunctions, rise.timingFunctions) = (ease, ease)
+            let group = CAAnimationGroup()
+            group.animations = [fade, rise]
+            group.duration = symbol == nil ? 1.3 : 2.4
+            group.repeatCount = .infinity
+            group.beginTime = CACurrentMediaTime() + Double(index) * 0.16
+            group.fillMode = .backwards
+            return group
+        }
+
         private func build(in layer: CALayer) {
             layer.sublayers = nil
             for index in 0 ..< (symbol == nil ? 3 : 1) {
                 let part = CALayer()
-                part.frame = CGRect(x: CGFloat(index) * size * 1.6, y: 0, width: size, height: size)
+                // Dots sit low, with room above to rise into.
+                let low = symbol == nil ? size * 0.2 : 0
+                part.frame = CGRect(x: CGFloat(index) * size * 1.6, y: low, width: size, height: size)
                 part.cornerRadius = symbol == nil ? size / 2 : 0
                 part.contentsGravity = .resizeAspect
                 part.contentsScale = window?.backingScaleFactor ?? 2
                 if !still {
-                    let fade = CABasicAnimation(keyPath: "opacity")
-                    (fade.fromValue, fade.toValue) = (1.0, 0.3)
-                    fade.duration = 0.5
-                    fade.autoreverses = true
-                    fade.repeatCount = .infinity
-                    fade.beginTime = CACurrentMediaTime() + Double(index) * 0.2
-                    fade.fillMode = .backwards
-                    part.add(fade, forKey: "pulse")
+                    part.add(pulse(index: index), forKey: "pulse")
                 }
                 layer.addSublayer(part)
             }
