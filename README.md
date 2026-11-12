@@ -25,8 +25,15 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/screenshot-00.png" alt="NIMQO's welcome window on macOS: the app icon above four cards on what using an unofficial client means, over clear glass" width="440">
-  <img src="screenshots/screenshot-01.png" alt="NIMQO on macOS: the chat list beside an open group conversation, over a translucent window" width="440">
+  <img src="screenshots/screenshot-00.png" alt="NIMQO's welcome window on the macOS desktop: the app icon above four cards on what using an unofficial client means, on clear glass" width="900">
+  <br>
+  <sub><b>First launch.</b> What using an unofficial client means, before anything connects.</sub>
+</p>
+
+<p align="center">
+  <img src="screenshots/screenshot-01.png" alt="NIMQO on macOS: the chat list beside an open group conversation, over a translucent window" width="900">
+  <br>
+  <sub><b>Every day.</b> Your chats in a native Mac window, on glass.</sub>
 </p>
 
 > [!WARNING]
