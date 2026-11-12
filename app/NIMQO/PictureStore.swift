@@ -218,6 +218,8 @@ struct MessagePictureView: View {
     @Environment(Lightbox.self) private var lightbox: Lightbox?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
+    /// Clicks on an animated sticker: each plays it once more.
+    @State private var replays = 0
 
     private var isSticker: Bool {
         message.kind == .sticker
@@ -226,10 +228,10 @@ struct MessagePictureView: View {
     var body: some View {
         Group {
             if isSticker, let animation = store.animation(chat: chat, message: message) {
-                StickerAnimation(animation: animation)
+                StickerAnimation(animation: animation, replays: replays)
                     .frame(maxWidth: 160, maxHeight: 160)
             } else if isSticker, !reduceMotion, let file = store.animatedSticker(chat: chat, message: message) {
-                AnimatedImage(data: file)
+                AnimatedImage(data: file, replays: replays)
             } else if let picture = store.image(chat: chat, message: message) {
                 Image(nsImage: picture.image)
                     .resizable()
@@ -272,7 +274,9 @@ struct MessagePictureView: View {
         .accessibilityHint(isSticker ? "" : "Opens the photo.")
         // Nothing to enlarge until there is a picture; stickers stay put.
         .onTapGesture {
-            if !isSticker, store.image(chat: chat, message: message) != nil {
+            if isSticker {
+                replays += 1
+            } else if store.image(chat: chat, message: message) != nil {
                 lightbox?.open(message, reduceMotion: reduceMotion)
             }
         }
@@ -323,61 +327,6 @@ struct MediaTile: ViewModifier {
         } else {
             content
         }
-    }
-}
-
-/// An animated sticker, looping; still under Reduce Motion. One far off
-/// screen is not drawn at all (`TimelineWindow`), so it needs no pausing
-/// here; pausing it by visibility left every sticker still.
-private struct StickerAnimation: View {
-    let animation: LottieAnimation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        LottieView(animation: animation)
-            .playbackMode(reduceMotion
-                ? .paused(at: .progress(0))
-                : .playing(.fromProgress(0, toProgress: 1, loopMode: .loop)))
-            .resizable()
-            .scaledToFit()
-            .frame(width: 160, height: 160)
-    }
-}
-
-/// An animated WebP (or GIF) sticker, looping, played by ImageIO while on
-/// screen; `TimelineWindow` removes one far off screen, which stops it.
-private struct AnimatedImage: View {
-    let data: Data
-    @State private var frame: CGImage?
-    @State private var playing: Playing?
-
-    final class Playing {
-        var stopped = false
-    }
-
-    var body: some View {
-        Group {
-            if let frame {
-                Image(decorative: frame, scale: 1).resizable().scaledToFit()
-            } else {
-                Color.clear
-            }
-        }
-        .frame(width: 160, height: 160)
-        .onAppear {
-            let playing = Playing()
-            self.playing = playing
-            CGAnimateImageDataWithBlock(data as CFData, nil) { _, image, stop in
-                MainActor.assumeIsolated {
-                    if playing.stopped {
-                        stop.pointee = true
-                    } else {
-                        frame = image
-                    }
-                }
-            }
-        }
-        .onDisappear { playing?.stopped = true }
     }
 }
 

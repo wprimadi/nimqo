@@ -248,9 +248,10 @@ struct MainView: View {
                     .contextMenu { ChatListMenu(chat: chat, model: model) }
             }
         }
-        // Pinning moves a chat to the top, archiving takes it away: the
-        // rows slide to their new places instead of jumping.
-        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0), value: shown.map(\.id))
+        // No animation on the list itself: with one, every reorder (each
+        // new message moves a chat to the top) left rows drawn over each
+        // other and separators across them, the table and SwiftUI both
+        // moving the same rows.
         .overlay {
             if shown.isEmpty {
                 ContentUnavailableView(
