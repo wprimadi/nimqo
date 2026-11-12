@@ -259,6 +259,12 @@ extension ConversationView {
                 NSPasteboard.general.setString(body, forType: .string)
             }
         }
+        ForEach(MessageText.links(in: message.body), id: \.self) { link in
+            Button("Copy \(link)", systemImage: link.contains("@") && !link.contains("/") ? "envelope" : "link") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(link, forType: .string)
+            }
+        }
         if send != nil, message.isEditable {
             Button("Edit", systemImage: "pencil") {
                 replyingTo = nil

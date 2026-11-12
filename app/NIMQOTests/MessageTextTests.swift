@@ -30,3 +30,11 @@ struct MessageTextTests {
         #expect(shown("> quoted\n- item") == "▎ quoted\n• item")
     }
 }
+
+extension MessageTextTests {
+    @Test func linksAreCopiedAsTyped() {
+        let text = "see example.com/a_b or https://x.org, mail me@ex.com; file:///etc/passwd"
+        #expect(MessageText.links(in: text) == ["example.com/a_b", "https://x.org", "me@ex.com"])
+        #expect(MessageText.links(in: nil).isEmpty)
+    }
+}

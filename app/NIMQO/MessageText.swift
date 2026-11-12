@@ -51,6 +51,20 @@ enum MessageText {
         formatted(&out, shown: shown, untouched: tagged)
         return out
     }
+
+    /// The web and mail addresses in `text`, as they would be copied: a
+    /// drag that starts on a link opens it instead of selecting it.
+    static func links(in text: String?) -> [String] {
+        guard let text else { return [] }
+        let all = NSRange(location: 0, length: (text as NSString).length)
+        return (detector?.matches(in: text, range: all) ?? []).compactMap { link in
+            guard let url = link.url, let scheme = url.scheme?.lowercased(), schemes.contains(scheme) else {
+                return nil
+            }
+            return scheme == "mailto" ? String(url.absoluteString.dropFirst("mailto:".count))
+                : (text as NSString).substring(with: link.range)
+        }
+    }
 }
 
 /// WhatsApp's formatting: *bold*, _italic_, ~strikethrough~, `code`,
