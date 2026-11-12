@@ -1515,6 +1515,11 @@ async fn connect(
     let builder = presence_handlers(builder, history_inbox, Arc::clone(&presences));
     let bot = state_handlers(builder, machine)
         .with_backend(stores.protocol)
+        // The name the phone shows under Linked devices; the library's
+        // default is "rust". Sent only when linking.
+        .with_device_props(
+            whatsapp_rust::wacore::store::DevicePropsOverride::new().with_os("NIMQO"),
+        )
         .with_inbound_durability_hook(stores.inbox)
         .with_event_delivery(EVENT_DELIVERY)
         .on_qr_code(move |code, timeout| {
