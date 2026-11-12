@@ -84,7 +84,10 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
             Some(pn) => pn.to_non_ad_string(),
             None => lids::phone_chat(inbox, client, &p.jid).await,
         };
-        if let Some(lid) = [Some(&p.jid), p.lid.as_ref()].into_iter().flatten().find(|j| j.is_lid())
+        if let Some(lid) = [Some(&p.jid), p.lid.as_ref()]
+            .into_iter()
+            .flatten()
+            .find(|j| j.is_lid())
             && id.ends_with("@s.whatsapp.net")
         {
             let lid = lid.to_non_ad_string();
