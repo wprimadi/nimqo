@@ -99,13 +99,17 @@ struct TimelinePaging: ViewModifier {
 /// ponytail: every loaded message is laid out; fine for a few hundred,
 /// a sized lazy layout if long histories get slow.
 struct TimelineStack<Content: View>: View {
+    nonisolated static var spacing: CGFloat {
+        2
+    }
+
     @ViewBuilder let content: Content
 
     var body: some View {
         if #available(macOS 15, *) {
-            VStack(spacing: 2) { content }
+            VStack(spacing: Self.spacing) { content }
         } else {
-            LazyVStack(spacing: 2) { content }
+            LazyVStack(spacing: Self.spacing) { content }
         }
     }
 }
