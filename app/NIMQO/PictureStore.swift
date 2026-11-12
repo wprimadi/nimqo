@@ -300,6 +300,9 @@ private struct StickerAnimation: View {
             .resizable()
             .scaledToFit()
             .frame(width: 160, height: 160)
+            // LottieView reads its playback mode only when made: changing
+            // it left the sticker paused for good, so remake it instead.
+            .id(shown)
             .onShownChange { shown = $0 }
     }
 }
