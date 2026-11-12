@@ -34,7 +34,8 @@ final class PictureStore {
     @ObservationIgnored private var images: [String: (image: NSImage, full: Bool)?] = [:]
     /// The one picture shown full size (lightbox, status), at its own size.
     @ObservationIgnored private var original: (key: String, picture: (image: NSImage, full: Bool))?
-    @ObservationIgnored private var requested: Set<String> = []
+    /// Asked for this session; observed, as it shows a download running.
+    private var requested: Set<String> = []
     /// Animated stickers, decoded once; nil marks "not one" until the next
     /// change, since the file may not be downloaded yet.
     @ObservationIgnored private var animations: [String: LottieAnimation?] = [:]
@@ -144,6 +145,11 @@ final class PictureStore {
         }
     }
 
+    /// Its full image was asked for and has not come yet.
+    func isDownloading(chat: String, message: ChatMessage) -> Bool {
+        requested.contains(Self.key(chat, message))
+    }
+
     func didFail(chat: String, message: ChatMessage) -> Bool {
         failed.contains(Self.key(chat, message))
     }
@@ -191,7 +197,10 @@ struct MessagePictureView: View {
                     .overlay {
                         if store.didFail(chat: chat, message: message) {
                             RetryDownload(chat: chat, message: message, store: store)
-                        } else if !picture.full {
+                        } else if !picture.full, store.isDownloading(chat: chat, message: message) {
+                            // Only while it downloads: the timeline lays out
+                            // every message, and a spinner on each picture
+                            // never scrolled to redrew the window every frame.
                             ProgressView().controlSize(.small)
                         }
                     }
