@@ -6,6 +6,11 @@ struct NimqoApp: App {
     @State private var panels = Panels()
 
     init() {
+        // A new install starts on clear glass; a look chosen before stays.
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: CoreModel.disclosureKey), defaults.object(forKey: GlassLook.key) == nil {
+            defaults.set(GlassLook.clear.rawValue, forKey: GlassLook.key)
+        }
         // A second launch brings the running NIMQO forward instead. The
         // core's data-directory lock still guards the session if this
         // misses (another copy of the app, a race at launch).
@@ -35,6 +40,9 @@ struct NimqoApp: App {
                 .windowLook()
                 .task { model.start() }
         }
+        // Room for the welcome screen on first open; later the window
+        // keeps the size it was left at.
+        .defaultSize(width: 960, height: 720)
 
         // Opened by the menu bar label when a call starts or rings.
         Window("Call", id: CallWindow.id) {
