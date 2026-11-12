@@ -142,6 +142,8 @@ pub struct ChatMessage {
     pub sender_name: Option<String>,
     /// The sender's name in the phone's address book.
     pub contact_name: Option<String>,
+    /// `+<digits>` of the sender, when known (a LID's number may not be).
+    pub sender_phone: Option<String>,
     pub edited: bool,
     /// A picture (thumbnail or full) can be shown for this message.
     pub has_media: bool,
@@ -274,6 +276,9 @@ impl From<MessageRow> for ChatMessage {
             sender: r.sender,
             sender_name: r.sender_name.filter(|n| !n.is_empty()),
             contact_name: r.contact_name,
+            sender_phone: r
+                .sender_phone
+                .and_then(|p| p.split('@').next().map(|user| format!("+{user}"))),
             edited: r.edited,
             reactions: r.reactions,
             my_reaction: r.my_reaction,

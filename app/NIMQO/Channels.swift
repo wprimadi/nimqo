@@ -219,7 +219,8 @@ extension ChannelPost {
     /// chat message's, under the channel id and `serverId`.
     var asMessage: ChatMessage {
         ChatMessage(id: String(serverId), seq: Int64(clamping: serverId), sender: "", senderName: nil,
-                    contactName: nil, edited: edited, hasMedia: hasMedia, reactions: tally, myReaction: nil,
+                    contactName: nil, senderPhone: nil, edited: edited, hasMedia: hasMedia, reactions: tally,
+                    myReaction: nil,
                     fromMe: false, timestampSecs: timestampSecs, kind: kind, body: body, delivery: .none,
                     reply: nil, mentions: [], forwarded: false, starred: false, revision: 0, hasLink: false, gif: false)
     }

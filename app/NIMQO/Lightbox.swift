@@ -352,7 +352,20 @@ private struct PhotoGestures: ViewModifier {
 
 extension ChatMessage {
     /// "You", the saved name, else the self-chosen one marked "~".
+    /// As WhatsApp writes a group sender: the saved name, else the number
+    /// and "~push name".
     var displaySender: String {
-        fromMe ? String(localized: "You") : contactName ?? senderName.map { "~\($0)" } ?? String(localized: "Unknown")
+        if fromMe {
+            return String(localized: "You")
+        }
+        if let contactName {
+            return contactName
+        }
+        return switch (senderPhone, senderName.map { "~\($0)" }) {
+        case let (phone?, name?): "\(phone) \(name)"
+        case let (phone?, nil): phone
+        case let (nil, name?): name
+        case (nil, nil): String(localized: "Unknown")
+        }
     }
 }

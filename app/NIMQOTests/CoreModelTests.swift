@@ -112,7 +112,8 @@ struct CoreModelTests {
     @Test func reloadKeepsOlderPagesOnly() {
         func msg(_ time: Int64, _ seq: Int64) -> ChatMessage {
             ChatMessage(
-                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
+                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, senderPhone: nil, edited: false,
+                hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: false, timestampSecs: time, kind: .text, body: nil,
                 delivery: .none,
                 reply: nil, mentions: [], forwarded: false, starred: false, revision: 0, hasLink: false, gif: false
@@ -121,6 +122,21 @@ struct CoreModelTests {
         let loaded = [msg(1, 1), msg(2, 5), msg(2, 6), msg(3, 2)]
         #expect(CoreModel.olderThan(msg(2, 6), in: loaded).map(\.seq) == [1, 5])
         #expect(CoreModel.olderThan(nil, in: loaded).isEmpty)
+    }
+
+    @Test func groupSenderReadsLikeWhatsApp() {
+        func from(_ saved: String?, _ phone: String?, _ push: String?) -> String {
+            ChatMessage(
+                id: "m", seq: 1, sender: "s", senderName: push, contactName: saved, senderPhone: phone, edited: false,
+                hasMedia: false, reactions: nil, myReaction: nil, fromMe: false, timestampSecs: 0, kind: .text,
+                body: nil, delivery: .none, reply: nil, mentions: [], forwarded: false, starred: false, revision: 0,
+                hasLink: false, gif: false
+            ).displaySender
+        }
+        #expect(from("Ana", "+62811", "A") == "Ana")
+        #expect(from(nil, "+62811", "A") == "+62811 ~A")
+        #expect(from(nil, "+62811", nil) == "+62811")
+        #expect(from(nil, nil, "A") == "~A")
     }
 
     @Test func nextAndPreviousChatWrapAround() {

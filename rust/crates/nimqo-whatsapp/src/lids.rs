@@ -236,4 +236,26 @@ mod tests {
         drop(inbox);
         std::fs::remove_file(&path).unwrap();
     }
+
+    #[test]
+    fn a_group_sender_known_only_by_lid_gets_its_number_and_saved_name() {
+        let path = std::env::temp_dir().join(format!("nimqo-lid-sender-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let inbox = Inbox::open(&path, &Key::new([6; 32]), Fault::None).unwrap();
+        let (group, lid, pn) = ("1@g.us", "78@lid", "62812@s.whatsapp.net");
+        inbox.insert_for_test(group, lid, "m1");
+        let row = &inbox.messages(group, 10).unwrap()[0];
+        assert_eq!(
+            (row.sender_phone.as_deref(), row.contact_name.as_deref()),
+            (None, None)
+        );
+
+        inbox.record_lids(&[(lid.into(), pn.into())]).unwrap();
+        inbox.save_contact(pn, "Budi").unwrap();
+        let row = &inbox.messages(group, 10).unwrap()[0];
+        assert_eq!(row.sender_phone.as_deref(), Some(pn));
+        assert_eq!(row.contact_name.as_deref(), Some("Budi"));
+        drop(inbox);
+        std::fs::remove_file(&path).unwrap();
+    }
 }

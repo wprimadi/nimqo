@@ -19,7 +19,8 @@ struct ChatRowTests {
         utc.timeZone = try #require(TimeZone(identifier: "UTC"))
         func msg(_ seq: Int64, _ time: Int64, mine: Bool) -> ChatMessage {
             ChatMessage(
-                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, edited: false, hasMedia: false,
+                id: "m", seq: seq, sender: "s", senderName: nil, contactName: nil, senderPhone: nil, edited: false,
+                hasMedia: false,
                 reactions: nil, myReaction: nil, fromMe: mine, timestampSecs: time, kind: .text, body: nil,
                 delivery: .none, reply: nil, mentions: [], forwarded: false, starred: false, revision: 0,
                 hasLink: false, gif: false

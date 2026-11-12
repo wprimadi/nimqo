@@ -103,6 +103,9 @@ pub struct MessageRow {
     pub status: String,
     #[diesel(sql_type = Nullable<Text>)]
     pub contact_name: Option<String>,
+    /// The sender's number chat id, when known.
+    #[diesel(sql_type = Nullable<Text>)]
+    pub sender_phone: Option<String>,
     #[diesel(sql_type = Bool)]
     pub edited: bool,
     /// Every reaction's emoji, concatenated.
@@ -268,9 +271,17 @@ impl Inbox {
                  coalesce((SELECT name FROM contacts WHERE jid = q.sender),
                           (SELECT name FROM chat_names WHERE chat = q.sender),
                           nullif(q.sender_name, '')) AS quote_name,
-                 -- A person's chat name (from history) is their saved name.
+                 -- The sender's number: as sent, or known for their LID.
+                 CASE WHEN m.sender LIKE '%@s.whatsapp.net' THEN m.sender
+                      ELSE (SELECT pn FROM lid_map WHERE lid = m.sender) END AS sender_phone,
+                 -- A person's chat name (from history) is their saved name,
+                 -- under their LID or their number.
                  coalesce((SELECT name FROM contacts WHERE jid = m.sender),
-                          (SELECT name FROM chat_names WHERE chat = m.sender)) AS contact_name,
+                          (SELECT name FROM chat_names WHERE chat = m.sender),
+                          (SELECT c.name FROM contacts c JOIN lid_map l ON c.jid = l.pn
+                           WHERE l.lid = m.sender),
+                          (SELECT n.name FROM chat_names n JOIN lid_map l ON n.chat = l.pn
+                           WHERE l.lid = m.sender)) AS contact_name,
                  (SELECT group_concat(emoji, '') FROM reactions x
                   WHERE x.chat = m.chat AND x.target = m.id) AS reactions,
                  (SELECT emoji FROM reactions y WHERE y.chat = m.chat AND y.target = m.id
