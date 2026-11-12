@@ -142,6 +142,7 @@ struct Composer: View {
             sendFiles(urls)
         }
         .focusedSceneValue(\.attachFile, $picking)
+        .pastesFiles(active: focused && editing == nil) { dropped += $0 }
     }
 
     /// Nothing typed and nothing edited: the round button records instead.
