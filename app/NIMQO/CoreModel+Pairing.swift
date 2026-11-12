@@ -39,7 +39,7 @@ extension CoreModel {
         pairing.lapse = Task { [weak self] in
             // The next code comes as this one lapses; a little grace.
             try? await Task.sleep(for: .seconds(Double(timeout) + 3))
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, state == .pairing else { return }
             pairing.expired = true
             refreshQrIfIdle()
         }
@@ -53,10 +53,19 @@ extension CoreModel {
     /// the user asks (WhatsApp Web stops at once). Never over a code being
     /// typed on the phone.
     func refreshQrIfIdle() {
-        guard state == .notPaired || pairing.expired, pairCode == nil, !pairing.awaitingCode,
+        // Only while pairing: never over a linked session.
+        guard state == .notPaired || (state == .pairing && pairing.expired), pairCode == nil,
+              !pairing.awaitingCode,
               NSApp.isActive, pairing.autoRefreshes < 3 else { return }
         pairing.autoRefreshes += 1
         refreshPairing()
+    }
+
+    /// Linked: no QR code lapses any more, no code is waited for.
+    func endPairing() {
+        pairing.lapse?.cancel()
+        pairing.answer?.cancel()
+        pairing = PairingClock()
     }
 
     /// Back in front: refreshes on their own start counting again.
@@ -67,7 +76,7 @@ extension CoreModel {
 
     /// A new session, for new QR codes.
     func refreshPairing() {
-        guard !pairing.restarting, core != nil else { return }
+        guard !pairing.restarting, !isSessionUp, core != nil else { return }
         pairing.restarting = true
         pairing.since = nil
         pairing.lapse?.cancel()

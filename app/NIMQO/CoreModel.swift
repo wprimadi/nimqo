@@ -75,18 +75,6 @@ final class CoreModel {
     /// Bump the version when the disclosure text changes materially.
     static let disclosureKey = "disclosureAccepted.v1"
 
-    /// The main window replaces pairing once the session has been up.
-    var isSessionUp: Bool {
-        switch state {
-        case .connected, .reconnecting, .offline: true
-        default: false
-        }
-    }
-
-    var canReset: Bool {
-        core != nil && !isResetting
-    }
-
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         hasAcceptedDisclosure = defaults.bool(forKey: Self.disclosureKey)
@@ -175,6 +163,9 @@ final class CoreModel {
             qrPayload = nil
             pairCode = nil
             pairCodeMessage = nil
+        }
+        if isSessionUp {
+            endPairing()
         }
         if state == .notPaired {
             refreshQrIfIdle()

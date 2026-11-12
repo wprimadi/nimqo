@@ -69,6 +69,19 @@ struct CoreModelTests {
         #expect(!model.pairing.awaitingCode)
     }
 
+    @Test func linkingEndsThePairingClock() {
+        let model = CoreModel()
+        model.update(state: .pairing)
+        model.update(qrPayload: "payload", timeout: 60)
+        #expect(model.pairing.lapse != nil)
+        model.update(state: .connected)
+        #expect(model.pairing.lapse == nil)
+        // A lapse that fires anyway does nothing to a linked session.
+        model.pairing.expired = true
+        model.refreshQrIfIdle()
+        #expect(!model.pairing.restarting)
+    }
+
     @Test func throttledPairCodeSaysWhenToRetry() {
         let model = CoreModel()
         model.pairCodeFailed(throttled: true, retryAfterSecs: 120)

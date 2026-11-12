@@ -7,6 +7,18 @@ import SwiftUI
 
 /// Status and error text, derived only.
 extension CoreModel {
+    /// The main window replaces pairing once the session has been up.
+    var isSessionUp: Bool {
+        switch state {
+        case .connected, .reconnecting, .offline: true
+        default: false
+        }
+    }
+
+    var canReset: Bool {
+        core != nil && !isResetting
+    }
+
     var statusText: String {
         switch state {
         case nil, .connecting: "Connecting…"
