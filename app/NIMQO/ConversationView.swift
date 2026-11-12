@@ -100,9 +100,8 @@ struct ConversationView: View {
             .navigationTitle(chat.title)
     }
 
-    /// The topmost message on screen, reported by the scroll view as the
-    /// user scrolls (macOS 14 only, see `TimelinePaging`).
-    @State private var topSeq: Int64?
+    /// Near the oldest loaded message (macOS 14 only, see `TimelinePaging`).
+    @State private var nearTop = false
     @State private var isLoading = false
     /// Whether the end of the timeline is on screen; new messages follow
     /// only then, so reading older ones is never interrupted.
@@ -138,12 +137,22 @@ struct ConversationView: View {
                         .onShownChange { atBottom = $0 }
                 }
                 .scrollTargetLayout()
+                .legacyScrollGeometry { visible, height in
+                    window.scrolled(to: visible)
+                    atBottom = visible.maxY > height - 40
+                    if nearTop != (visible.minY < 600) {
+                        nearTop.toggle()
+                        if nearTop, hasOlder {
+                            showOlder()
+                        }
+                    }
+                }
                 .padding(Theme.Spacing.medium)
             }
             .timelineWindow($window)
-            .modifier(TimelinePaging(topSeq: $topSeq) { top in
-                // Near the oldest loaded message: load the page before it.
-                if hasOlder, top.map({ top in messages.prefix(5).contains { $0.seq == top } }) ?? true {
+            // Near the oldest loaded message: load the page before it.
+            .modifier(TimelinePaging {
+                if hasOlder {
                     showOlder()
                 }
             })

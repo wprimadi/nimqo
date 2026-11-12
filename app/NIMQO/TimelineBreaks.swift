@@ -59,15 +59,13 @@ struct DayChip: View {
     }
 }
 
-/// Loads older messages near the top. On macOS 15 and later from the
-/// scroll offset: a scroll position bound to a message made SwiftUI hold
-/// that message where its guessed height put it, and when the guesses for
-/// a chat full of photos collapsed, the view sat past every row, blank.
-/// macOS 14 has no offset to read and keeps the bound position; `near`
-/// gets the topmost message there, nil on 15.
+/// Loads older messages near the top, from the scroll offset: a scroll
+/// position bound to a message made SwiftUI hold that message where its
+/// guessed height put it, and when the guesses for a chat full of photos
+/// collapsed, the view sat past every row, blank. macOS 14 has no offset
+/// here; it reads one from AppKit (`legacyScrollGeometry`).
 struct TimelinePaging: ViewModifier {
-    @Binding var topSeq: Int64?
-    let near: (Int64?) -> Void
+    let near: () -> Void
 
     func body(content: Content) -> some View {
         if #available(macOS 15, *) {
@@ -75,27 +73,19 @@ struct TimelinePaging: ViewModifier {
                 geometry.contentOffset.y + geometry.contentInsets.top < 600
             } action: { _, isNear in
                 if isNear {
-                    near(nil)
+                    near()
                 }
             }
         } else {
             content
-                .scrollPosition(id: $topSeq, anchor: .top)
-                .onChange(of: topSeq) { _, top in
-                    if top != nil {
-                        near(top)
-                    }
-                }
         }
     }
 }
 
-/// The timeline's rows. On macOS 15 and later all of them are laid out:
-/// a lazy stack guesses the rows it has not laid out from those it has,
-/// and at the end of a chat full of photos the guess was several times too
-/// tall; when it collapsed the view sat past every row, blank until
-/// scrolled. macOS 14 cannot tell a row is on screen without a lazy stack
-/// (`onShown`), so it keeps one.
+/// The timeline's rows, all of them laid out: a lazy stack guesses the
+/// rows it has not laid out from those it has, and at the end of a chat
+/// full of photos the guess was several times too tall; when it collapsed
+/// the view sat past every row, blank until scrolled.
 /// ponytail: every loaded message is laid out; fine for a few hundred,
 /// a sized lazy layout if long histories get slow.
 struct TimelineStack<Content: View>: View {
@@ -106,11 +96,7 @@ struct TimelineStack<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        if #available(macOS 15, *) {
-            VStack(spacing: Self.spacing) { content }
-        } else {
-            LazyVStack(spacing: Self.spacing) { content }
-        }
+        VStack(spacing: Self.spacing) { content }
     }
 }
 

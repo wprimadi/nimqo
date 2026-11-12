@@ -11,8 +11,7 @@ struct TimelineWindow {
     /// Heights rows had when last drawn, at `width`.
     private var heights: [Int64: CGFloat] = [:]
     private var width: CGFloat = 0
-    /// What the scroll view shows, in content coordinates; nil until known
-    /// (and on macOS 14, which has a lazy stack instead).
+    /// What the scroll view shows, in content coordinates; nil until known.
     private var visible: CGRect?
     /// False while the window is minimized, hidden or covered: then no row
     /// is drawn at all.
@@ -138,6 +137,72 @@ private struct WindowOcclusion: NSViewRepresentable {
                     self?.changed?(window.occlusionState.contains(.visible))
                 }
             }
+        }
+    }
+}
+
+extension View {
+    /// macOS 14 has no scroll geometry in SwiftUI: the visible part and the
+    /// content's height, read from the AppKit scroll view around this
+    /// content. Nothing on macOS 15 and later.
+    @ViewBuilder
+    func legacyScrollGeometry(_ changed: @escaping (_ visible: CGRect, _ height: CGFloat) -> Void) -> some View {
+        if #available(macOS 15, *) {
+            self
+        } else {
+            background(ScrollProbe(changed: changed))
+        }
+    }
+}
+
+private struct ScrollProbe: NSViewRepresentable {
+    let changed: (CGRect, CGFloat) -> Void
+
+    func makeNSView(context _: Context) -> Probe {
+        Probe()
+    }
+
+    func updateNSView(_ view: Probe, context _: Context) {
+        view.changed = changed
+    }
+
+    final class Probe: NSView {
+        var changed: ((CGRect, CGFloat) -> Void)?
+        private var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers = []
+            guard window != nil, let scroll = enclosingScrollView else { return }
+            scroll.contentView.postsBoundsChangedNotifications = true
+            scroll.documentView?.postsFrameChangedNotifications = true
+            let watched: [(Notification.Name, NSView?)] = [
+                (NSView.boundsDidChangeNotification, scroll.contentView),
+                (NSView.frameDidChangeNotification, scroll.contentView),
+                (NSView.frameDidChangeNotification, scroll.documentView),
+            ]
+            for (name, object) in watched {
+                observers.append(NotificationCenter.default.addObserver(
+                    forName: name, object: object, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.report() }
+                })
+            }
+            // Not inside the update that attached it.
+            DispatchQueue.main.async { [weak self] in self?.report() }
+        }
+
+        private func report() {
+            guard let scroll = enclosingScrollView, let document = scroll.documentView else { return }
+            var visible = scroll.contentView.documentVisibleRect
+            let height = document.bounds.height
+            if !document.isFlipped {
+                visible.origin.y = height - visible.maxY
+            }
+            changed?(visible, height)
         }
     }
 }

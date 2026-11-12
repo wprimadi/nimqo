@@ -5,25 +5,13 @@ import SwiftUI
 /// ripples, with two arcs circling it. Reduce Motion keeps it still.
 struct ConnectingView: View {
     let text: String
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 28) {
-            if reduceMotion {
-                emblem(at: 0)
-            } else {
-                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                    emblem(at: context.date.timeIntervalSinceReferenceDate)
-                }
-            }
+            Emblem()
+                .frame(width: 260, height: 260)
             VStack(spacing: 6) {
-                if reduceMotion {
-                    Text(text).font(.title3.weight(.semibold))
-                } else {
-                    TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                        Shimmer(text: text, time: context.date.timeIntervalSinceReferenceDate)
-                    }
-                }
+                Text(text).font(.title3.weight(.semibold))
                 Label("End-to-end encrypted", systemImage: "lock.fill")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -32,76 +20,156 @@ struct ConnectingView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(text)
     }
-
-    private func emblem(at time: TimeInterval) -> some View {
-        ZStack {
-            Ripples(time: time)
-            // Two arcs, turning against each other.
-            Circle()
-                .trim(from: 0, to: 0.3)
-                .stroke(AngularGradient(colors: [.accentColor.opacity(0), .accentColor], center: .center,
-                                        startAngle: .zero, endAngle: .degrees(108)),
-                        style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .frame(width: 128, height: 128)
-                .rotationEffect(.degrees(time * 160))
-            Circle()
-                .trim(from: 0, to: 0.18)
-                .stroke(.secondary.opacity(0.6), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .frame(width: 112, height: 112)
-                .rotationEffect(.degrees(-time * 110))
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 84, height: 84)
-                .scaleEffect(1 + 0.035 * sin(time * 2.2))
-                .shadow(color: .accentColor.opacity(0.35 + 0.15 * sin(time * 2.2)), radius: 18)
-        }
-        .frame(width: 260, height: 260)
-    }
 }
 
-/// Rings rising from the icon and fading as they spread.
-private struct Ripples: View {
-    let time: TimeInterval
-    private let count = 3
-    private let period = 2.6
+/// Drawn by Core Animation in the render server: it keeps moving while the
+/// app is busy bringing the connection up (a SwiftUI timeline froze then,
+/// on slower Macs), and costs the app nothing per frame.
+private struct Emblem: NSViewRepresentable {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
-        Canvas { context, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            for ring in 0 ..< count {
-                let phase = (time / period + Double(ring) / Double(count)).truncatingRemainder(dividingBy: 1)
-                let radius = 46 + phase * (size.width / 2 - 46)
-                let rect = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
-                context.stroke(Circle().path(in: rect), with: .color(.accentColor.opacity((1 - phase) * 0.45)),
-                               lineWidth: 1.5 + (1 - phase) * 1.5)
+    func makeNSView(context _: Context) -> EmblemView {
+        EmblemView()
+    }
+
+    func updateNSView(_ view: EmblemView, context _: Context) {
+        view.still = reduceMotion
+    }
+
+    final class EmblemView: NSView {
+        var still = false {
+            didSet {
+                if still != oldValue {
+                    built = false
+                    needsDisplay = true
+                }
             }
         }
-        .allowsHitTesting(false)
-    }
-}
 
-/// The status, with a band of light passing across it.
-private struct Shimmer: View {
-    let text: String
-    let time: TimeInterval
+        private var built = false
 
-    var body: some View {
-        let band = (time / 1.8).truncatingRemainder(dividingBy: 1) * 1.6 - 0.3
-        Text(text)
-            .font(.title3.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .overlay {
-                Text(text)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .mask {
-                        LinearGradient(stops: [
-                            .init(color: .clear, location: band - 0.25),
-                            .init(color: .black, location: band),
-                            .init(color: .clear, location: band + 0.25),
-                        ], startPoint: .leading, endPoint: .trailing)
-                    }
+        override var wantsUpdateLayer: Bool {
+            true
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            wantsLayer = true
+            built = false
+            needsDisplay = true
+        }
+
+        override func setFrameSize(_ size: NSSize) {
+            super.setFrameSize(size)
+            built = false
+            needsDisplay = true
+        }
+
+        override func viewDidChangeEffectiveAppearance() {
+            super.viewDidChangeEffectiveAppearance()
+            built = false
+            needsDisplay = true
+        }
+
+        override func updateLayer() {
+            guard let layer, !built, window != nil, bounds.width > 0 else { return }
+            built = true
+            layer.sublayers = nil
+            // Colors resolved in this view's appearance (light or dark).
+            var accent = CGColor.black
+            var secondary = CGColor.black
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                accent = NSColor.controlAccentColor.cgColor
+                secondary = NSColor.secondaryLabelColor.cgColor
             }
+            let scale = window?.backingScaleFactor ?? 2
+            let center = CGPoint(x: bounds.midX, y: bounds.midY)
+            for ring in 0 ..< 3 {
+                layer.addSublayer(ripple(at: center, color: accent, index: ring))
+            }
+            layer.addSublayer(arc(diameter: 128, length: 0.3, width: 3, color: accent, turn: -360.0 / 160))
+            layer.addSublayer(arc(diameter: 112, length: 0.18, width: 2,
+                                  color: secondary.copy(alpha: 0.6) ?? secondary, turn: 360.0 / 110))
+            layer.addSublayer(icon(at: center, color: accent, scale: scale))
+        }
+
+        /// A ring rising from the icon and fading as it spreads.
+        private func ripple(at center: CGPoint, color: CGColor, index: Int) -> CALayer {
+            let ring = CAShapeLayer()
+            let side = bounds.width
+            ring.frame = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+            ring.path = CGPath(ellipseIn: ring.bounds.insetBy(dx: 1.5, dy: 1.5), transform: nil)
+            ring.fillColor = nil
+            ring.strokeColor = color
+            ring.lineWidth = 1.5
+            ring.opacity = still ? 0 : 0.45
+            guard !still else { return ring }
+            let period = 2.6
+            let grow = CABasicAnimation(keyPath: "transform.scale")
+            grow.fromValue = 92 / side
+            grow.toValue = 1
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0.45
+            fade.toValue = 0
+            let group = CAAnimationGroup()
+            group.animations = [grow, fade]
+            group.duration = period
+            group.repeatCount = .infinity
+            // Spread evenly, already under way when shown.
+            group.timeOffset = period * Double(index) / 3
+            ring.add(group, forKey: "ripple")
+            return ring
+        }
+
+        /// One arc of a circle, turning once every `turn` seconds; clockwise
+        /// when negative.
+        private func arc(diameter: CGFloat, length: CGFloat, width: CGFloat, color: CGColor, turn: Double) -> CALayer {
+            let center = CGPoint(x: bounds.midX, y: bounds.midY)
+            let arc = CAShapeLayer()
+            arc.frame = CGRect(x: center.x - diameter / 2, y: center.y - diameter / 2,
+                               width: diameter, height: diameter)
+            arc.path = CGPath(ellipseIn: arc.bounds, transform: nil)
+            arc.fillColor = nil
+            arc.strokeColor = color
+            arc.lineWidth = width
+            arc.lineCap = .round
+            arc.strokeEnd = length
+            guard !still else { return arc }
+            let spin = CABasicAnimation(keyPath: "transform.rotation.z")
+            spin.fromValue = 0
+            spin.toValue = (turn < 0 ? -2 : 2) * Double.pi
+            spin.duration = abs(turn)
+            spin.repeatCount = .infinity
+            arc.add(spin, forKey: "spin")
+            return arc
+        }
+
+        /// The app icon, breathing, with a glow that swells with it.
+        private func icon(at center: CGPoint, color: CGColor, scale: CGFloat) -> CALayer {
+            let icon = CALayer()
+            icon.frame = CGRect(x: center.x - 42, y: center.y - 42, width: 84, height: 84)
+            icon.contents = NSApp.applicationIconImage.layerContents(forContentsScale: scale)
+            icon.contentsScale = scale
+            icon.contentsGravity = .resizeAspect
+            icon.shadowColor = color
+            icon.shadowOffset = .zero
+            icon.shadowRadius = 18
+            icon.shadowOpacity = 0.35
+            guard !still else { return icon }
+            let breathe = CABasicAnimation(keyPath: "transform.scale")
+            breathe.fromValue = 0.965
+            breathe.toValue = 1.035
+            let glow = CABasicAnimation(keyPath: "shadowOpacity")
+            glow.fromValue = 0.2
+            glow.toValue = 0.5
+            let group = CAAnimationGroup()
+            group.animations = [breathe, glow]
+            group.duration = .pi / 2.2
+            group.autoreverses = true
+            group.repeatCount = .infinity
+            group.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            icon.add(group, forKey: "breathe")
+            return icon
+        }
     }
 }
