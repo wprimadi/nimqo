@@ -45,6 +45,8 @@ final class CoreModel {
         didSet { loadMessages() }
     }
 
+    /// Between `start` and the core up: a second start finds its own lock.
+    private var isStarting = false
     private(set) var core: Core? {
         didSet {
             avatars.core = core
@@ -121,14 +123,22 @@ final class CoreModel {
 
     func start() {
         // Unit tests host the app; never connect a real account from a test.
-        guard core == nil, hasAcceptedDisclosure, NSClassFromString("XCTestCase") == nil else { return }
+        guard core == nil, !isStarting, hasAcceptedDisclosure, NSClassFromString("XCTestCase") == nil else { return }
+        isStarting = true
         let listener = Listener(model: self)
         Task.detached {
-            do {
-                let core = try Core.start(listener: listener)
-                await MainActor.run { self.attach(core) }
-            } catch {
-                await MainActor.run { self.fail(error) }
+            // A core just stopped can hold the data lock a moment longer.
+            for attempt in 1 ... 10 {
+                do {
+                    let core = try Core.start(listener: listener)
+                    await MainActor.run { self.attach(core) }
+                    return
+                } catch CoreError.AlreadyRunning where attempt < 10 {
+                    try? await Task.sleep(for: .milliseconds(300))
+                } catch {
+                    await MainActor.run { self.fail(error) }
+                    return
+                }
             }
         }
     }
@@ -168,18 +178,6 @@ final class CoreModel {
         }
         if state == .notPaired {
             refreshQrIfIdle()
-        }
-    }
-
-    /// Drops the core off the main thread, then starts a new one.
-    func restartCore() {
-        guard let old = core else { return }
-        observers.stop()
-        lastNetworkAvailable = nil
-        core = nil
-        Task.detached {
-            old.stop()
-            await MainActor.run { self.start() }
         }
     }
 
@@ -272,6 +270,7 @@ final class CoreModel {
     }
 
     func fail(_ error: Error) {
+        isStarting = false
         // The detail can hold file paths; keep it out of public logs.
         log.error("start failed: \(String(describing: error), privacy: .private)")
         failure = Self.message(for: error)
@@ -305,6 +304,7 @@ final class CoreModel {
     }
 
     private func attach(_ core: Core) {
+        isStarting = false
         self.core = core
         reloadChats()
         observers.start(
@@ -375,6 +375,18 @@ extension CoreModel {
     /// A person or group already here: it gets a composer, reactions, mute.
     func canSend(_ chatId: String) -> Bool {
         core?.canSend(chatId: chatId) ?? false
+    }
+
+    /// Drops the core off the main thread, then starts a new one.
+    func restartCore() {
+        guard let old = core else { return }
+        observers.stop()
+        lastNetworkAvailable = nil
+        core = nil
+        Task.detached {
+            old.stop()
+            await MainActor.run { self.start() }
+        }
     }
 }
 
