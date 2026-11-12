@@ -290,14 +290,11 @@ private struct MapSketch: View {
 }
 
 private struct LiveBadge: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
         HStack(spacing: 5) {
-            // A symbol effect pulses in Core Animation: a phaseAnimator
-            // re-rendered the window every frame, on or off screen.
-            Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(.red)
-                .symbolEffect(.pulse, isActive: !reduceMotion)
+            // Pulses in the render server: a SwiftUI animation re-rendered
+            // the window every frame (see `Pulsing`).
+            Pulsing(symbol: "circle.fill", size: 7, color: .systemRed)
             Text("LIVE").font(.caption2.weight(.heavy))
         }
         .padding(.horizontal, 8).padding(.vertical, 4)
