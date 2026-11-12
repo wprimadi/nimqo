@@ -20,9 +20,15 @@ struct Composer: View {
     var stickers: StickerPicking?
     /// Sends a new poll; nil where none can be sent.
     var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
+    /// A group's members, to mention with "@"; nil elsewhere.
+    var members: (@MainActor () -> [GroupMember])?
+    /// Each "@Name" picked, and the number it is sent as.
+    @State var mentioned: [String: String] = [:]
+    @State var mentionHighlight = 0
+    @State var dismissedMention: String?
     @State private var pickingSticker = false
     @State private var recorder = VoiceRecorder()
-    @State private var text = ""
+    @State var text = ""
     /// What was typed before editing began, put back when it ends.
     @State private var stash = ""
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -77,6 +83,9 @@ struct Composer: View {
                 .glassSurface(in: .rect(cornerRadius: 18))
                 // Rises out of the field it belongs to, and sinks back.
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
+            if !suggestions.isEmpty {
+                mentionList.transition(.opacity)
             }
             if recorder.state == .recording {
                 RecordingBar(recorder: recorder, cancel: recorder.cancel, send: sendRecording)
@@ -152,11 +161,15 @@ struct Composer: View {
                 // Shift-Return starts a new line where the cursor is, as
                 // Option-Return already does; Return alone sends.
                 .onKeyPress(.return, phases: .down) { press in
-                    guard press.modifiers.contains(.shift) else { return .ignored }
+                    guard press.modifiers.contains(.shift) else { return mentionKey(.return) }
                     NSApp.sendAction(#selector(NSText.insertNewlineIgnoringFieldEditor(_:)), to: nil, from: nil)
                     return .handled
                 }
+                .onKeyPress(keys: [.downArrow, .tab, .escape]) { mentionKey($0.key) }
                 .onKeyPress(.upArrow) {
+                    if mentionKey(.upArrow) == .handled {
+                        return .handled
+                    }
                     guard text.isEmpty, editing == nil, let lastEditable else { return .ignored }
                     replyingTo = nil
                     editing = lastEditable
@@ -256,7 +269,9 @@ struct Composer: View {
         .padding(.trailing, 10)
         .padding(.bottom, 7)
     }
+}
 
+extension Composer {
     private func submit() {
         // Return on an empty field does nothing, like other chat apps.
         guard !isSending, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -268,10 +283,11 @@ struct Composer: View {
         let draft = text
         let reply = replyingTo
         Task {
-            refusal = await send(draft, reply?.seq)
+            refusal = await send(withMentions(draft), reply?.seq)
             // Keep the draft when it was refused, so nothing typed is lost.
             if refusal == nil, text == draft {
                 text = ""
+                mentioned = [:]
                 if replyingTo?.seq == reply?.seq {
                     replyingTo = nil
                 }
@@ -279,9 +295,7 @@ struct Composer: View {
             isSending = false
         }
     }
-}
 
-extension Composer {
     private var sendTitle: LocalizedStringKey {
         if editing != nil {
             return "Save Edit"
@@ -329,7 +343,7 @@ extension Composer {
         refusal = nil
         isSending = true
         Task {
-            refusal = await edit(message.seq, draft)
+            refusal = await edit(message.seq, withMentions(draft))
             if refusal == nil, editing?.seq == message.seq {
                 editing = nil
             }

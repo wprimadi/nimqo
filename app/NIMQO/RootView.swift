@@ -176,7 +176,8 @@ struct MainView: View {
                 },
                 info: { await model.messageInfo($0, in: chat.id, waiting: $1) },
                 avatars: model.avatars,
-                sendPoll: { await model.sendPoll($0, options: $1, multiple: $2, to: chat.id) }
+                sendPoll: { await model.sendPoll($0, options: $1, multiple: $2, to: chat.id) },
+                members: model.contacts.mentionable(chat)
             )
         )
         // A new view per chat: it opens at the latest message.

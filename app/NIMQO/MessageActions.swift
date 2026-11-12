@@ -24,6 +24,8 @@ struct MessageCommands {
     /// Pictures for Message Info's rows.
     var avatars: AvatarStore?
     var sendPoll: (@MainActor (String, [String], Bool) async -> String?)?
+    /// A group's members, to mention; nil outside groups.
+    var members: (@MainActor () -> [GroupMember])?
 }
 
 /// Asks how a message goes: for everyone (when its sender, or a group's

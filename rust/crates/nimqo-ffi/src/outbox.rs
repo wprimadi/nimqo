@@ -220,12 +220,21 @@ impl Sender {
                 .ok_or("sticker not sendable")?
         } else if p.kind == "text" {
             let body = p.body.clone().unwrap_or_default();
+            let mentioned = self.mentioned(to, &body).await;
             let mut text = match self.quote_context(p) {
                 Some(context) => wa::Message::text_with_context(body, context),
                 None => wa::Message::text(body),
             };
             if let Some(link) = nimqo_whatsapp::links::pending_link(p.media.as_deref()) {
                 link.attach(&mut text);
+            }
+            if !mentioned.is_empty() {
+                let plain = text.conversation.take();
+                let ext = text.extended_text_message.get_or_insert_default();
+                if ext.text.is_none() {
+                    ext.text = plain;
+                }
+                ext.context_info.get_or_insert_default().mentioned_jid = mentioned;
             }
             text
         } else {
@@ -244,6 +253,35 @@ impl Sender {
             log::warn!("sent media not recorded: {e:#}");
         }
         Ok(())
+    }
+
+    /// Who each "@number" in a group text is, as the group addresses them:
+    /// the app writes a member as `lids::phone_chat` names them. Unknown digits mention no one; a failed lookup sends the text
+    /// without mentions.
+    async fn mentioned(&self, to: &Jid, body: &str) -> Vec<String> {
+        let users = crate::chats::mentioned_users(body);
+        if users.is_empty() || !to.to_string().ends_with("@g.us") {
+            return Vec::new();
+        }
+        let meta = match self.client.groups().fetch_metadata(to).await {
+            Ok(meta) => meta,
+            Err(e) => {
+                log::info!("mentions not resolved: {:?}", std::mem::discriminant(&e));
+                return Vec::new();
+            }
+        };
+        let mut out = Vec::new();
+        for p in &meta.participants {
+            let jid = p.jid.to_non_ad_string();
+            let named = match &p.phone_number {
+                Some(pn) => pn.to_non_ad_string(),
+                None => lids::phone_chat(&self.inbox, &self.client, &p.jid).await,
+            };
+            if users.contains(&named.split('@').next().unwrap_or_default()) {
+                out.push(jid);
+            }
+        }
+        out
     }
 
     /// The quote sent with a reply; None when it is not one, or the quoted
