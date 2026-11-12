@@ -294,8 +294,10 @@ private struct LiveBadge: View {
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle().fill(.red).frame(width: 7, height: 7)
-                .phaseAnimator([1.0, 0.3]) { dot, phase in dot.opacity(reduceMotion ? 1 : phase) }
+            // A symbol effect pulses in Core Animation: a phaseAnimator
+            // re-rendered the window every frame, on or off screen.
+            Image(systemName: "circle.fill").font(.system(size: 7)).foregroundStyle(.red)
+                .symbolEffect(.pulse, isActive: !reduceMotion)
             Text("LIVE").font(.caption2.weight(.heavy))
         }
         .padding(.horizontal, 8).padding(.vertical, 4)

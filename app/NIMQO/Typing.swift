@@ -14,34 +14,18 @@ extension ChatSummary {
     }
 }
 
-/// Three dots rising one after another, like a breath; still under
-/// Reduce Motion.
+/// Three dots that light up one after another; still under Reduce Motion.
+/// A symbol effect runs in Core Animation, so it costs nothing per frame
+/// here; the TimelineView it replaced re-rendered the whole window 30 times
+/// a second for as long as anyone was typing.
 struct TypingDots: View {
     var size: CGFloat = 5
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if reduceMotion {
-            dots(phase: -1)
-        } else {
-            TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                dots(phase: context.date.timeIntervalSinceReferenceDate)
-            }
-        }
-    }
-
-    /// `phase` < 0 draws them at rest.
-    private func dots(phase: Double) -> some View {
-        HStack(spacing: size * 0.6) {
-            ForEach(0 ..< 3) { index in
-                let wave = phase < 0 ? 0 : max(0, sin((phase * 2 * .pi / 1.2) - Double(index) * 0.9))
-                Circle()
-                    .frame(width: size, height: size)
-                    .offset(y: -wave * size * 0.7)
-                    .opacity(0.45 + wave * 0.55)
-            }
-        }
-        .accessibilityHidden(true)
+        Image(systemName: "ellipsis")
+            .font(.system(size: size * 3, weight: .black))
+            .symbolEffect(.variableColor.iterative.dimInactiveLayers)
+            .accessibilityHidden(true)
     }
 }
 
