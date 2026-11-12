@@ -256,7 +256,7 @@ impl Sender {
     }
 
     /// Who each "@number" in a group text is, as the group addresses them:
-    /// the app writes a member as `lids::phone_chat` names them. Unknown digits mention no one; a failed lookup sends the text
+    /// the app writes the member's id, LID or number. Unknown digits mention no one; a failed lookup sends the text
     /// without mentions.
     async fn mentioned(&self, to: &Jid, body: &str) -> Vec<String> {
         let users = crate::chats::mentioned_users(body);
@@ -273,11 +273,12 @@ impl Sender {
         let mut out = Vec::new();
         for p in &meta.participants {
             let jid = p.jid.to_non_ad_string();
-            let named = match &p.phone_number {
-                Some(pn) => pn.to_non_ad_string(),
-                None => lids::phone_chat(&self.inbox, &self.client, &p.jid).await,
-            };
-            if users.contains(&named.split('@').next().unwrap_or_default()) {
+            // The app mentions a member by `jid`; a typed number also counts.
+            let named = [Some(&p.jid), p.phone_number.as_ref(), p.lid.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|j| users.contains(&&*j.user));
+            if named {
                 out.push(jid);
             }
         }

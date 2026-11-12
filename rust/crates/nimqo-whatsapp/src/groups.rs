@@ -77,11 +77,21 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
     // Own number and LID, to find the account among the members.
     let me: Vec<Jid> = [client.pn(), client.lid()].into_iter().flatten().collect();
     let mut members = Vec::with_capacity(meta.participants.len());
+    // Numbers learned for LIDs: mentions of them then read "+number".
+    let mut learned = Vec::new();
     for p in &meta.participants {
         let id = match &p.phone_number {
             Some(pn) => pn.to_non_ad_string(),
             None => lids::phone_chat(inbox, client, &p.jid).await,
         };
+        if let Some(lid) = [Some(&p.jid), p.lid.as_ref()].into_iter().flatten().find(|j| j.is_lid())
+            && id.ends_with("@s.whatsapp.net")
+        {
+            let lid = lid.to_non_ad_string();
+            if inbox.known_pn(&lid).ok().flatten().as_deref() != Some(id.as_str()) {
+                learned.push((lid, id.clone()));
+            }
+        }
         let lid = p.lid.as_ref().map(Jid::to_non_ad_string);
         let (saved_name, push_name) = inbox.member_names(&id, lid.as_deref())?;
         let is_me = [Some(&p.jid), p.phone_number.as_ref(), p.lid.as_ref()]
@@ -100,6 +110,10 @@ pub async fn info(inbox: &Inbox, client: &Client, chat: &str) -> Result<Info> {
                 ParticipantType::Member => Role::Member,
             },
         });
+    }
+    if !learned.is_empty() {
+        inbox.record_lids(&learned)?;
+        inbox.notify_changed(vec![chat.to_owned()]);
     }
     sort(&mut members);
     let my_role = members.iter().find(|m| m.is_me).map(|m| m.role);

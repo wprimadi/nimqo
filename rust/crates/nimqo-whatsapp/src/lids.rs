@@ -49,7 +49,7 @@ impl Inbox {
         Ok(rows.into_iter().map(|a| a.jid).collect())
     }
 
-    fn known_pn(&self, lid: &str) -> Result<Option<String>> {
+    pub(crate) fn known_pn(&self, lid: &str) -> Result<Option<String>> {
         #[derive(diesel::QueryableByName)]
         struct P {
             #[diesel(sql_type = Text)]
