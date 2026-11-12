@@ -9,6 +9,11 @@ enum Theme {
         static let large: CGFloat = 32
     }
 
-    static let qrSide: CGFloat = 280
     static let sidebarMinWidth: CGFloat = 240
+
+    /// The app icon's neon: green into cyan into blue.
+    static let neon = LinearGradient(
+        colors: [Color(red: 0.35, green: 0.95, blue: 0.45), .cyan, Color(red: 0.2, green: 0.45, blue: 1)],
+        startPoint: .leading, endPoint: .trailing
+    )
 }

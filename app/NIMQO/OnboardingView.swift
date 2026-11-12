@@ -7,12 +7,6 @@ struct OnboardingView: View {
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The icon's own neon: green into cyan into blue.
-    private static let neon = LinearGradient(
-        colors: [Color(red: 0.35, green: 0.95, blue: 0.45), .cyan, Color(red: 0.2, green: 0.45, blue: 1)],
-        startPoint: .leading, endPoint: .trailing
-    )
-
     private struct Point {
         let symbol: String
         let color: Color
@@ -75,7 +69,7 @@ struct OnboardingView: View {
             ZStack {
                 // A soft glow in the icon's colors, as if it lit the glass.
                 Circle()
-                    .fill(Self.neon)
+                    .fill(Theme.neon)
                     .frame(width: 170, height: 170)
                     .blur(radius: 60)
                     .opacity(0.55)
@@ -89,7 +83,7 @@ struct OnboardingView: View {
             .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.7, bounce: 0.3), value: shown)
             .accessibilityHidden(true)
 
-            Text("Welcome to \(Text("NIMQO").foregroundStyle(Self.neon))")
+            Text("Welcome to \(Text("NIMQO").foregroundStyle(Theme.neon))")
                 .font(.system(size: 40, weight: .bold))
                 .tracking(-0.6)
                 .multilineTextAlignment(.center)

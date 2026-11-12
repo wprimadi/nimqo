@@ -8,7 +8,7 @@ struct CoreModelTests {
     @Test func qrIsClearedOnceNoLongerPairing() {
         let model = CoreModel()
         model.update(state: .pairing)
-        model.update(qrPayload: "payload")
+        model.update(qrPayload: "payload", timeout: 60)
         #expect(model.qrPayload == "payload")
 
         model.update(state: .connected)
@@ -54,6 +54,19 @@ struct CoreModelTests {
         #expect(model.pairCode == "ABCD-EFGH")
         model.update(state: .connected)
         #expect(model.pairCode == nil)
+    }
+
+    @Test func codeAskedBeforeTheFirstQrWaitsForIt() {
+        let model = CoreModel()
+        model.requestPairCode(phoneNumber: "+62 812 0000 0000")
+        #expect(model.pairing.pendingPhone != nil)
+        #expect(model.pairing.awaitingCode)
+        model.update(state: .pairing)
+        model.update(qrPayload: "payload", timeout: 60)
+        #expect(model.pairing.pendingPhone == nil)
+        #expect(model.pairing.awaitingCode)
+        model.update(pairCode: "ABCDEFGH")
+        #expect(!model.pairing.awaitingCode)
     }
 
     @Test func throttledPairCodeSaysWhenToRetry() {

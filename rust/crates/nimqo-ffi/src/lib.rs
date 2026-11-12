@@ -1872,7 +1872,9 @@ fn input_from(event: &Event) -> Option<Input> {
         Event::StreamError(e) => Input::StreamError {
             code: e.code.clone(),
         },
-        Event::PairingQrCodesExhausted(_) => Input::QrExhausted,
+        // Not while a phone-number code is still out: that session stays
+        // up for it, and the code must stay on screen.
+        Event::PairingQrCodesExhausted(x) if x.disconnected => Input::QrExhausted,
         _ => return None,
     })
 }

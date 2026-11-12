@@ -11,10 +11,11 @@ import SwiftUI
 @Observable
 final class CoreModel {
     private(set) var state: ConnectionState?
-    private(set) var qrPayload: String?
+    var qrPayload: String?
     /// Code for linking by phone number, shown as `ABCD-EFGH`.
-    private(set) var pairCode: String?
-    private(set) var pairCodeMessage: String?
+    var pairCode: String?
+    var pairCodeMessage: String?
+    var pairing = PairingClock()
     private(set) var hasAcceptedDisclosure: Bool
     private(set) var failure: String?
     /// Bound by the confirmation dialog in `RootView`.
@@ -104,7 +105,10 @@ final class CoreModel {
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.loadMessages() }
+            MainActor.assumeIsolated {
+                self?.loadMessages()
+                self?.pairingResumed()
+            }
         }
     }
 
@@ -161,6 +165,21 @@ final class CoreModel {
             qrPayload = nil
             pairCode = nil
             pairCodeMessage = nil
+        }
+        if state == .notPaired {
+            refreshQrIfIdle()
+        }
+    }
+
+    /// Drops the core off the main thread, then starts a new one.
+    func restartCore() {
+        guard let old = core else { return }
+        observers.stop()
+        lastNetworkAvailable = nil
+        core = nil
+        Task.detached {
+            old.stop()
+            await MainActor.run { self.start() }
         }
     }
 
@@ -252,10 +271,6 @@ final class CoreModel {
         }
     }
 
-    func update(qrPayload payload: String) {
-        qrPayload = payload
-    }
-
     func fail(_ error: Error) {
         // The detail can hold file paths; keep it out of public logs.
         log.error("start failed: \(String(describing: error), privacy: .private)")
@@ -279,6 +294,7 @@ final class CoreModel {
         qrPayload = nil
         pairCode = nil
         pairCodeMessage = nil
+        pairing = PairingClock()
         switch result {
         case .success:
             failure = nil
@@ -295,34 +311,6 @@ final class CoreModel {
             networkChanged: { [weak self] available in self?.networkReported(available) },
             didWake: { [weak self] in self?.core?.reconnectNow() }
         )
-    }
-}
-
-/// Linking with a code instead of the QR code.
-extension CoreModel {
-    func requestPairCode(phoneNumber: String) {
-        pairCode = nil
-        do {
-            try core?.requestPairCode(phoneNumber: phoneNumber)
-            pairCodeMessage = "Requesting a code…"
-        } catch {
-            pairCodeMessage = Self.message(for: error)
-        }
-    }
-
-    func update(pairCode code: String) {
-        // Shown in two groups of four, the way WhatsApp displays it.
-        pairCode = code.count == 8 ? "\(code.prefix(4))-\(code.suffix(4))" : code
-        pairCodeMessage = nil
-    }
-
-    func pairCodeFailed(throttled: Bool, retryAfterSecs: UInt64?) {
-        pairCode = nil
-        pairCodeMessage = if throttled {
-            "Too many requests. Try again in \(Self.duration(retryAfterSecs ?? 60))."
-        } else {
-            "WhatsApp did not issue a code. Check the number, or use the QR code."
-        }
     }
 }
 

@@ -11,7 +11,7 @@ extension CoreModel {
         switch state {
         case nil, .connecting: "Connecting…"
         case .pairing: "Waiting for QR code scan"
-        case .notPaired: "The QR codes expired. Quit and reopen NIMQO to try again."
+        case .notPaired: "The QR code expired."
         case .connected: "Connected"
         case .reconnecting: "Reconnecting…"
         case .offline: "Offline. NIMQO reconnects when the network returns."
@@ -72,8 +72,8 @@ final class Listener: CoreListener, Sendable {
         Task { @MainActor [model] in model?.update(state: state) }
     }
 
-    func onQr(code: String, timeoutSecs _: UInt64) {
-        Task { @MainActor [model] in model?.update(qrPayload: code) }
+    func onQr(code: String, timeoutSecs: UInt64) {
+        Task { @MainActor [model] in model?.update(qrPayload: code, timeout: timeoutSecs) }
     }
 
     func onPairCode(code: String, timeoutSecs _: UInt64) {
