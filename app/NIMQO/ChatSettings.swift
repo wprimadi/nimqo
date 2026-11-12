@@ -10,6 +10,9 @@ struct ChatSettings: View {
     var locked = false
     let showStarred: () -> Void
     @State private var problem: String?
+    /// Nil until WhatsApp's blocklist answers.
+    @State private var blocked: Bool?
+    @State private var confirmingBlock = false
 
     private static let timers: [(String, UInt32)] = [
         (String(localized: "Off"), 0),
@@ -41,6 +44,9 @@ struct ChatSettings: View {
                 .menuIndicator(.hidden)
                 .disabled(locked)
                 .help(locked ? "Only admins can change this group's settings." : "")
+                if !chat.isGroup {
+                    blockRow
+                }
                 if let problem {
                     Label(problem, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption).foregroundStyle(.red)
@@ -49,6 +55,36 @@ struct ChatSettings: View {
                 }
             }
             .disabled(core == nil)
+        }
+        .task(id: chat.id) {
+            blocked = try? await core?.isBlocked(chatId: chat.id)
+        }
+        .confirmationDialog("Block \(chat.title)?", isPresented: $confirmingBlock) {
+            Button("Block", role: .destructive) { setBlocked(true) }
+        } message: {
+            Text("Blocked contacts can no longer call you or send you messages.")
+        }
+    }
+
+    private var blockRow: some View {
+        Button {
+            if blocked == true {
+                setBlocked(false)
+            } else {
+                confirmingBlock = true
+            }
+        } label: {
+            SettingRow(title: blocked == true ? "Unblock" : "Block", symbol: "hand.raised.fill", tint: .red,
+                       value: nil)
+        }
+        .buttonStyle(.plain)
+        .disabled(blocked == nil)
+    }
+
+    private func setBlocked(_ block: Bool) {
+        run {
+            try await $0.setBlocked(chatId: chat.id, blocked: block)
+            blocked = block
         }
     }
 

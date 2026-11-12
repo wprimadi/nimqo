@@ -832,6 +832,26 @@ impl Core {
             .await
     }
 
+    /// Whether a person is blocked, as WhatsApp's blocklist says.
+    ///
+    /// # Errors
+    /// `SendRefused` for a group or when the blocklist cannot be read.
+    pub async fn is_blocked(&self, chat_id: String) -> Result<bool, CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.is_blocked(&chat_id).await })
+            .await
+    }
+
+    /// Blocks or unblocks a person, on every device of the account.
+    ///
+    /// # Errors
+    /// `SendRefused` for a group or when WhatsApp does not take the change.
+    pub async fn set_blocked(&self, chat_id: String, blocked: bool) -> Result<(), CoreError> {
+        let sender = Arc::clone(&self.sender);
+        self.on_runtime(async move { sender.set_blocked(&chat_id, blocked).await })
+            .await
+    }
+
     /// Mutes a chat for `seconds` from now, on every device of the account.
     ///
     /// # Errors

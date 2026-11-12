@@ -414,6 +414,32 @@ impl Sender {
         Ok(())
     }
 
+    /// Whether `chat` (a person) is on the account's blocklist.
+    pub async fn is_blocked(&self, chat: &str) -> Result<bool, CoreError> {
+        let jid = Self::may_send(chat)?;
+        self.client
+            .blocking()
+            .is_blocked(&jid)
+            .await
+            .map_err(|e| CoreError::SendRefused {
+                reason: format!("blocklist not read: {e}"),
+            })
+    }
+
+    /// Blocks or unblocks `chat` (a person) on every device of the account.
+    pub async fn set_blocked(&self, chat: &str, blocked: bool) -> Result<(), CoreError> {
+        let jid = Self::may_send(chat)?;
+        let blocking = self.client.blocking();
+        let done = if blocked {
+            blocking.block(&jid).await
+        } else {
+            blocking.unblock(&jid).await
+        };
+        done.map_err(|e| CoreError::SendRefused {
+            reason: format!("block not changed: {e}"),
+        })
+    }
+
     /// Turns disappearing messages on (`seconds`) or off (0) in `chat`, for
     /// everyone in it.
     pub async fn set_timer(&self, chat: &str, seconds: u32) -> Result<(), CoreError> {
