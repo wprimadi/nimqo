@@ -25,7 +25,8 @@
 </p>
 
 <p align="center">
-  <img src="screenshots/screenshot-01.png" alt="NIMQO on macOS: the chat list beside an open group conversation, over a translucent window" width="900">
+  <img src="screenshots/screenshot-00.png" alt="NIMQO's welcome window on macOS: the app icon above four cards on what using an unofficial client means, over clear glass" width="440">
+  <img src="screenshots/screenshot-01.png" alt="NIMQO on macOS: the chat list beside an open group conversation, over a translucent window" width="440">
 </p>
 
 > [!WARNING]
@@ -288,9 +289,14 @@ not an Apple Developer ID, so macOS does not recognise the developer.
 xattr -cr /Applications/NIMQO.app
 ```
 
-It removes the download quarantine, so Gatekeeper lets the app open. Updates
-keep the same signature, so macOS remembers your Keychain and microphone and
-camera answers across updates.
+It removes the download quarantine, so Gatekeeper lets the app open.
+
+**Keychain access.** At first launch macOS asks for your login password so
+NIMQO can read its key; choose **Always Allow** and that copy of the app opens
+without asking. Without an Apple Developer ID, macOS ties Keychain access to
+the exact build rather than the certificate, so each update asks once more.
+Microphone and camera answers follow the certificate and are kept across
+updates.
 
 **Checking a release.** A genuine release reports this certificate:
 
@@ -301,7 +307,7 @@ codesign -dr - /Applications/NIMQO.app
 
 **Building it yourself.** Your build is signed ad hoc. That runs fine on your
 Mac, but every rebuild is a new app to macOS, which asks for Keychain access
-again. The maintainer keeps the certificate in `Secret/`, which is
+again (with the maintainer's certificate, too: see Keychain access above). The maintainer keeps the certificate in `Secret/`, which is
 git-ignored; `build-app.sh` signs with it when it is there.
 
 ### Logs
