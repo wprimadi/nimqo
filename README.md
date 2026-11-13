@@ -53,6 +53,7 @@
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Privacy and security](#privacy-and-security)
 - [Requirements](#requirements)
+- [Download and install](#download-and-install)
 - [Build and run](#build-and-run)
 - [Linking your account](#linking-your-account)
 - [Architecture](#architecture)
@@ -250,9 +251,51 @@ Found a vulnerability? Please report it privately as described in
 | **Build** | Xcode 26 or later, Rust 1.95 or later, [XcodeGen](https://github.com/yonaskolb/XcodeGen) |
 | **Push** | gitleaks, cargo-audit, cargo-deny, SwiftLint, SwiftFormat (the local quality gate) |
 
+## Download and install
+
+Ready-made disk images are on the
+[Releases page](https://github.com/wprimadi/nimqo/releases):
+
+| File | For |
+| --- | --- |
+| `NIMQO-<version>-apple-silicon.dmg` | Macs with an M-series chip (smaller download) |
+| `NIMQO-<version>-universal.dmg` | Any Mac, Apple silicon or Intel |
+
+Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M…"
+is Apple silicon, "Processor: Intel…" is Intel. The universal one works on both.
+
+1. Download the disk image and open it.
+2. Drag **NIMQO** onto **Applications**, then eject the disk image.
+3. Open Terminal and run, once:
+
+   ```sh
+   xattr -cr /Applications/NIMQO.app
+   ```
+
+4. Open NIMQO from Applications or Launchpad, and scan the QR code with
+   WhatsApp on your phone (see [Linking your account](#linking-your-account)).
+
+**Why `xattr -cr`?** Your browser marks every downloaded file with a
+`com.apple.quarantine` attribute. Gatekeeper checks marked apps for an Apple
+Developer ID and a notarisation ticket; NIMQO has neither (it is signed with
+the maintainer's own certificate, see [Code signing](#code-signing)), so
+without this step macOS says the app "is damaged" or "can't be opened".
+`xattr` edits a file's extended attributes: `-c` clears them all, `-r` does so
+for every file inside the app bundle. It changes nothing else, and only for
+this one app; Gatekeeper stays on for everything else. To check first that the
+copy is genuine, compare its certificate as shown in
+[Code signing](#code-signing).
+
+Prefer not to use Terminal? Open the app once, dismiss the warning, then go to
+**System Settings → Privacy & Security** and click **Open Anyway** next to
+NIMQO. If macOS only offers to move it to the Trash, use `xattr` instead.
+
+To update, quit NIMQO, drag the new version onto Applications to replace the
+old one, and run `xattr -cr` again. Your chats and the linked account stay.
+
 ## Build and run
 
-There are no signed releases yet; build it from source.
+Or build it from source:
 
 ```sh
 git clone https://github.com/wprimadi/nimqo.git
@@ -290,13 +333,8 @@ Xcode project from [`app/project.yml`](app/project.yml), and build the app
 NIMQO releases are signed with the maintainer's own self-signed certificate,
 not an Apple Developer ID, so macOS does not recognise the developer.
 
-**Installing a release.** After you move NIMQO to Applications, run this once:
-
-```sh
-xattr -cr /Applications/NIMQO.app
-```
-
-It removes the download quarantine, so Gatekeeper lets the app open.
+**Installing a release.** Run `xattr -cr /Applications/NIMQO.app` once after
+each install; [Download and install](#download-and-install) explains why.
 
 **Keychain access.** At first launch macOS asks for your login password so
 NIMQO can read its key; choose **Always Allow** and that copy of the app opens
@@ -434,8 +472,8 @@ Never bypass it with `--no-verify`. Conventions:
 
 **Known limits today**
 
-- No releases yet and not notarized; build from source (see
-  [Code signing](#code-signing)).
+- Releases are not notarized, so each install needs `xattr -cr` (see
+  [Download and install](#download-and-install)).
 - Channels are read-only; you cannot post to or create one.
 - Status: no video posts, no deleting your own update, and the "close
   friends" audience is not supported (NIMQO refuses rather than guess).
